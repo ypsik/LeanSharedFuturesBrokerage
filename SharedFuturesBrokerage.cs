@@ -47,9 +47,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         private CancellationTokenSource _reconcileCts;
         private Task _reconcileTask;
 
-        private IEnumerator<BaseData> _tickEnumerator;
-        private int _tickEventPending;
-
         private readonly TimeSpan _reconciliationInterval = TimeSpan.FromSeconds(30);
 
         public SharedFuturesBrokerage(
@@ -109,7 +106,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                                 var prevFilled = _filledQtyCache.TryGetValue(orderId, out var pf) ? pf : 0m;
                                 var deltaFill = totalFilled - prevFilled;
 
-                                if (deltaFill <= 0m && status != OrderStatus.Filled)
+                                if (deltaFill <= 0m &&
+                                    status != OrderStatus.Filled &&
+                                    status != OrderStatus.Canceled)
                                     continue;
 
                                 _filledQtyCache[orderId] = totalFilled;
@@ -141,7 +140,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     throw new Exception($"Order socket failed: {subResult.Error?.Message}");
 
                 _orderSocketSub = subResult.Data;
-
                 _isConnected = true;
 
                 _reconcileCts = new CancellationTokenSource();
@@ -242,7 +240,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             var brokerId = result.Data.Id;
 
             _orderCache[brokerId] = order;
-            _filledQtyCache[brokerId] = 0m;   // FIX 3
+            _filledQtyCache.TryAdd(brokerId, 0m);   // FIX
 
             order.BrokerId.Add(brokerId);
 
@@ -315,13 +313,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             var exchangeOpen =
                 result.Data.ToDictionary(o => o.OrderId, o => o);
 
-            foreach (var brokerId in _orderCache.Keys)
+            foreach (var kvp in _orderCache.ToArray())
             {
-                if (exchangeOpen.ContainsKey(brokerId))
-                    continue;
-
-                if (!_orderCache.TryGetValue(brokerId, out var order))
-                    continue;
+                var brokerId = kvp.Key;
+                var order = kvp.Value;
 
                 var sharedSymbol = GetSharedSymbol(order.Symbol);
 
@@ -367,8 +362,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     EmitOrderEvent(order, exchangeStatus, 0m, 0m);
                 }
 
-                _orderCache.TryRemove(brokerId, out _);
-                _filledQtyCache.TryRemove(brokerId, out _);
+                if (exchangeStatus == OrderStatus.Filled ||
+                    exchangeStatus == OrderStatus.Canceled ||
+                    exchangeStatus == OrderStatus.Invalid)
+                {
+                    _orderCache.TryRemove(brokerId, out _);
+                    _filledQtyCache.TryRemove(brokerId, out _);
+                }
             }
         }
 
@@ -431,7 +431,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             {
                 if (_subscriptionMap.ContainsKey(symbol) ||
                     !_pendingSubscriptions.Add(symbol))
-                    return GetNextTicks().GetEnumerator();
+                    return null;
             }
 
             try
@@ -520,7 +520,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             SharedOrderStatus.Canceled => OrderStatus.Canceled,
             _ => OrderStatus.None
         };
-
 
         #endregion
     }
