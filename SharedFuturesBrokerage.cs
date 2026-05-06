@@ -108,7 +108,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                                 if (deltaFill <= 0m &&
                                     status != OrderStatus.Filled &&
-                                    status != OrderStatus.Canceled)
+                                    status != OrderStatus.Canceled &&
+                                    status != OrderStatus.Invalid)
                                     continue;
 
                                 _filledQtyCache[orderId] = totalFilled;
