@@ -319,6 +319,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 var brokerId = kvp.Key;
                 var order = kvp.Value;
 
+                if(exchangeOpen.ContainsKey(brokerId)) 
+                    continue;
+
                 var sharedSymbol = GetSharedSymbol(order.Symbol);
 
                 var statusResult = RunSync(() =>
