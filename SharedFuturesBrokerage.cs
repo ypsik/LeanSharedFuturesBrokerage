@@ -119,7 +119,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                                 OnOrderEvent(new OrderEvent(
                                     cachedOrder,
                                     update.DataTimeLocal ?? DateTime.UtcNow,
-                                    CalculateFee(cachedOrder, price))
+                                    OrderFee.Zero)
                                 {
                                     Status = status,
                                     FillPrice = price,
@@ -381,9 +381,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         private void EmitOrderEvent(Order order, OrderStatus status, decimal price, decimal qty)
         {
-            var fee = price > 0 ? CalculateFee(order, price) : OrderFee.Zero;
-
-            OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, fee)
+            OnOrderEvent(new OrderEvent(
+                order,
+                DateTime.UtcNow,
+                OrderFee.Zero)
             {
                 Status = status,
                 FillPrice = price,
@@ -391,7 +392,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 Message = "Reconciliation"
             });
         }
-
         #endregion
 
         #region Account
@@ -507,17 +507,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 TradingMode.PerpetualLinear,
                 leanSymbol.Value,
                 "USDC");
-        }
-
-        protected virtual OrderFee CalculateFee(Order order, decimal price)
-        {
-            var rate =
-                order.Type == OrderType.Limit
-                    ? 0.0002m
-                    : 0.0005m;
-
-            return new OrderFee(
-                new CashAmount(Math.Abs(order.Quantity) * price * rate, "USDC"));
         }
 
         private OrderStatus MapStatus(SharedOrderStatus status, decimal totalFilled)
