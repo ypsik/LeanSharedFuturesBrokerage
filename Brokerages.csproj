@@ -4,10 +4,13 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <RootNamespace>SilverQuant.Lean.Brokerages.Futures.Shared</RootNamespace>
+
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="HyperLiquid.Net" Version="4.4.1" />
+    <PackageReference Include="CryptoExchange.Net" Version="11.1.1" />
+    <PackageReference Include="HyperLiquid.Net" Version="4.5.0" />
     <PackageReference Include="QuantConnect.Lean.Engine" Version="2.5.17677" />
   </ItemGroup>
 
