@@ -9,7 +9,6 @@ using CryptoExchange.Net.Objects.Sockets;
 using QuantConnect;
 using QuantConnect.Brokerages;
 using QuantConnect.Data;
-using QuantConnect.Data.Market;
 using QuantConnect.Interfaces;
 using QuantConnect.Orders;
 using QuantConnect.Orders.Fees;
@@ -21,26 +20,31 @@ using CxCancelOrderRequest = CryptoExchange.Net.SharedApis.CancelOrderRequest;
 
 namespace SilverQuant.Lean.Brokerages.Futures.Shared
 {
-    public class SharedFuturesBrokerage : Brokerage, IDataQueueHandler
+    /// <summary>
+    /// Exchange-agnostic base brokerage for perpetual futures via CryptoExchange.Net SharedApis.
+    ///
+    /// IDataQueueHandler is intentionally NOT implemented here.
+    /// Market data (ticks) must be provided by a separate IDataQueueHandler / IDataProvider
+    /// registered in LEAN's live node config. Exchange-specific derived classes may implement
+    /// IDataQueueHandler if they need to serve ticks through _tickerSocket directly.
+    /// </summary>
+    public class SharedFuturesBrokerage : Brokerage
     {
         private readonly IFuturesOrderRestClient _orderClient;
         private readonly IBalanceRestClient _balanceClient;
-        private readonly ITickerSocketClient _tickerSocket;
+        protected readonly ITickerSocketClient _tickerSocket;
         private readonly IFuturesOrderSocketClient _orderSocket;
-
         private readonly Func<List<Holding>> _getHoldingsFunc;
 
-        private readonly ConcurrentQueue<BaseData> _ticks = new ConcurrentQueue<BaseData>();
-        private readonly ConcurrentDictionary<string, Order> _orderCache = new ConcurrentDictionary<string, Order>();
-        private readonly ConcurrentDictionary<string, decimal> _filledQtyCache = new ConcurrentDictionary<string, decimal>();
+        private readonly ConcurrentDictionary<string, Order> _orderCache = new();
+        private readonly ConcurrentDictionary<string, decimal> _filledQtyCache = new();
 
-        private readonly Dictionary<Symbol, UpdateSubscription> _subscriptionMap = new Dictionary<Symbol, UpdateSubscription>();
-        private readonly HashSet<Symbol> _pendingSubscriptions = new HashSet<Symbol>();
+        // Available for derived classes that implement IDataQueueHandler.
+        protected readonly ConcurrentDictionary<Symbol, UpdateSubscription> _subscriptionMap = new();
+        protected readonly ConcurrentDictionary<Symbol, byte> _pendingSubscriptions = new();
 
         private UpdateSubscription _orderSocketSub;
-
-        private readonly object _subscriptionLock = new object();
-        private readonly object _connectLock = new object();
+        private readonly object _connectLock = new();
 
         private bool _isConnected;
 
@@ -55,22 +59,23 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             IBalanceRestClient balanceClient,
             ITickerSocketClient tickerSocket,
             IFuturesOrderSocketClient orderSocket,
-            Func<List<Holding>> getHoldingsFunc) : base(exchangeName)
+            Func<List<Holding>> getHoldingsFunc)
+            : base(exchangeName)
         {
-            _orderClient = orderClient ?? throw new ArgumentNullException(nameof(orderClient));
-            _balanceClient = balanceClient ?? throw new ArgumentNullException(nameof(balanceClient));
-            _tickerSocket = tickerSocket ?? throw new ArgumentNullException(nameof(tickerSocket));
-            _orderSocket = orderSocket ?? throw new ArgumentNullException(nameof(orderSocket));
-            _getHoldingsFunc = getHoldingsFunc ?? throw new ArgumentNullException(nameof(getHoldingsFunc));
+            _orderClient = orderClient;
+            _balanceClient = balanceClient;
+            _tickerSocket = tickerSocket;
+            _orderSocket = orderSocket;
+            _getHoldingsFunc = getHoldingsFunc;
         }
 
-        #region Sync Helpers
+        #region Sync
 
-        private static T RunSync<T>(Func<Task<T>> asyncFunc) =>
-            asyncFunc().ConfigureAwait(false).GetAwaiter().GetResult();
+        private static T RunSync<T>(Func<Task<T>> f) =>
+            f().ConfigureAwait(false).GetAwaiter().GetResult();
 
-        private static void RunSync(Func<Task> asyncFunc) =>
-            asyncFunc().ConfigureAwait(false).GetAwaiter().GetResult();
+        private static void RunSync(Func<Task> f) =>
+            f().ConfigureAwait(false).GetAwaiter().GetResult();
 
         #endregion
 
@@ -84,67 +89,29 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             {
                 if (_isConnected) return;
 
-                var auth = RunSync(() => _balanceClient.GetBalancesAsync(new GetBalancesRequest()));
-                if (!auth.Success)
-                    throw new Exception($"Auth failed: {auth.Error?.Message}");
+                var auth = RunSync(() =>
+                    _balanceClient.GetBalancesAsync(new GetBalancesRequest()));
 
-                var subResult = RunSync(() =>
+                if (!auth.Success)
+                    throw new Exception(auth.Error?.Message);
+
+                var sub = RunSync(() =>
                     _orderSocket.SubscribeToFuturesOrderUpdatesAsync(
                         new SubscribeFuturesOrderRequest(),
-                        update =>
-                        {
-                            foreach (var item in update.Data)
-                            {
-                                var orderId = item.OrderId;
-                                if (string.IsNullOrEmpty(orderId)) continue;
-                                if (!_orderCache.TryGetValue(orderId, out var cachedOrder)) continue;
+                        HandleSocket));
 
-                                var totalFilled = item.QuantityFilled?.QuantityInBaseAsset ?? 0m; 
-                                var status = MapStatus(item.Status, totalFilled);
-                                var sideMultiplier = cachedOrder.Quantity > 0 ? 1m : -1m;
+                if (!sub.Success)
+                    throw new Exception(sub.Error?.Message);
 
-                                var prevFilled = _filledQtyCache.TryGetValue(orderId, out var pf) ? pf : 0m;
-                                var deltaFill = totalFilled - prevFilled;
-
-                                if (deltaFill <= 0m &&
-                                    status != OrderStatus.Filled &&
-                                    status != OrderStatus.Canceled &&
-                                    status != OrderStatus.Invalid)
-                                    continue;
-
-                                _filledQtyCache[orderId] = totalFilled;
-
-                                var price = item.AveragePrice ?? item.OrderPrice ?? 0m;
-
-                                OnOrderEvent(new OrderEvent(
-                                    cachedOrder,
-                                    update.DataTimeLocal ?? DateTime.UtcNow,
-                                    OrderFee.Zero)
-                                {
-                                    Status = status,
-                                    FillPrice = price,
-                                    FillQuantity = deltaFill * sideMultiplier,
-                                    Message = "Socket Update"
-                                });
-
-                                if (status == OrderStatus.Filled ||
-                                    status == OrderStatus.Canceled ||
-                                    status == OrderStatus.Invalid)
-                                {
-                                    _orderCache.TryRemove(orderId, out _);
-                                    _filledQtyCache.TryRemove(orderId, out _);
-                                }
-                            }
-                        }));
-
-                if (!subResult.Success)
-                    throw new Exception($"Order socket failed: {subResult.Error?.Message}");
-
-                _orderSocketSub = subResult.Data;
+                _orderSocketSub = sub.Data;
                 _isConnected = true;
 
                 _reconcileCts = new CancellationTokenSource();
-                _reconcileTask = Task.Run(() => ReconciliationLoop(_reconcileCts.Token));
+                _reconcileTask = Task.Factory.StartNew(
+                () => ReconcileLoop(_reconcileCts.Token),
+                _reconcileCts.Token,
+                TaskCreationOptions.LongRunning,
+                TaskScheduler.Default).Unwrap();
             }
         }
 
@@ -152,28 +119,69 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         {
             _reconcileCts?.Cancel();
 
-            try { _reconcileTask?.Wait(TimeSpan.FromSeconds(5)); }
-            catch { }
+            try { _reconcileTask?.Wait(5000); } catch { }
 
-            lock (_subscriptionLock)
-            {
-                foreach (var sub in _subscriptionMap.Values)
-                    RunSync(() => sub.CloseAsync());
-
-                _subscriptionMap.Clear();
-                _pendingSubscriptions.Clear();
-            }
-
-            if (_orderSocketSub != null)
-            {
-                RunSync(() => _orderSocketSub.CloseAsync());
-                _orderSocketSub = null;
-            }
+            RunSync(() => _orderSocketSub?.CloseAsync());
+            _orderSocketSub = null;
 
             _orderCache.Clear();
             _filledQtyCache.Clear();
+            _subscriptionMap.Clear();
 
             _isConnected = false;
+        }
+
+        #endregion
+
+        #region Socket
+
+        private void HandleSocket(DataEvent<SharedFuturesOrder[]> update)
+        {
+            foreach (var o in update.Data)
+            {
+                if (string.IsNullOrEmpty(o.OrderId))
+                    continue;
+
+                if (!_orderCache.TryGetValue(o.OrderId, out var order))
+                {
+                    // Expected during the narrow window between PlaceFuturesOrderAsync
+                    // returning and _orderCache being written. Also fires for orders
+                    // placed outside this session. Logged for race-window diagnostics.
+                    Log.Trace($"{Name} HandleSocket: unknown order {o.OrderId} — skipping");
+                    continue;
+                }
+
+                var totalFilled = o.QuantityFilled?.QuantityInBaseAsset ?? 0m;
+                var prev = _filledQtyCache.TryGetValue(o.OrderId, out var pf) ? pf : 0m;
+                var delta = totalFilled - prev;
+
+                var status = MapStatus(o.Status, totalFilled);
+
+                // Skip no-op: no new fill and still just submitted
+                if (delta == 0 && status == OrderStatus.Submitted)
+                    continue;
+
+                _filledQtyCache[o.OrderId] = totalFilled;
+
+                OnOrderEvent(new OrderEvent(
+                    order,
+                    DateTime.UtcNow,
+                    OrderFee.Zero)
+                {
+                    Status = status,
+                    FillPrice = o.AveragePrice ?? o.OrderPrice ?? 0m,
+                    FillQuantity = delta * (order.Quantity > 0 ? 1 : -1),
+                    Message = "socket"
+                });
+
+                if (status is OrderStatus.Filled
+                           or OrderStatus.Canceled
+                           or OrderStatus.Invalid)
+                {
+                    _orderCache.TryRemove(o.OrderId, out _);
+                    _filledQtyCache.TryRemove(o.OrderId, out _);
+                }
+            }
         }
 
         #endregion
@@ -182,47 +190,37 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         public override List<Order> GetOpenOrders()
         {
-            var result = RunSync(() =>
+            var res = RunSync(() =>
                 _orderClient.GetOpenFuturesOrdersAsync(new GetOpenOrdersRequest()));
 
-            if (!result.Success || result.Data == null)
+            if (!res.Success || res.Data == null)
                 return new List<Order>();
 
-            return result.Data.Select(item =>
+            return res.Data.Select(o =>
             {
-                var symbol = Symbol.Create(item.Symbol, SecurityType.CryptoFuture, Name);
+                var symbol = Symbol.Create(NormalizeSymbol(o.Symbol), SecurityType.CryptoFuture, Name);
 
-                var side = item.Side == SharedOrderSide.Sell ? -1m : 1m;
+                var qty = (o.OrderQuantity?.QuantityInBaseAsset ?? 0m)
+                          * (o.Side == SharedOrderSide.Sell ? -1 : 1);
 
-                var quantity =
-                    (item.OrderQuantity?.QuantityInBaseAsset ?? 0m) * side;
+                Order order = o.OrderType == SharedOrderType.Limit
+                    ? new LimitOrder(symbol, qty, o.OrderPrice ?? 0m, DateTime.UtcNow)
+                    : new MarketOrder(symbol, qty, DateTime.UtcNow);
 
-                var createTime = item.CreateTime ?? DateTime.UtcNow;
+                order.BrokerId.Add(o.OrderId);
+                order.Status = MapStatus(o.Status, o.QuantityFilled?.QuantityInBaseAsset ?? 0m);
 
-                Order order =
-                    item.OrderType == SharedOrderType.Limit
-                        ? new LimitOrder(symbol, quantity, item.OrderPrice ?? 0m, createTime)
-                        : new MarketOrder(symbol, quantity, createTime);
-
-                var brokerId = item.OrderId;
-
-                order.BrokerId.Add(brokerId);
-                order.Status = MapStatus(item.Status, item.QuantityFilled?.QuantityInBaseAsset ?? 0m);
-
-                _orderCache[brokerId] = order;
-                _filledQtyCache[brokerId] = item.QuantityFilled?.QuantityInBaseAsset ?? 0m;
+                _orderCache[o.OrderId] = order;
+                _filledQtyCache[o.OrderId] = o.QuantityFilled?.QuantityInBaseAsset ?? 0m;
 
                 return order;
-
             }).ToList();
         }
 
         public override bool PlaceOrder(Order order)
         {
-            var sharedSymbol = GetSharedSymbol(order.Symbol);
-
             var request = new PlaceFuturesOrderRequest(
-                sharedSymbol,
+                GetSharedSymbol(order.Symbol),
                 order.Quantity > 0 ? SharedOrderSide.Buy : SharedOrderSide.Sell,
                 order.Type == OrderType.Limit ? SharedOrderType.Limit : SharedOrderType.Market,
                 new SharedQuantity { QuantityInBaseAsset = Math.Abs(order.Quantity) })
@@ -230,20 +228,18 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 Price = (order as LimitOrder)?.LimitPrice
             };
 
-            var result = RunSync(() => _orderClient.PlaceFuturesOrderAsync(request));
+            var res = RunSync(() => _orderClient.PlaceFuturesOrderAsync(request));
 
-            if (!result.Success)
-            {
-                Log.Error($"{Name}.PlaceOrder: {result.Error?.Message}");
+            if (!res.Success)
                 return false;
-            }
 
-            var brokerId = result.Data.Id;
-
-            _orderCache[brokerId] = order;
-            _filledQtyCache.TryAdd(brokerId, 0m);   // FIX
-
-            order.BrokerId.Add(brokerId);
+            // Cache with real broker ID immediately after REST returns.
+            // Narrow race window (socket event arriving between REST return and cache write)
+            // can only be fully closed via ClientOrderId pre-registration — implement in
+            // derived class if the exchange supports it.
+            order.BrokerId.Add(res.Data.Id);
+            _orderCache[res.Data.Id] = order;
+            _filledQtyCache[res.Data.Id] = 0m;
 
             OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero)
             {
@@ -258,261 +254,115 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             if (!order.BrokerId.Any())
                 return false;
 
-            var brokerId = order.BrokerId.First();
-            var sharedSymbol = GetSharedSymbol(order.Symbol);
+            var id = order.BrokerId.First();
 
-            var result = RunSync(() =>
+            var res = RunSync(() =>
                 _orderClient.CancelFuturesOrderAsync(
-                    new CxCancelOrderRequest(sharedSymbol, brokerId)));
+                    new CxCancelOrderRequest(GetSharedSymbol(order.Symbol), id)));
 
-            if (!result.Success)
-            {
-                Log.Error($"{Name}.CancelOrder: {result.Error?.Message}");
+            if (!res.Success)
                 return false;
-            }
 
-            // KEIN Cache remove hier
-            // Socket oder Reconciliation wird den final state liefern
-
+            // Order stays in cache until socket confirms Canceled (HandleSocket removes it)
+            // or reconcile loop cleans it up after the interval.
             OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero)
             {
-                Status = OrderStatus.CancelPending,
-                Message = "Cancel requested"
+                Status = OrderStatus.CancelPending
             });
 
             return true;
         }
 
-
-        public override bool UpdateOrder(Order order)
-        {
-            Log.Error($"{Name}.UpdateOrder not supported.");
-            return false;
-        }
+        public override bool UpdateOrder(Order order) => false;
 
         #endregion
 
-        #region Reconciliation
+        #region Reconcile
 
-        private async Task ReconciliationLoop(CancellationToken ct)
+        private async Task ReconcileLoop(CancellationToken ct)
         {
             while (!ct.IsCancellationRequested)
             {
                 try { await Task.Delay(_reconciliationInterval, ct); }
-                catch (TaskCanceledException) { break; }
+                catch { break; }
 
-                try { ReconcileOrders(); }
-                catch (Exception ex) { Log.Error($"{Name}.Reconcile error: {ex.Message}"); }
-            }
-        }
-
-        private void ReconcileOrders()
-        {
-            var result = RunSync(() =>
-                _orderClient.GetOpenFuturesOrdersAsync(new GetOpenOrdersRequest()));
-
-            if (!result.Success || result.Data == null)
-                return;
-
-            var exchangeOpen =
-                result.Data.ToDictionary(o => o.OrderId, o => o);
-
-            foreach (var kvp in _orderCache.ToArray())
-            {
-                var brokerId = kvp.Key;
-                var order = kvp.Value;
-
-                if(exchangeOpen.ContainsKey(brokerId)) 
-                    continue;
-
-                var sharedSymbol = GetSharedSymbol(order.Symbol);
-
-                var statusResult = RunSync(() =>
-                    _orderClient.GetFuturesOrderAsync(
-                        new GetOrderRequest(sharedSymbol, brokerId)));
-
-                if (!statusResult.Success || statusResult.Data == null)
+                try
                 {
-                    EmitOrderEvent(order, OrderStatus.Canceled, 0m, 0m);
-                    _orderCache.TryRemove(brokerId, out _);
-                    _filledQtyCache.TryRemove(brokerId, out _);
-                    continue;
+                    var open = await _orderClient
+                        .GetOpenFuturesOrdersAsync(new GetOpenOrdersRequest())
+                        .ConfigureAwait(false);
+
+                    // Skip only on genuine API failure or null data.
+                    // An empty list (all orders closed) is valid and triggers cache cleanup.
+                    if (!open.Success || open.Data == null)
+                        continue;
+
+                    // FIX: GroupBy guards against malformed exchange responses that
+                    // return duplicate OrderIds — ToDictionary would throw otherwise.
+                    var map = open.Data
+                        .GroupBy(x => x.OrderId)
+                        .ToDictionary(g => g.Key, g => g.First());
+
+                    foreach (var kv in _orderCache.ToArray())
+                    {
+                        if (map.ContainsKey(kv.Key))
+                            continue;
+
+                        OnOrderEvent(new OrderEvent(kv.Value, DateTime.UtcNow, OrderFee.Zero)
+                        {
+                            Status = OrderStatus.Canceled,
+                            Message = "reconcile"
+                        });
+
+                        _orderCache.TryRemove(kv.Key, out _);
+                        _filledQtyCache.TryRemove(kv.Key, out _);
+                    }
                 }
-
-                var totalFilled =
-                    statusResult.Data.QuantityFilled?.QuantityInBaseAsset ?? 0m;
-
-                var exchangeStatus = MapStatus(statusResult.Data.Status, totalFilled);
-
-                var prevFilled =
-                    _filledQtyCache.TryGetValue(brokerId, out var pf) ? pf : 0m;
-
-                var deltaFill = totalFilled - prevFilled;
-
-                var price =
-                    statusResult.Data.AveragePrice ??
-                    statusResult.Data.OrderPrice ??
-                    0m;
-
-                if (deltaFill > 0m)
+                catch (Exception ex)
                 {
-                    var side = order.Quantity > 0 ? 1m : -1m;
-
-                    EmitOrderEvent(
-                        order,
-                        exchangeStatus,
-                        price,
-                        deltaFill * side);
-                }
-                else
-                {
-                    EmitOrderEvent(order, exchangeStatus, 0m, 0m);
-                }
-
-                if (exchangeStatus == OrderStatus.Filled ||
-                    exchangeStatus == OrderStatus.Canceled ||
-                    exchangeStatus == OrderStatus.Invalid)
-                {
-                    _orderCache.TryRemove(brokerId, out _);
-                    _filledQtyCache.TryRemove(brokerId, out _);
+                    Log.Error(ex);
                 }
             }
         }
 
-        private void EmitOrderEvent(Order order, OrderStatus status, decimal price, decimal qty)
-        {
-            OnOrderEvent(new OrderEvent(
-                order,
-                DateTime.UtcNow,
-                OrderFee.Zero)
-            {
-                Status = status,
-                FillPrice = price,
-                FillQuantity = qty,
-                Message = "Reconciliation"
-            });
-        }
         #endregion
 
-        #region Account
+        #region Cash / Holdings
 
         public override List<CashAmount> GetCashBalance()
         {
-            var result = RunSync(() =>
+            var res = RunSync(() =>
                 _balanceClient.GetBalancesAsync(new GetBalancesRequest()));
 
-            if (!result.Success || result.Data == null)
-            {
-                Log.Error($"{Name}.GetCashBalance: {result.Error?.Message}");
-                return new List<CashAmount>();
-            }
-
-            return result.Data
-                .Select(b => new CashAmount(
-                    b.Available,
-                    b.Asset ?? "USDC"))
-                .ToList();
+            return res.Success && res.Data != null
+                ? res.Data.Select(x => new CashAmount(x.Available, x.Asset ?? "USDC")).ToList()
+                : new List<CashAmount>();
         }
 
         public override List<Holding> GetAccountHoldings()
         {
-            try { return _getHoldingsFunc.Invoke(); }
+            try { return _getHoldingsFunc?.Invoke() ?? new List<Holding>(); }
             catch { return new List<Holding>(); }
         }
 
         #endregion
 
-        #region IDataQueueHandler
-
-        public IEnumerable<BaseData> GetNextTicks()
-        {
-            while (_ticks.TryDequeue(out var t))
-                yield return t;
-        }
-
-        public IEnumerator<BaseData> Subscribe(SubscriptionDataConfig dataConfig, EventHandler newDataAvailableHandler)
-        {
-            var symbol = dataConfig.Symbol;
-
-            lock (_subscriptionLock)
-            {
-                if (_subscriptionMap.ContainsKey(symbol) ||
-                    !_pendingSubscriptions.Add(symbol))
-                    return null;
-            }
-
-            try
-            {
-                var sharedSymbol = GetSharedSymbol(symbol);
-
-                var subResult = RunSync(() =>
-                    _tickerSocket.SubscribeToTickerUpdatesAsync(
-                        new SubscribeTickerRequest(sharedSymbol),
-                        update =>
-                        {
-                            _ticks.Enqueue(new Tick
-                            {
-                                Symbol = symbol,
-                                Time = update?.DataTimeLocal ?? DateTime.UtcNow,
-                                Value = update?.Data.LastPrice ?? 0m,
-                                TickType = TickType.Trade,
-                                Quantity = 0m
-                            });
-
-                            newDataAvailableHandler?.Invoke(this, EventArgs.Empty);
-                        }));
-
-                if (subResult.Success)
-                {
-                    lock (_subscriptionLock)
-                        _subscriptionMap[symbol] = subResult.Data;
-                }
-                else
-                {
-                    Log.Error($"{Name}.Subscribe error: {subResult.Error?.Message}");
-                }
-            }
-            finally
-            {
-                lock (_subscriptionLock)
-                    _pendingSubscriptions.Remove(symbol);
-            }
-
-            return GetNextTicks().GetEnumerator();
-        }
-
-        public void Unsubscribe(SubscriptionDataConfig dataConfig)
-        {
-            UpdateSubscription sub = null;
-
-            lock (_subscriptionLock)
-            {
-                if (_subscriptionMap.TryGetValue(dataConfig.Symbol, out sub))
-                    _subscriptionMap.Remove(dataConfig.Symbol);
-            }
-
-            if (sub != null)
-                RunSync(() => sub.CloseAsync());
-        }
-
-        public void SetJob(LiveNodePacket job) { }
-
-        #endregion
-
         #region Helpers
 
-        protected virtual SharedSymbol GetSharedSymbol(Symbol leanSymbol)
-        {
-            return new SharedSymbol(
-                TradingMode.PerpetualLinear,
-                leanSymbol.Value,
-                "USDC");
-        }
+        /// <summary>
+        /// Maps an exchange-native symbol string to the LEAN-compatible format.
+        /// Override in derived classes when the exchange returns symbols that differ
+        /// from LEAN convention (e.g. "BTC-PERP" → "BTCUSDC").
+        /// </summary>
+        protected virtual string NormalizeSymbol(string rawSymbol) => rawSymbol;
 
-        private OrderStatus MapStatus(SharedOrderStatus status, decimal totalFilled)
+        protected virtual SharedSymbol GetSharedSymbol(Symbol s)
+            => new(TradingMode.PerpetualLinear, s.Value, "USDC");
+
+        private OrderStatus MapStatus(SharedOrderStatus status, decimal filled)
         {
             if (status == SharedOrderStatus.Open)
-                return totalFilled > 0
+                return filled > 0
                     ? OrderStatus.PartiallyFilled
                     : OrderStatus.Submitted;
 
