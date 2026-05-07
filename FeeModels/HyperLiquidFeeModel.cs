@@ -11,16 +11,23 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.FeeModels
     {
         public override OrderFee GetOrderFee(OrderFeeParameters parameters)
         {
-            // Hyperliquid Standard-Gebühren: Maker = 0.00%, Taker = 0.035%
-            // Wir nehmen an: Limit-Orders sind Maker, Market-Orders sind Taker
-            decimal feeRate = parameters.Order.Type == OrderType.Limit ? 0.0000m : 0.00035m;
+            var order = parameters.Order;
+            var security = parameters.Security;
 
-            // Transaktionsvolumen berechnen (Preis * Menge)
-            decimal tradeValue = parameters.Security.Price * Math.Abs(parameters.Order.Quantity);
-            decimal feeAmount = tradeValue * feeRate;
+            var price = security.Price;
 
-            // Hyperliquid rechnet Gebühren in USDC ab
-            return new OrderFee(new CashAmount(feeAmount, "USDC"));
+            var rate = order.Type == OrderType.Limit
+                ? 0.0002m
+                : 0.0005m;
+
+            var fee = Math.Abs(order.Quantity) * price * rate;
+
+            var currency = security.QuoteCurrency?.Symbol
+                           ?? "USDC";
+
+            return new OrderFee(
+                new CashAmount(fee, currency)
+            );
         }
     }
 }
