@@ -2,6 +2,7 @@
 using HyperLiquid.Net.Clients;
 using QuantConnect;
 using QuantConnect.Brokerages;
+using QuantConnect.Configuration;
 using QuantConnect.Interfaces;
 using QuantConnect.Packets;
 using QuantConnect.Securities;
@@ -19,7 +20,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
         {
         }
 
-        public override Dictionary<string, string> BrokerageData => new Dictionary<string, string>();
+        public override Dictionary<string, string> BrokerageData => new Dictionary<string, string>
+        {
+            { "hyperliquid-address", Config.Get("hyperliquid-address") },
+            { "hyperliquid-secret", Config.Get("hyperliquid-secret") }
+        };
 
         // LÖSUNG 2: Lean verlangt diese Methode zwingend. 
         // Hier geben wir direkt unser neues HyperLiquidBrokerageModel zurück!
@@ -30,10 +35,16 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
 
         public override IBrokerage CreateBrokerage(LiveNodePacket job, IAlgorithm algorithm)
         {
-            // Die Keys laden wir entweder aus der config.json (job.BrokerageData) 
-            // oder du hast sie hier hartcodiert für lokale Tests.
-            string address = job.BrokerageData.ContainsKey("hl-address") ? job.BrokerageData["hl-address"] : "DEINE_ADRESSE";
-            string secret = job.BrokerageData.ContainsKey("hl-key") ? job.BrokerageData["hl-key"] : "DEIN_SECRET";
+            var errors = new List<string>();
+
+            // 2. Nutze die integrierte Read<T> Methode von Lean für sauberes Error-Handling
+            var address = Read<string>(job.BrokerageData, "hyperliquid-address", errors);
+            var secret = Read<string>(job.BrokerageData, "hyperliquid-secret", errors);
+
+            if (errors.Any())
+            {
+                throw new ArgumentException(string.Join(Environment.NewLine, errors));
+            }
 
             var hlRestClient = new HyperLiquidRestClient(options => {
                 options.ApiCredentials = new HyperLiquidCredentials(address, secret);
