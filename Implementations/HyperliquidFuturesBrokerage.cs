@@ -5,7 +5,7 @@ using QuantConnect.Data;
 using QuantConnect.Data.Market;
 using QuantConnect.Interfaces;
 using QuantConnect.Packets;
-using QuantConnect.Securities;
+using QuantConnect.Logging;
 using SilverQuant.Lean.Brokerages.Futures.Shared;
 using System;
 using System.Collections.Concurrent;
@@ -14,16 +14,10 @@ using System.Linq;
 
 namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 {
-    /// <summary>
-    /// Hyperliquid futures brokerage with:
-    /// - Order execution (base class)
-    /// - Market data feed (IDataQueueHandler)
-    /// - Tick buffer + thread-safe queue
-    /// </summary>
     public class HyperliquidFuturesBrokerage : SharedFuturesBrokerage, IDataQueueHandler
     {
+        private readonly HyperLiquidRestClient _restClient;
         private readonly ConcurrentQueue<BaseData> _ticks = new();
-        private readonly object _tickLock = new();
 
         public HyperliquidFuturesBrokerage(
             HyperLiquidRestClient restClient,
@@ -37,11 +31,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 socketClient.FuturesApi.SharedClient,
                 getHoldingsFunc)
         {
+            _restClient = restClient;
         }
 
-        // ─────────────────────────────────────────────────────────────
+        // ─────────────────────────────────────────────
         // SYMBOL MAPPING
-        // ─────────────────────────────────────────────────────────────
+        // ─────────────────────────────────────────────
 
         protected override string NormalizeSymbol(string rawSymbol)
             => rawSymbol.EndsWith("USDC", StringComparison.OrdinalIgnoreCase)
@@ -62,9 +57,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 "USDC");
         }
 
-        // ─────────────────────────────────────────────────────────────
-        // MARKET DATA (LEAN IDataQueueHandler)
-        // ─────────────────────────────────────────────────────────────
+        // ─────────────────────────────────────────────
+        // SUBSCRIBE (WARMUP + LIVE)
+        // ─────────────────────────────────────────────
 
         public IEnumerator<BaseData> Subscribe(
             SubscriptionDataConfig config,
@@ -73,6 +68,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             var symbol = config.Symbol;
             var shared = GetSharedSymbol(symbol);
 
+            // 1️⃣ WARMUP (KLINES / CANDLES)
+            WarmupHistory(symbol, shared);
+
+            // 2️⃣ LIVE STREAM
             _tickerSocket.SubscribeToTickerUpdatesAsync(
                 new SubscribeTickerRequest(shared),
                 update =>
@@ -80,24 +79,78 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                     if (update?.Data == null)
                         return;
 
-                    if (update.Data.LastPrice == null)
+                    var price = update.Data.LastPrice;
+                    if (price == null)
                         return;
 
-                    var tick = new Tick
+                    _ticks.Enqueue(new Tick
                     {
                         Symbol = symbol,
                         Time = update.DataTimeLocal ?? DateTime.UtcNow,
-                        Value = update.Data.LastPrice ?? 0m,
+                        Value = price.Value,
                         TickType = TickType.Trade,
                         Quantity = 0
-                    };
+                    });
 
-                    _ticks.Enqueue(tick);
                     newDataAvailable?.Invoke(this, EventArgs.Empty);
                 });
 
             return GetNextTicks().GetEnumerator();
         }
+
+        // ─────────────────────────────────────────────
+        // HISTORY (FIXED KLINES USAGE)
+        // ─────────────────────────────────────────────
+
+        private void WarmupHistory(Symbol symbol, SharedSymbol shared)
+        {
+            try
+            {
+                var end = DateTime.UtcNow;
+                var start = end.AddMinutes(-200);
+
+                var res = _restClient.FuturesApi.SharedClient.GetKlinesAsync(
+                    new GetKlinesRequest(
+                        shared,
+                        SharedKlineInterval.OneMinute,
+                        start,
+                        end,
+                        500
+                    )
+                ).GetAwaiter().GetResult();
+
+                if (!res.Success || res.Data == null)
+                {
+                    Log.Trace($"{Name}: Warmup empty");
+                    return;
+                }
+
+                foreach (var k in res.Data.OrderBy(x => x.OpenTime))
+                {
+                    _ticks.Enqueue(new Tick
+                    {
+                        Symbol = symbol,
+
+                        // ✅ korrekt laut DTO
+                        Time = k.OpenTime,
+
+                        // ⚠️ bewusst: ClosePrice als Trade proxy
+                        Value = k.ClosePrice,
+
+                        TickType = TickType.Trade,
+                        Quantity = 0
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"{Name}.WarmupHistory failed: {ex}");
+            }
+        }
+
+        // ─────────────────────────────────────────────
+        // LEAN QUEUE
+        // ─────────────────────────────────────────────
 
         public IEnumerable<BaseData> GetNextTicks()
         {
@@ -106,14 +159,14 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 yield return tick;
             }
         }
+
         public void Unsubscribe(SubscriptionDataConfig config)
         {
-            // Optional: implement socket unsubscribe if SDK supports it
+            // optional: implement socket unsubscribe if SDK supports it
         }
 
         public void SetJob(LiveNodePacket job)
         {
-            // Not required for Hyperliquid
         }
     }
 }
