@@ -99,10 +99,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                                 if (string.IsNullOrEmpty(orderId)) continue;
                                 if (!_orderCache.TryGetValue(orderId, out var cachedOrder)) continue;
 
-                                var status = MapStatus(item.Status);
+                                var totalFilled = item.QuantityFilled?.QuantityInBaseAsset ?? 0m; 
+                                var status = MapStatus(item.Status, totalFilled);
                                 var sideMultiplier = cachedOrder.Quantity > 0 ? 1m : -1m;
 
-                                var totalFilled = item.QuantityFilled?.QuantityInBaseAsset ?? 0m;
                                 var prevFilled = _filledQtyCache.TryGetValue(orderId, out var pf) ? pf : 0m;
                                 var deltaFill = totalFilled - prevFilled;
 
@@ -207,7 +207,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 var brokerId = item.OrderId;
 
                 order.BrokerId.Add(brokerId);
-                order.Status = MapStatus(item.Status);
+                order.Status = MapStatus(item.Status, item.QuantityFilled?.QuantityInBaseAsset ?? 0m);
 
                 _orderCache[brokerId] = order;
                 _filledQtyCache[brokerId] = item.QuantityFilled?.QuantityInBaseAsset ?? 0m;
@@ -255,7 +255,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         public override bool CancelOrder(Order order)
         {
-            if (!order.BrokerId.Any()) return false;
+            if (!order.BrokerId.Any())
+                return false;
 
             var brokerId = order.BrokerId.First();
             var sharedSymbol = GetSharedSymbol(order.Symbol);
@@ -270,16 +271,18 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 return false;
             }
 
-            _orderCache.TryRemove(brokerId, out _);
-            _filledQtyCache.TryRemove(brokerId, out _);
+            // KEIN Cache remove hier
+            // Socket oder Reconciliation wird den final state liefern
 
             OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero)
             {
-                Status = OrderStatus.Canceled
+                Status = OrderStatus.CancelPending,
+                Message = "Cancel requested"
             });
 
             return true;
         }
+
 
         public override bool UpdateOrder(Order order)
         {
@@ -336,13 +339,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     continue;
                 }
 
-                var exchangeStatus = MapStatus(statusResult.Data.Status);
+                var totalFilled =
+                    statusResult.Data.QuantityFilled?.QuantityInBaseAsset ?? 0m;
+
+                var exchangeStatus = MapStatus(statusResult.Data.Status, totalFilled);
 
                 var prevFilled =
                     _filledQtyCache.TryGetValue(brokerId, out var pf) ? pf : 0m;
-
-                var totalFilled =
-                    statusResult.Data.QuantityFilled?.QuantityInBaseAsset ?? 0m;
 
                 var deltaFill = totalFilled - prevFilled;
 
@@ -517,13 +520,20 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 new CashAmount(Math.Abs(order.Quantity) * price * rate, "USDC"));
         }
 
-        private OrderStatus MapStatus(SharedOrderStatus status) => status switch
+        private OrderStatus MapStatus(SharedOrderStatus status, decimal totalFilled)
         {
-            SharedOrderStatus.Open => OrderStatus.Submitted,
-            SharedOrderStatus.Filled => OrderStatus.Filled,
-            SharedOrderStatus.Canceled => OrderStatus.Canceled,
-            _ => OrderStatus.None
-        };
+            if (status == SharedOrderStatus.Open)
+                return totalFilled > 0
+                    ? OrderStatus.PartiallyFilled
+                    : OrderStatus.Submitted;
+
+            return status switch
+            {
+                SharedOrderStatus.Filled => OrderStatus.Filled,
+                SharedOrderStatus.Canceled => OrderStatus.Canceled,
+                _ => OrderStatus.None
+            };
+        }
 
         #endregion
     }
