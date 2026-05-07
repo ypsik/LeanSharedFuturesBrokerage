@@ -41,12 +41,18 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
             if (errors.Any())
                 throw new ArgumentException(string.Join(Environment.NewLine, errors));
 
+            var credentials = new HyperLiquidCredentials(address, secret);
+
             var restClient = new HyperLiquidRestClient(options =>
             {
-                options.ApiCredentials = new HyperLiquidCredentials(address, secret);
+                options.ApiCredentials = credentials;
+                options.BuilderFeePercentage = 0;
             });
 
-            var socketClient = new HyperLiquidSocketClient();
+            var socketClient = new HyperLiquidSocketClient(options =>
+            {
+                options.ApiCredentials = credentials;
+            });
 
             Func<List<Holding>> getHoldingsFunc = () =>
                 algorithm.Securities.Values

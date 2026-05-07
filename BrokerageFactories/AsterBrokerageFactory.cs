@@ -1,5 +1,6 @@
 ﻿using Aster.Net;
 using Aster.Net.Clients;
+using Aster.Net.Objects;
 using QuantConnect;
 using QuantConnect.Brokerages;
 using QuantConnect.Configuration;
@@ -22,6 +23,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
 
         public override Dictionary<string, string> BrokerageData => new Dictionary<string, string>
         {
+            { "aster-public-address", Config.Get("aster-public-address") },
             { "aster-address", Config.Get("aster-address") },
             { "aster-secret", Config.Get("aster-secret") }
         };
@@ -38,6 +40,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
             var errors = new List<string>();
 
             // 2. Nutze die integrierte Read<T> Methode von Lean für sauberes Error-Handling
+            //V3 api needs the public ETH address as well.
+            var publicAddress = Read<string>(job.BrokerageData, "aster-public-address", errors);
             var address = Read<string>(job.BrokerageData, "aster-address", errors);
             var secret = Read<string>(job.BrokerageData, "aster-secret", errors);
 
@@ -46,11 +50,16 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
                 throw new ArgumentException(string.Join(Environment.NewLine, errors));
             }
 
+            var asterCredentials = new AsterCredentials(new AsterV3Credential(publicAddress, address, secret));
+
             var asterRestClient = new AsterRestClient(options => {
-                options.ApiCredentials = new AsterCredentials(address, secret);
+                options.ApiCredentials = asterCredentials;
+                options.BuilderFeePercentage = 0;
             });
 
-            var asterSocketClient = new AsterSocketClient();
+            var asterSocketClient = new AsterSocketClient(options => {
+                options.ApiCredentials = asterCredentials;
+            });
 
             // Delegate für die Holdings
             Func<List<Holding>> getHoldingsFunc = () => {
