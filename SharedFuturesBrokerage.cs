@@ -1,21 +1,17 @@
-﻿using System;
-using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
+﻿using CryptoExchange.Net.Objects.Sockets;
 using CryptoExchange.Net.SharedApis;
-using CryptoExchange.Net.Objects.Sockets;
 using QuantConnect;
 using QuantConnect.Brokerages;
 using QuantConnect.Data;
 using QuantConnect.Data.Market;
 using QuantConnect.Interfaces;
+using QuantConnect.Logging;
 using QuantConnect.Orders;
 using QuantConnect.Orders.Fees;
-using QuantConnect.Logging;
-using QuantConnect.Securities;
 using QuantConnect.Packets;
+using QuantConnect.Securities;
+using System;
+using System.Collections.Concurrent;
 
 using CxCancelOrderRequest = CryptoExchange.Net.SharedApis.CancelOrderRequest;
 // Explicit alias resolves ambiguity between QuantConnect.Data.HistoryRequest
@@ -55,6 +51,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         // Tick + MarginInterestRate queue — drained by LEAN via GetNextTicks().
         protected readonly ConcurrentQueue<BaseData> _ticks = new();
+
         protected const int MaxQueueSize = 10_000;
 
         private UpdateSubscription _orderSocketSub;
@@ -397,49 +394,47 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         /// (e.g. MarginInterestRate via exchange-specific WebSocket).
         /// </summary>
         public virtual IEnumerator<BaseData> Subscribe(
-      SubscriptionDataConfig config,
-      EventHandler handler)
+     SubscriptionDataConfig config,
+     EventHandler handler)
         {
             var symbol = config.Symbol;
-
-            // Only subscribe to live ticker feed for TradeBar configs.
-            // QuoteBar and MarginInterestRate are handled separately (or skipped).
-            if (config.Type != typeof(TradeBar))
-                return GetNextTicks().GetEnumerator();
-
-            // Avoid duplicate ticker subscription for the same symbol
-            if (_subscriptionMap.ContainsKey(symbol))
-                return GetNextTicks().GetEnumerator();
-
             var shared = GetSharedSymbol(symbol);
 
             var sub = RunSync(() =>
-                    _tickerSocket.SubscribeToTickerUpdatesAsync(
+                _tickerSocket.SubscribeToTickerUpdatesAsync(
                     new SubscribeTickerRequest(shared),
                     update =>
                     {
-                        if (_ticks.Count >= MaxQueueSize) return;
-
+                        // HIER wird 'price' definiert:
                         var price = update.Data.LastPrice;
+
+                        // Sicherheitscheck: Wenn kein Preis da ist oder er <= 0, abbrechen
                         if (price == null || price <= 0m) return;
 
-                        _ticks.Enqueue(new Tick
+                        if (_ticks.Count > MaxQueueSize)
                         {
-                            Symbol = symbol,
-                            Time = update.DataTimeLocal ?? DateTime.UtcNow,
-                            Value = price.Value,
-                            TickType = TickType.Trade,
-                            // Volume is non-nullable decimal on SharedSpotTicker
-                            Quantity = update.Data.Volume
-                        });
+                            _ticks.TryDequeue(out _);
+                        }
 
+
+                        var time = update.DataTimeLocal ?? DateTime.UtcNow;
+
+                        // Hier nutzen wir jetzt 'price.Value', da 'price' ein nullable decimal (decimal?) ist
+                        BaseData data = config.Type switch
+                        {
+                            Type t when t == typeof(TradeBar) => CreateTradeBar(symbol, price.Value, time, config),
+                            Type t when t == typeof(QuoteBar) => CreateQuoteBar(symbol, price.Value, time, config),
+                            _ => CreateTick(symbol, price.Value, time)
+                        };
+
+                        _ticks.Enqueue(data);
                         handler?.Invoke(this, EventArgs.Empty);
                     }));
 
             if (sub.Success)
                 _subscriptionMap[symbol] = sub.Data;
 
-            return GetNextTicks().GetEnumerator();
+            return Enumerable.Empty<BaseData>().GetEnumerator();
         }
 
         public void Unsubscribe(SubscriptionDataConfig config)
@@ -448,6 +443,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 RunSync(() => sub.CloseAsync());
         }
 
+
         public IEnumerable<BaseData> GetNextTicks()
         {
             while (_ticks.TryDequeue(out var tick))
@@ -455,6 +451,50 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         }
 
         public void SetJob(LiveNodePacket job) { }
+
+        #endregion
+
+        #region Factory Methods
+
+        private TradeBar CreateTradeBar(Symbol symbol, decimal price, DateTime time, SubscriptionDataConfig config)
+        {
+            return new TradeBar
+            {
+                Symbol = symbol,
+                Time = time,
+                Open = price,
+                High = price,
+                Low = price,
+                Close = price,
+                Volume = 0m, // Wichtig: 24h Volumen hier ignorieren
+                Period = config.Resolution.ToTimeSpan()
+            };
+        }
+
+        private QuoteBar CreateQuoteBar(Symbol symbol, decimal price, DateTime time, SubscriptionDataConfig config)
+        {
+            return new QuoteBar
+            {
+                Symbol = symbol,
+                Time = time,
+                Value = price,
+                Ask = new Bar(price, price, price, price),
+                Bid = new Bar(price, price, price, price),
+                Period = config.Resolution.ToTimeSpan()
+            };
+        }
+
+        private Tick CreateTick(Symbol symbol, decimal price, DateTime time)
+        {
+            return new Tick
+            {
+                Symbol = symbol,
+                Time = time,
+                Value = price,
+                TickType = TickType.Trade,
+                Quantity = 0m // Wichtig: 24h Volumen hier ignorieren
+            };
+        }
 
         #endregion
 
