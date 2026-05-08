@@ -18,6 +18,9 @@ using QuantConnect.Securities;
 using QuantConnect.Packets;
 
 using CxCancelOrderRequest = CryptoExchange.Net.SharedApis.CancelOrderRequest;
+// Explicit alias resolves ambiguity between QuantConnect.Data.HistoryRequest
+// and QuantConnect.Packets.HistoryRequest.
+using LeanHistoryRequest = QuantConnect.Data.HistoryRequest;
 
 namespace SilverQuant.Lean.Brokerages.Futures.Shared
 {
@@ -26,13 +29,15 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
     ///
     /// Provides:
     ///   - Order execution  (PlaceOrder / CancelOrder / reconcile loop)
-    ///   - Live tick feed   (IDataQueueHandler — Subscribe / GetNextTicks)
-    ///   - History hook     (GetHistory — override in derived class)
+    ///   - Live price ticks (IDataQueueHandler — ticker socket → _ticks)
+    ///   - Funding history  (GetHistory for warmup via IFundingRateRestClient)
     ///
     /// Derived classes must override:
-    ///   - NormalizeSymbol()  exchange symbol → LEAN ticker
-    ///   - GetSharedSymbol()  LEAN symbol     → exchange SharedSymbol
-    ///   - GetHistory()       warmup bars via exchange REST
+    ///   - NormalizeSymbol()      exchange symbol → LEAN ticker
+    ///   - GetSharedSymbol()      LEAN symbol     → exchange SharedSymbol
+    ///   - GetHistory()           warmup bars (TradeBar) + delegates MarginInterestRate to base
+    ///   - FundingRateRestClient  provides IFundingRateRestClient (or null to disable)
+    ///   - Subscribe()            override for exchange-specific live data types
     /// </summary>
     public class SharedFuturesBrokerage : Brokerage, IDataQueueHandler
     {
@@ -48,9 +53,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         protected readonly ConcurrentDictionary<Symbol, UpdateSubscription> _subscriptionMap = new();
         protected readonly ConcurrentDictionary<Symbol, byte> _pendingSubscriptions = new();
 
-        // ── Tick pipeline (IDataQueueHandler) ────────────────────────────
-        private readonly ConcurrentQueue<BaseData> _ticks = new();
-        private const int MaxQueueSize = 10_000;
+        // Tick + MarginInterestRate queue — drained by LEAN via GetNextTicks().
+        protected readonly ConcurrentQueue<BaseData> _ticks = new();
+        protected const int MaxQueueSize = 10_000;
 
         private UpdateSubscription _orderSocketSub;
         private readonly object _connectLock = new();
@@ -76,6 +81,14 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             _orderSocket = orderSocket;
             _getHoldingsFunc = getHoldingsFunc;
         }
+
+        // ── Funding rate client (override in derived class) ──────────────
+
+        /// <summary>
+        /// Return the exchange's IFundingRateRestClient to enable funding rate
+        /// history for warmup. Return null to disable.
+        /// </summary>
+        protected virtual IFundingRateRestClient FundingRateRestClient => null;
 
         #region Sync
 
@@ -131,7 +144,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             RunSync(() => _orderSocketSub?.CloseAsync());
             _orderSocketSub = null;
 
-            // Close all ticker subscriptions
             foreach (var kv in _subscriptionMap)
                 RunSync(() => kv.Value.CloseAsync());
 
@@ -329,13 +341,58 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         #endregion
 
+        #region History
+
+        /// <summary>
+        /// Handles MarginInterestRate history for warmup.
+        /// Derived classes override for TradeBar and call base for MarginInterestRate.
+        /// </summary>
+        public override IEnumerable<BaseData> GetHistory(LeanHistoryRequest request)
+        {
+            if (request.DataType != typeof(MarginInterestRate))
+                yield break;
+
+            var client = FundingRateRestClient;
+            if (client == null)
+            {
+                Log.Trace($"{Name} GetHistory: FundingRateRestClient not configured — skipping");
+                yield break;
+            }
+
+            var res = RunSync(() =>
+                client.GetFundingRateHistoryAsync(
+                    new GetFundingRateHistoryRequest(GetSharedSymbol(request.Symbol))
+                    {
+                        StartTime = request.StartTimeUtc,
+                        EndTime = request.EndTimeUtc
+                    }));
+
+            if (!res.Success || res.Data == null)
+                yield break;
+
+            foreach (var rate in res.Data.OrderBy(r => r.Timestamp))
+            {
+                yield return new MarginInterestRate
+                {
+                    Symbol = request.Symbol,
+                    Time = rate.Timestamp,
+                    InterestRate = rate.FundingRate
+                };
+            }
+        }
+
+        #endregion
+
         #region IDataQueueHandler
 
         /// <summary>
-        /// LEAN calls this to subscribe to live price data for a symbol.
-        /// Opens a ticker socket and enqueues ticks into the shared queue.
+        /// Subscribes to live price ticks via ticker socket.
+        /// Override in derived class to handle additional data types
+        /// (e.g. MarginInterestRate via exchange-specific WebSocket).
         /// </summary>
-        public IEnumerator<BaseData> Subscribe(SubscriptionDataConfig config, EventHandler handler)
+        public virtual IEnumerator<BaseData> Subscribe(
+            SubscriptionDataConfig config,
+            EventHandler handler)
         {
             var symbol = config.Symbol;
             var shared = GetSharedSymbol(symbol);
@@ -347,15 +404,16 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     {
                         if (_ticks.Count >= MaxQueueSize) return;
 
-                        var price = update.Data.LastPrice ?? 0m;
-                        if (price <= 0m) return;
+                        var price = update.Data.LastPrice;
+                        if (price == null || price <= 0m) return;
 
                         _ticks.Enqueue(new Tick
                         {
                             Symbol = symbol,
                             Time = update.DataTimeLocal ?? DateTime.UtcNow,
-                            Value = price,
+                            Value = price.Value,
                             TickType = TickType.Trade,
+                            // Volume is non-nullable decimal on SharedSpotTicker
                             Quantity = update.Data.Volume
                         });
 
@@ -368,18 +426,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             return GetNextTicks().GetEnumerator();
         }
 
-        /// <summary>
-        /// LEAN calls this when a symbol is removed from the universe.
-        /// </summary>
         public void Unsubscribe(SubscriptionDataConfig config)
         {
             if (_subscriptionMap.TryRemove(config.Symbol, out var sub))
                 RunSync(() => sub.CloseAsync());
         }
 
-        /// <summary>
-        /// LEAN polls this every cycle to drain queued ticks.
-        /// </summary>
         public IEnumerable<BaseData> GetNextTicks()
         {
             while (_ticks.TryDequeue(out var tick))
@@ -392,10 +444,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         #region Helpers
 
-        /// <summary>
-        /// Maps exchange-native symbol string to LEAN-compatible ticker.
-        /// Override per exchange (e.g. "BTC" → "BTCUSDC").
-        /// </summary>
         protected virtual string NormalizeSymbol(string rawSymbol) => rawSymbol;
 
         protected virtual SharedSymbol GetSharedSymbol(Symbol s)
