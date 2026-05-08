@@ -28,6 +28,19 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
             var alwaysOpen = SecurityExchangeHours.AlwaysOpen(TimeZones.Utc);
 
             mhdb.SetEntry("hyperliquid", null, SecurityType.CryptoFuture, alwaysOpen, TimeZones.Utc);
+
+            var spdb = SymbolPropertiesDatabase.FromDataFolder();
+            var symbolProperties = new SymbolProperties(
+                description: "Hyperliquid Perpetual",
+                quoteCurrency: "USDC",          // WICHTIG: Damit trennt Lean "BTCUSDC" in "BTC" und "USDC"
+                contractMultiplier: 1m,         // Bei Crypto-Futures meist 1
+                minimumPriceVariation: 0.0001m, // Fallback Tick-Size (wird später ggf. durch echte Daten überschrieben)
+                lotSize: 0.0001m,               // Fallback Min-Order-Size
+                marketTicker: string.Empty
+            );
+
+            // Das "*" dient als Wildcard. Gilt für ALLE CryptoFutures auf Hyperliquid.
+            spdb.SetEntry("hyperliquid", "*", SecurityType.CryptoFuture, symbolProperties);
         }
 
         public override Dictionary<string, string> BrokerageData => new Dictionary<string, string>

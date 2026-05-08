@@ -29,6 +29,19 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
 
             mhdb.SetEntry("aster", null, SecurityType.CryptoFuture, alwaysOpen, TimeZones.Utc);
 
+            var spdb = SymbolPropertiesDatabase.FromDataFolder();
+            var symbolProperties = new SymbolProperties(
+                description: "Aster Perpetual",
+                quoteCurrency: "USDT",          // WICHTIG: Damit trennt Lean "BTCUSDT" in "BTC" und "USDT"
+                contractMultiplier: 1m,         // Bei Crypto-Futures meist 1
+                minimumPriceVariation: 0.0001m, // Fallback Tick-Size (wird später ggf. durch echte Daten überschrieben)
+                lotSize: 0.0001m,               // Fallback Min-Order-Size
+                marketTicker: string.Empty
+            );
+
+            // Das "*" dient als Wildcard. Gilt für ALLE CryptoFutures auf Aster.
+            spdb.SetEntry("aster", "*", SecurityType.CryptoFuture, symbolProperties);
+
         }
 
         public override Dictionary<string, string> BrokerageData => new Dictionary<string, string>
