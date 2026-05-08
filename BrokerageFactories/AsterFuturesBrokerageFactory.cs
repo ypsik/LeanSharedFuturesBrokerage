@@ -23,6 +23,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
         public AsterFuturesBrokerageFactory() : base(typeof(AsterFuturesBrokerage))
         {
             Market.Add("aster", 902);
+
+            var mhdb = MarketHoursDatabase.FromDataFolder();
+            var alwaysOpen = SecurityExchangeHours.AlwaysOpen(TimeZones.Utc);
+
+            mhdb.SetEntry("aster", null, SecurityType.CryptoFuture, alwaysOpen, TimeZones.Utc);
+
         }
 
         public override Dictionary<string, string> BrokerageData => new Dictionary<string, string>
