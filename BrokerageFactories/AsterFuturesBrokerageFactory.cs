@@ -7,6 +7,7 @@ using QuantConnect.Configuration;
 using QuantConnect.Interfaces;
 using QuantConnect.Packets;
 using QuantConnect.Securities;
+using SilverQuant.Lean.Brokerages.Futures.Implementations;
 using SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageModels;
 using System;
 using System.Collections.Generic;
@@ -14,10 +15,10 @@ using System.Text;
 
 namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
 {
-    public class AsterBrokerageFactory : BrokerageFactory
+    public class AsterFuturesBrokerageFactory : BrokerageFactory
     {
         // LÖSUNG 1: Der Konstruktor muss den Typ an die Basisklasse weitergeben
-        public AsterBrokerageFactory() : base(typeof(SharedFuturesBrokerage))
+        public AsterFuturesBrokerageFactory() : base(typeof(AsterFuturesBrokerage))
         {
         }
 
