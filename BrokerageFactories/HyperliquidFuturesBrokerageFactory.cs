@@ -22,7 +22,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
     {
         public HyperliquidFuturesBrokerageFactory() : base(typeof(HyperliquidFuturesBrokerage))
         {
-            Market.Add("hyperliquid", 1001);
+            Market.Add("hyperliquid", 901);
         }
 
         public override Dictionary<string, string> BrokerageData => new Dictionary<string, string>

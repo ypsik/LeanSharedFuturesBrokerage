@@ -22,6 +22,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
         // LÖSUNG 1: Der Konstruktor muss den Typ an die Basisklasse weitergeben
         public AsterFuturesBrokerageFactory() : base(typeof(AsterFuturesBrokerage))
         {
+            Market.Add("aster", 902);
         }
 
         public override Dictionary<string, string> BrokerageData => new Dictionary<string, string>
