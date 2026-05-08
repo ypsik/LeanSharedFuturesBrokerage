@@ -66,7 +66,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
 
             // Register with MEF Composer so Lean reuses this instance when
             // resolving IDataQueueHandler instead of trying to construct a new one
-            Composer.Instance.AddPart(brokerage);
+            Composer.Instance.AddPart<IDataQueueHandler>(brokerage);
 
             return brokerage;
         }
