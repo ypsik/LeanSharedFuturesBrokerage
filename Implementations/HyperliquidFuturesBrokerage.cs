@@ -5,6 +5,7 @@ using CryptoExchange.Net.SharedApis;
 using HyperLiquid.Net.Clients;
 using QuantConnect;
 using QuantConnect.Data;
+using LeanHistoryRequest = QuantConnect.Data.HistoryRequest;
 using QuantConnect.Data.Market;
 using QuantConnect.Securities;
 using SilverQuant.Lean.Brokerages.Futures.Shared;
@@ -15,10 +16,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Hyperliquid
     /// Hyperliquid-specific overrides on top of SharedFuturesBrokerage.
     ///
     /// Adds:
-    ///   - Symbol normalization  ("BTC" ↔ "BTCUSDC")
-    ///   - GetHistory()          warmup bars via Hyperliquid REST klines
+    ///   - Symbol normalization    ("BTC" ↔ "BTCUSDC")
+    ///   - FundingRateRestClient   → funding rate history for warmup via REST
+    ///   - GetHistory()            → TradeBar (klines) + base for MarginInterestRate
     ///
-    /// Everything else (orders, ticks, reconcile) is handled by the base class.
+    /// Note: Hyperliquid.Net exposes no funding rate socket via SharedApis.
+    /// Live funding rate is loaded via GetHistory() on warmup (changes every 8h).
     /// </summary>
     public class HyperliquidFuturesBrokerage : SharedFuturesBrokerage
     {
@@ -39,6 +42,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Hyperliquid
             _restClient = restClient;
         }
 
+        // ── Funding rate REST client ─────────────────────────────────────
+
+        protected override IFundingRateRestClient FundingRateRestClient
+            => _restClient.FuturesApi.SharedClient;
+
         // ── Symbol mapping ───────────────────────────────────────────────
 
         protected override string NormalizeSymbol(string rawSymbol)
@@ -53,13 +61,22 @@ namespace SilverQuant.Lean.Brokerages.Futures.Hyperliquid
             return new SharedSymbol(TradingMode.PerpetualLinear, coin, "USDC");
         }
 
-        // ── History / Warmup ─────────────────────────────────────────────
+
+        // ── History ──────────────────────────────────────────────────────
 
         /// <summary>
-        /// Called by LEAN during SetWarmup() when config contains:
-        ///   "history-provider": "BrokerageHistoryProvider"
+        /// TradeBar          → Hyperliquid klines via REST
+        /// MarginInterestRate → funding rate history via base class
         /// </summary>
-        public override IEnumerable<BaseData> GetHistory(HistoryRequest request)
+        public override IEnumerable<BaseData> GetHistory(LeanHistoryRequest request)
+        {
+            if (request.DataType == typeof(MarginInterestRate))
+                return base.GetHistory(request);
+
+            return GetKlineHistory(request);
+        }
+
+        private IEnumerable<BaseData> GetKlineHistory(LeanHistoryRequest request)
         {
             var ticker = request.Symbol.Value.ToUpperInvariant();
             var coin = ticker.EndsWith("USDC") ? ticker[..^4] : ticker;
@@ -70,7 +87,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Hyperliquid
                 Resolution.Minute => (SharedKlineInterval?)SharedKlineInterval.OneMinute,
                 Resolution.Hour => SharedKlineInterval.OneHour,
                 Resolution.Daily => SharedKlineInterval.OneDay,
-                _ => null  // Tick/Second not supported via REST klines
+                _ => null
             };
 
             if (interval == null)
