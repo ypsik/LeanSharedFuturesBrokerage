@@ -67,6 +67,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         private readonly TimeSpan _reconciliationInterval = TimeSpan.FromSeconds(30);
 
         public SharedFuturesBrokerage(
+            string exchangeName)
+            : base(exchangeName)
+        {
+        }
+
+        public SharedFuturesBrokerage(
             string exchangeName,
             IFuturesOrderRestClient orderClient,
             IBalanceRestClient balanceClient,
