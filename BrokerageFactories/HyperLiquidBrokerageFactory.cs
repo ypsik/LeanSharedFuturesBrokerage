@@ -2,6 +2,7 @@
 using HyperLiquid.Net.Clients;
 using QuantConnect;
 using QuantConnect.Brokerages;
+using QuantConnect.Util;
 using QuantConnect.Configuration;
 using QuantConnect.Interfaces;
 using QuantConnect.Packets;
@@ -61,7 +62,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
                     .Select(x => new Holding(x))
                     .ToList();
 
-            return new HyperliquidFuturesBrokerage(restClient, socketClient, getHoldingsFunc);
+            var brokerage = new HyperliquidFuturesBrokerage(restClient, socketClient, getHoldingsFunc);
+
+            // Register with MEF Composer so Lean reuses this instance when
+            // resolving IDataQueueHandler instead of trying to construct a new one
+            Composer.Instance.AddPart(brokerage);
+
+            return brokerage;
         }
 
         public override void Dispose() { }
