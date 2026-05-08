@@ -36,16 +36,16 @@ namespace SilverQuant.Lean.Brokerages.Futures.Hyperliquid
         private CryptoExchange.Net.Objects.Sockets.UpdateSubscription _fundingSubscription;
         private readonly object _fundingSubLock = new();
 
-        public HyperliquidFuturesBrokerage() : base("HyperLiquid")
+        public HyperliquidFuturesBrokerage() : base("Hyperliquid")
         {
         }
 
-        public HyperliquidFuturesBrokerage(
+        internal HyperliquidFuturesBrokerage(
             HyperLiquidRestClient restClient,
             HyperLiquidSocketClient socketClient,
             Func<List<Holding>> getHoldingsFunc)
             : base(
-                "HyperLiquid",
+                "Hyperliquid",
                 restClient.FuturesApi.SharedClient,    // IFuturesOrderRestClient
                 restClient.FuturesApi.SharedClient,    // IBalanceRestClient
                 socketClient.FuturesApi.SharedClient,  // ITickerSocketClient
