@@ -28,19 +28,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
             var alwaysOpen = SecurityExchangeHours.AlwaysOpen(TimeZones.Utc);
 
             mhdb.SetEntry("hyperliquid", null, SecurityType.CryptoFuture, alwaysOpen, TimeZones.Utc);
-
-            var spdb = SymbolPropertiesDatabase.FromDataFolder();
-            var symbolProperties = new SymbolProperties(
-                description: "Hyperliquid Perpetual",
-                quoteCurrency: "USDC",          // WICHTIG: Damit trennt Lean "BTCUSDC" in "BTC" und "USDC"
-                contractMultiplier: 1m,         // Bei Crypto-Futures meist 1
-                minimumPriceVariation: 0.0001m, // Fallback Tick-Size (wird später ggf. durch echte Daten überschrieben)
-                lotSize: 0.0001m,               // Fallback Min-Order-Size
-                marketTicker: string.Empty
-            );
-
-            // Das "*" dient als Wildcard. Gilt für ALLE CryptoFutures auf Hyperliquid.
-            spdb.SetEntry("hyperliquid", "*", SecurityType.CryptoFuture, symbolProperties);
         }
 
         public override Dictionary<string, string> BrokerageData => new Dictionary<string, string>
@@ -83,6 +70,32 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
                     .Select(x => new Holding(x))
                     .ToList();
 
+            // --- Populate SPDB with all live HL assets ---
+            var spdb = SymbolPropertiesDatabase.FromDataFolder();
+
+            var metaResult = restClient.FuturesApi.ExchangeData
+                .GetExchangeInfoAsync()
+                .GetAwaiter().GetResult();
+
+            if (!metaResult.Success)
+                throw new Exception($"Failed to load Hyperliquid assets: {metaResult.Error}");
+
+            foreach (var symbol in metaResult.Data.Where(s => !s.IsDelisted))
+            {
+                var ticker = symbol.Name + "USDC"; // Main DEX = always USDC
+                var lotSize = Math.Pow(10, -symbol.QuantityDecimals);  // QuantityDecimals nutzen!
+
+                var symbolProperties = new SymbolProperties(
+                    description: $"Hyperliquid {symbol.Name} Perpetual",
+                    quoteCurrency: "USDC",
+                    contractMultiplier: 1m,
+                    minimumPriceVariation: 0.0001m,
+                    lotSize: (decimal)lotSize,
+                    marketTicker: symbol.Name  // HL erwartet nur "BTC", nicht "BTCUSDC"
+                );
+
+                spdb.SetEntry("hyperliquid", ticker, SecurityType.CryptoFuture, symbolProperties);
+            }
             var brokerage = new HyperliquidFuturesBrokerage(restClient, socketClient, getHoldingsFunc);
 
             // Register with MEF Composer so Lean reuses this instance when
