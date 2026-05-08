@@ -7,6 +7,8 @@ using QuantConnect;
 using QuantConnect.Data;
 using LeanHistoryRequest = QuantConnect.Data.HistoryRequest;
 using QuantConnect.Data.Market;
+using QuantConnect.Interfaces;
+using QuantConnect.Packets;
 using QuantConnect.Securities;
 using SilverQuant.Lean.Brokerages.Futures.Shared;
 
@@ -18,14 +20,21 @@ namespace SilverQuant.Lean.Brokerages.Futures.Hyperliquid
     /// Adds:
     ///   - Symbol normalization    ("BTC" ↔ "BTCUSDC")
     ///   - FundingRateRestClient   → funding rate history for warmup via REST
+    ///   - Subscribe()             → MarginInterestRate via SubscribeToUserFundingUpdatesAsync
+    ///                               (single subscription for all coins, dispatches per symbol)
+    ///                               price ticks delegate to base.Subscribe()
     ///   - GetHistory()            → TradeBar (klines) + base for MarginInterestRate
-    ///
-    /// Note: Hyperliquid.Net exposes no funding rate socket via SharedApis.
-    /// Live funding rate is loaded via GetHistory() on warmup (changes every 8h).
     /// </summary>
     public class HyperliquidFuturesBrokerage : SharedFuturesBrokerage
     {
         private readonly HyperLiquidRestClient _restClient;
+        private readonly HyperLiquidSocketClient _socketClient;
+
+        // Funding subscription is global (all coins in one channel).
+        // Guard ensures we only subscribe once regardless of how many symbols
+        // request MarginInterestRate.
+        private CryptoExchange.Net.Objects.Sockets.UpdateSubscription _fundingSubscription;
+        private readonly object _fundingSubLock = new();
 
         public HyperliquidFuturesBrokerage(
             HyperLiquidRestClient restClient,
@@ -40,9 +49,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Hyperliquid
                 getHoldingsFunc)
         {
             _restClient = restClient;
+            _socketClient = socketClient;
         }
 
-        // ── Funding rate REST client ─────────────────────────────────────
+        // ── Funding rate REST client (warmup history) ────────────────────
 
         protected override IFundingRateRestClient FundingRateRestClient
             => _restClient.FuturesApi.SharedClient;
@@ -61,11 +71,64 @@ namespace SilverQuant.Lean.Brokerages.Futures.Hyperliquid
             return new SharedSymbol(TradingMode.PerpetualLinear, coin, "USDC");
         }
 
+        // ── Subscribe ────────────────────────────────────────────────────
+
+        public override IEnumerator<BaseData> Subscribe(
+            SubscriptionDataConfig config,
+            EventHandler handler)
+        {
+            if (config.Type == typeof(MarginInterestRate))
+            {
+                // SubscribeToUserFundingUpdatesAsync delivers funding payments
+                // for ALL coins in a single channel. Subscribe once, dispatch
+                // per coin into _ticks so LEAN sees MarginInterestRate per symbol.
+                lock (_fundingSubLock)
+                {
+                    if (_fundingSubscription == null)
+                    {
+                        var sub = RunSync(() =>
+                            _socketClient.FuturesApi.Account
+                                .SubscribeToUserFundingUpdatesAsync(
+                                    null, // null = use API credentials
+                                    update =>
+                                    {
+                                        foreach (var funding in update.Data)
+                                        {
+                                            if (_ticks.Count >= MaxQueueSize) break;
+
+                                            var leanTicker = NormalizeSymbol(funding.Symbol);
+                                            var sym = Symbol.Create(
+                                                leanTicker,
+                                                SecurityType.CryptoFuture,
+                                                "HyperLiquid");
+
+                                            _ticks.Enqueue(new MarginInterestRate
+                                            {
+                                                Symbol = sym,
+                                                Time = funding.Timestamp ?? DateTime.UtcNow,
+                                                InterestRate = funding.FundingRate
+                                            });
+                                        }
+
+                                        handler?.Invoke(this, EventArgs.Empty);
+                                    }));
+
+                        if (sub.Success)
+                            _fundingSubscription = sub.Data;
+                    }
+                }
+
+                return GetNextTicks().GetEnumerator();
+            }
+
+            // Price ticks — handled generically by base class.
+            return base.Subscribe(config, handler);
+        }
 
         // ── History ──────────────────────────────────────────────────────
 
         /// <summary>
-        /// TradeBar          → Hyperliquid klines via REST
+        /// TradeBar           → Hyperliquid klines via REST
         /// MarginInterestRate → funding rate history via base class
         /// </summary>
         public override IEnumerable<BaseData> GetHistory(LeanHistoryRequest request)
