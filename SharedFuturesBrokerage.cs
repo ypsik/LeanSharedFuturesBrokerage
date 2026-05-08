@@ -397,14 +397,24 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         /// (e.g. MarginInterestRate via exchange-specific WebSocket).
         /// </summary>
         public virtual IEnumerator<BaseData> Subscribe(
-            SubscriptionDataConfig config,
-            EventHandler handler)
+      SubscriptionDataConfig config,
+      EventHandler handler)
         {
             var symbol = config.Symbol;
+
+            // Only subscribe to live ticker feed for TradeBar configs.
+            // QuoteBar and MarginInterestRate are handled separately (or skipped).
+            if (config.Type != typeof(TradeBar))
+                return GetNextTicks().GetEnumerator();
+
+            // Avoid duplicate ticker subscription for the same symbol
+            if (_subscriptionMap.ContainsKey(symbol))
+                return GetNextTicks().GetEnumerator();
+
             var shared = GetSharedSymbol(symbol);
 
             var sub = RunSync(() =>
-                _tickerSocket.SubscribeToTickerUpdatesAsync(
+                    _tickerSocket.SubscribeToTickerUpdatesAsync(
                     new SubscribeTickerRequest(shared),
                     update =>
                     {
