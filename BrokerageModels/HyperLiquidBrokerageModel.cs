@@ -9,9 +9,9 @@ using System.Text;
 
 namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageModels
 {
-    public class HyperLiquidBrokerageModel : DefaultBrokerageModel
+    public class HyperliquidBrokerageModel : DefaultBrokerageModel
     {
-        public HyperLiquidBrokerageModel(AccountType accountType = AccountType.Margin)
+        public HyperliquidBrokerageModel(AccountType accountType = AccountType.Margin)
             : base(accountType)
         {
         }
@@ -19,7 +19,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageModels
         // 1. Dein neues Gebührenmodell zuweisen
         public override IFeeModel GetFeeModel(Security security)
         {
-            return new HyperLiquidFeeModel();
+            return new HyperliquidFeeModel();
         }
 
         // 2. Den Standard-Hebel (Buying Power) definieren

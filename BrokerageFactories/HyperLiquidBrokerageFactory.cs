@@ -15,9 +15,9 @@ using System.Linq;
 
 namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
 {
-    public class HyperLiquidBrokerageFactory : BrokerageFactory
+    public class HyperliquidBrokerageFactory : BrokerageFactory
     {
-        public HyperLiquidBrokerageFactory() : base(typeof(HyperliquidFuturesBrokerage))
+        public HyperliquidBrokerageFactory() : base(typeof(HyperliquidFuturesBrokerage))
         {
         }
 
@@ -29,7 +29,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
 
         public override IBrokerageModel GetBrokerageModel(IOrderProvider orderProvider)
         {
-            return new HyperLiquidBrokerageModel(AccountType.Margin);
+            return new HyperliquidBrokerageModel(AccountType.Margin);
         }
 
         public override IBrokerage CreateBrokerage(LiveNodePacket job, IAlgorithm algorithm)

@@ -7,7 +7,7 @@ using System.Text;
 
 namespace SilverQuant.Lean.Brokerages.Futures.Shared.FeeModels
 {
-    public class HyperLiquidFeeModel : FeeModel
+    public class HyperliquidFeeModel : FeeModel
     {
         public override OrderFee GetOrderFee(OrderFeeParameters parameters)
         {
