@@ -6,6 +6,7 @@ using QuantConnect.Configuration;
 using QuantConnect.Interfaces;
 using QuantConnect.Packets;
 using QuantConnect.Securities;
+using SilverQuant.Lean.Brokerages.Futures.Hyperliquid;
 using SilverQuant.Lean.Brokerages.Futures.Implementations;
 using SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageModels;
 using System;

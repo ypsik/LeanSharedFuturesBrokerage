@@ -9,6 +9,7 @@ using CryptoExchange.Net.Objects.Sockets;
 using QuantConnect;
 using QuantConnect.Brokerages;
 using QuantConnect.Data;
+using QuantConnect.Data.Market;
 using QuantConnect.Interfaces;
 using QuantConnect.Orders;
 using QuantConnect.Orders.Fees;
@@ -23,12 +24,17 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
     /// <summary>
     /// Exchange-agnostic base brokerage for perpetual futures via CryptoExchange.Net SharedApis.
     ///
-    /// IDataQueueHandler is intentionally NOT implemented here.
-    /// Market data (ticks) must be provided by a separate IDataQueueHandler / IDataProvider
-    /// registered in LEAN's live node config. Exchange-specific derived classes may implement
-    /// IDataQueueHandler if they need to serve ticks through _tickerSocket directly.
+    /// Provides:
+    ///   - Order execution  (PlaceOrder / CancelOrder / reconcile loop)
+    ///   - Live tick feed   (IDataQueueHandler — Subscribe / GetNextTicks)
+    ///   - History hook     (GetHistory — override in derived class)
+    ///
+    /// Derived classes must override:
+    ///   - NormalizeSymbol()  exchange symbol → LEAN ticker
+    ///   - GetSharedSymbol()  LEAN symbol     → exchange SharedSymbol
+    ///   - GetHistory()       warmup bars via exchange REST
     /// </summary>
-    public class SharedFuturesBrokerage : Brokerage
+    public class SharedFuturesBrokerage : Brokerage, IDataQueueHandler
     {
         private readonly IFuturesOrderRestClient _orderClient;
         private readonly IBalanceRestClient _balanceClient;
@@ -39,13 +45,15 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         private readonly ConcurrentDictionary<string, Order> _orderCache = new();
         private readonly ConcurrentDictionary<string, decimal> _filledQtyCache = new();
 
-        // Available for derived classes that implement IDataQueueHandler.
         protected readonly ConcurrentDictionary<Symbol, UpdateSubscription> _subscriptionMap = new();
         protected readonly ConcurrentDictionary<Symbol, byte> _pendingSubscriptions = new();
 
+        // ── Tick pipeline (IDataQueueHandler) ────────────────────────────
+        private readonly ConcurrentQueue<BaseData> _ticks = new();
+        private const int MaxQueueSize = 10_000;
+
         private UpdateSubscription _orderSocketSub;
         private readonly object _connectLock = new();
-
         private bool _isConnected;
 
         private CancellationTokenSource _reconcileCts;
@@ -71,10 +79,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         #region Sync
 
-        private static T RunSync<T>(Func<Task<T>> f) =>
+        protected static T RunSync<T>(Func<Task<T>> f) =>
             f().ConfigureAwait(false).GetAwaiter().GetResult();
 
-        private static void RunSync(Func<Task> f) =>
+        protected static void RunSync(Func<Task> f) =>
             f().ConfigureAwait(false).GetAwaiter().GetResult();
 
         #endregion
@@ -108,32 +116,34 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                 _reconcileCts = new CancellationTokenSource();
                 _reconcileTask = Task.Factory.StartNew(
-                () => ReconcileLoop(_reconcileCts.Token),
-                _reconcileCts.Token,
-                TaskCreationOptions.LongRunning,
-                TaskScheduler.Default).Unwrap();
+                    () => ReconcileLoop(_reconcileCts.Token),
+                    _reconcileCts.Token,
+                    TaskCreationOptions.LongRunning,
+                    TaskScheduler.Default).Unwrap();
             }
         }
 
         public override void Disconnect()
         {
             _reconcileCts?.Cancel();
-
             try { _reconcileTask?.Wait(5000); } catch { }
 
             RunSync(() => _orderSocketSub?.CloseAsync());
             _orderSocketSub = null;
 
+            // Close all ticker subscriptions
+            foreach (var kv in _subscriptionMap)
+                RunSync(() => kv.Value.CloseAsync());
+
+            _subscriptionMap.Clear();
             _orderCache.Clear();
             _filledQtyCache.Clear();
-            _subscriptionMap.Clear();
-
             _isConnected = false;
         }
 
         #endregion
 
-        #region Socket
+        #region Socket — Order Updates
 
         private void HandleSocket(DataEvent<SharedFuturesOrder[]> update)
         {
@@ -144,9 +154,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                 if (!_orderCache.TryGetValue(o.OrderId, out var order))
                 {
-                    // Expected during the narrow window between PlaceFuturesOrderAsync
-                    // returning and _orderCache being written. Also fires for orders
-                    // placed outside this session. Logged for race-window diagnostics.
                     Log.Trace($"{Name} HandleSocket: unknown order {o.OrderId} — skipping");
                     continue;
                 }
@@ -154,19 +161,14 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 var totalFilled = o.QuantityFilled?.QuantityInBaseAsset ?? 0m;
                 var prev = _filledQtyCache.TryGetValue(o.OrderId, out var pf) ? pf : 0m;
                 var delta = totalFilled - prev;
-
                 var status = MapStatus(o.Status, totalFilled);
 
-                // Skip no-op: no new fill and still just submitted
                 if (delta == 0 && status == OrderStatus.Submitted)
                     continue;
 
                 _filledQtyCache[o.OrderId] = totalFilled;
 
-                OnOrderEvent(new OrderEvent(
-                    order,
-                    DateTime.UtcNow,
-                    OrderFee.Zero)
+                OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero)
                 {
                     Status = status,
                     FillPrice = o.AveragePrice ?? o.OrderPrice ?? 0m,
@@ -199,9 +201,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             return res.Data.Select(o =>
             {
                 var symbol = Symbol.Create(NormalizeSymbol(o.Symbol), SecurityType.CryptoFuture, Name);
-
                 var qty = (o.OrderQuantity?.QuantityInBaseAsset ?? 0m)
-                          * (o.Side == SharedOrderSide.Sell ? -1 : 1);
+                             * (o.Side == SharedOrderSide.Sell ? -1 : 1);
 
                 Order order = o.OrderType == SharedOrderType.Limit
                     ? new LimitOrder(symbol, qty, o.OrderPrice ?? 0m, DateTime.UtcNow)
@@ -229,14 +230,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             };
 
             var res = RunSync(() => _orderClient.PlaceFuturesOrderAsync(request));
+            if (!res.Success) return false;
 
-            if (!res.Success)
-                return false;
-
-            // Cache with real broker ID immediately after REST returns.
-            // Narrow race window (socket event arriving between REST return and cache write)
-            // can only be fully closed via ClientOrderId pre-registration — implement in
-            // derived class if the exchange supports it.
             order.BrokerId.Add(res.Data.Id);
             _orderCache[res.Data.Id] = order;
             _filledQtyCache[res.Data.Id] = 0m;
@@ -251,20 +246,15 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         public override bool CancelOrder(Order order)
         {
-            if (!order.BrokerId.Any())
-                return false;
+            if (!order.BrokerId.Any()) return false;
 
             var id = order.BrokerId.First();
-
             var res = RunSync(() =>
                 _orderClient.CancelFuturesOrderAsync(
                     new CxCancelOrderRequest(GetSharedSymbol(order.Symbol), id)));
 
-            if (!res.Success)
-                return false;
+            if (!res.Success) return false;
 
-            // Order stays in cache until socket confirms Canceled (HandleSocket removes it)
-            // or reconcile loop cleans it up after the interval.
             OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero)
             {
                 Status = OrderStatus.CancelPending
@@ -292,21 +282,16 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         .GetOpenFuturesOrdersAsync(new GetOpenOrdersRequest())
                         .ConfigureAwait(false);
 
-                    // Skip only on genuine API failure or null data.
-                    // An empty list (all orders closed) is valid and triggers cache cleanup.
                     if (!open.Success || open.Data == null)
                         continue;
 
-                    // FIX: GroupBy guards against malformed exchange responses that
-                    // return duplicate OrderIds — ToDictionary would throw otherwise.
                     var map = open.Data
                         .GroupBy(x => x.OrderId)
                         .ToDictionary(g => g.Key, g => g.First());
 
                     foreach (var kv in _orderCache.ToArray())
                     {
-                        if (map.ContainsKey(kv.Key))
-                            continue;
+                        if (map.ContainsKey(kv.Key)) continue;
 
                         OnOrderEvent(new OrderEvent(kv.Value, DateTime.UtcNow, OrderFee.Zero)
                         {
@@ -318,10 +303,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         _filledQtyCache.TryRemove(kv.Key, out _);
                     }
                 }
-                catch (Exception ex)
-                {
-                    Log.Error(ex);
-                }
+                catch (Exception ex) { Log.Error(ex); }
             }
         }
 
@@ -347,12 +329,72 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         #endregion
 
+        #region IDataQueueHandler
+
+        /// <summary>
+        /// LEAN calls this to subscribe to live price data for a symbol.
+        /// Opens a ticker socket and enqueues ticks into the shared queue.
+        /// </summary>
+        public IEnumerator<BaseData> Subscribe(SubscriptionDataConfig config, EventHandler handler)
+        {
+            var symbol = config.Symbol;
+            var shared = GetSharedSymbol(symbol);
+
+            var sub = RunSync(() =>
+                _tickerSocket.SubscribeToTickerUpdatesAsync(
+                    new SubscribeTickerRequest(shared),
+                    update =>
+                    {
+                        if (_ticks.Count >= MaxQueueSize) return;
+
+                        var price = update.Data.LastPrice ?? 0m;
+                        if (price <= 0m) return;
+
+                        _ticks.Enqueue(new Tick
+                        {
+                            Symbol = symbol,
+                            Time = update.DataTimeLocal ?? DateTime.UtcNow,
+                            Value = price,
+                            TickType = TickType.Trade,
+                            Quantity = update.Data.Volume
+                        });
+
+                        handler?.Invoke(this, EventArgs.Empty);
+                    }));
+
+            if (sub.Success)
+                _subscriptionMap[symbol] = sub.Data;
+
+            return GetNextTicks().GetEnumerator();
+        }
+
+        /// <summary>
+        /// LEAN calls this when a symbol is removed from the universe.
+        /// </summary>
+        public void Unsubscribe(SubscriptionDataConfig config)
+        {
+            if (_subscriptionMap.TryRemove(config.Symbol, out var sub))
+                RunSync(() => sub.CloseAsync());
+        }
+
+        /// <summary>
+        /// LEAN polls this every cycle to drain queued ticks.
+        /// </summary>
+        public IEnumerable<BaseData> GetNextTicks()
+        {
+            while (_ticks.TryDequeue(out var tick))
+                yield return tick;
+        }
+
+        public void SetJob(LiveNodePacket job) { }
+
+        #endregion
+
         #region Helpers
 
         /// <summary>
-        /// Maps an exchange-native symbol string to the LEAN-compatible format.
-        /// Override in derived classes when the exchange returns symbols that differ
-        /// from LEAN convention (e.g. "BTC-PERP" → "BTCUSDC").
+        /// Maps exchange-native symbol string to LEAN-compatible ticker.
+        /// Override per exchange (e.g. "BTC" → "BTCUSDC").
         /// </summary>
         protected virtual string NormalizeSymbol(string rawSymbol) => rawSymbol;
 
@@ -362,9 +404,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         private OrderStatus MapStatus(SharedOrderStatus status, decimal filled)
         {
             if (status == SharedOrderStatus.Open)
-                return filled > 0
-                    ? OrderStatus.PartiallyFilled
-                    : OrderStatus.Submitted;
+                return filled > 0 ? OrderStatus.PartiallyFilled : OrderStatus.Submitted;
 
             return status switch
             {
