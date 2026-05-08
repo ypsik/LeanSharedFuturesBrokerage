@@ -2,20 +2,22 @@
 using HyperLiquid.Net.Clients;
 using QuantConnect;
 using QuantConnect.Brokerages;
-using QuantConnect.Util;
 using QuantConnect.Configuration;
 using QuantConnect.Interfaces;
 using QuantConnect.Packets;
 using QuantConnect.Securities;
+using QuantConnect.Util;
 using SilverQuant.Lean.Brokerages.Futures.Hyperliquid;
 using SilverQuant.Lean.Brokerages.Futures.Implementations;
 using SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageModels;
 using System;
 using System.Collections.Generic;
+using System.ComponentModel.Composition;
 using System.Linq;
 
 namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
 {
+    [Export(typeof(IBrokerageFactory))]
     public class HyperliquidFuturesBrokerageFactory : BrokerageFactory
     {
         public HyperliquidFuturesBrokerageFactory() : base(typeof(HyperliquidFuturesBrokerage))
