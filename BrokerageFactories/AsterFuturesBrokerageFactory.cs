@@ -16,7 +16,7 @@ using System.Text;
 
 namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
 {
-    [Export(typeof(IBrokerageFactory))]
+
     public class AsterFuturesBrokerageFactory : BrokerageFactory
     {
         // LÖSUNG 1: Der Konstruktor muss den Typ an die Basisklasse weitergeben

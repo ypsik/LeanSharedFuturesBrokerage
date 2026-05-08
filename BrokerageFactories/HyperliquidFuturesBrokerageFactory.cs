@@ -17,7 +17,7 @@ using System.Linq;
 
 namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
 {
-    [Export(typeof(IBrokerageFactory))]
+
     public class HyperliquidFuturesBrokerageFactory : BrokerageFactory
     {
         public HyperliquidFuturesBrokerageFactory() : base(typeof(HyperliquidFuturesBrokerage))
