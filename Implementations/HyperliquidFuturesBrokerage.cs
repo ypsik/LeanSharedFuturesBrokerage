@@ -120,28 +120,44 @@ namespace SilverQuant.Lean.Brokerages.Futures.Hyperliquid
 
             if (interval == null) yield break;
 
-            var res = RunSync(() => _restClient.FuturesApi.SharedClient.GetKlinesAsync(new GetKlinesRequest(shared, interval.Value)
-            {
-                StartTime = request.StartTimeUtc,
-                EndTime = request.EndTimeUtc
-            }));
+            var barSize = request.Resolution.ToTimeSpan();
+            var batchEnd = request.EndTimeUtc;
+            var current = request.StartTimeUtc;
 
-            if (!res.Success || res.Data == null) yield break;
-
-            foreach (var bar in res.Data.OrderBy(b => b.OpenTime))
+            var klineRequest = new GetKlinesRequest(shared, interval.Value)
             {
-                yield return new TradeBar
+                StartTime = current,
+                EndTime = batchEnd
+            };
+
+            PageRequest? nextPage = null;
+
+            do
+            {
+                var res = RunSync(() =>
+                    _restClient.FuturesApi.SharedClient.GetKlinesAsync(klineRequest, nextPage));
+
+                if (!res.Success || res.Data == null || !res.Data.Any())
+                    yield break;
+
+                foreach (var bar in res.Data.OrderBy(b => b.OpenTime))
                 {
-                    Symbol = request.Symbol,
-                    Time = bar.OpenTime,
-                    Open = bar.OpenPrice,
-                    High = bar.HighPrice,
-                    Low = bar.LowPrice,
-                    Close = bar.ClosePrice,
-                    Volume = bar.Volume,
-                    Period = request.Resolution.ToTimeSpan()
-                };
+                    yield return new TradeBar
+                    {
+                        Symbol = request.Symbol,
+                        Time = bar.OpenTime,
+                        Open = bar.OpenPrice,
+                        High = bar.HighPrice,
+                        Low = bar.LowPrice,
+                        Close = bar.ClosePrice,
+                        Volume = bar.Volume,
+                        Period = barSize
+                    };
+                }
+
+                nextPage = res.NextPageRequest;
             }
+            while (nextPage != null);
         }
     }
 }

@@ -19,7 +19,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
     /// </summary>
     public class AsterFuturesBrokerage : SharedFuturesBrokerage
     {
-        public AsterFuturesBrokerage(
+        public AsterFuturesBrokerage() : base("Aster")
+        {
+        }
+
+        internal AsterFuturesBrokerage(
             AsterRestClient restClient,
             AsterSocketClient socketClient,
             Func<List<Holding>> getHoldingsFunc)
