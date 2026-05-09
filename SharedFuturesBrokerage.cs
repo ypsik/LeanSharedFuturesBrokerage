@@ -26,22 +26,17 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 {
     /// <summary>
     /// Exchange-agnostic base brokerage for perpetual futures via CryptoExchange.Net SharedApis.
-    ///
+    /// 
     /// Provides:
-    ///  - Order execution  (PlaceOrder / CancelOrder / reconcile loop)
-    ///  - Live price ticks (IDataQueueHandler — ticker socket → _ticks)
+    ///  - Order execution (PlaceOrder / CancelOrder / reconcile loop)
+    ///  - Live price ticks (IDataQueueHandler — Kline socket → _ticks)
     ///  - Funding & Kline history (GetHistory for warmup via RestClients)
-    ///
-    /// Derived classes must override:
-    ///  - NormalizeSymbol()      exchange symbol → LEAN ticker
-    ///  - GetSharedSymbol()      LEAN symbol      → exchange SharedSymbol
-    ///  - Subscribe()            override for exchange-specific live data types
     /// </summary>
     public class SharedFuturesBrokerage : Brokerage, IDataQueueHandler
     {
         private readonly IFuturesOrderRestClient _orderClient;
         private readonly IBalanceRestClient _balanceClient;
-        protected readonly ITickerSocketClient _tickerSocket;
+        private readonly IKlineSocketClient _klineSocket;
         private readonly IFuturesOrderSocketClient _orderSocket;
         private readonly IFundingRateRestClient _fundingRateClient;
         private readonly IKlineRestClient _klineClient;
@@ -53,7 +48,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         protected readonly ConcurrentDictionary<Symbol, UpdateSubscription> _subscriptionMap = new();
         protected readonly ConcurrentDictionary<Symbol, byte> _pendingSubscriptions = new();
 
-        // Tick + MarginInterestRate queue — drained by LEAN via GetNextTicks().
+        // Tick + TradeBar queue — drained by LEAN via GetNextTicks().
         protected readonly ConcurrentQueue<BaseData> _ticks = new();
 
         protected const int MaxQueueSize = 10_000;
@@ -67,17 +62,22 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         private readonly TimeSpan _reconciliationInterval = TimeSpan.FromSeconds(30);
 
-        public SharedFuturesBrokerage(
-            string exchangeName)
+        /// <summary>
+        /// Parameterless constructor for framework compatibility.
+        /// </summary>
+        public SharedFuturesBrokerage(string exchangeName)
             : base(exchangeName)
         {
         }
 
+        /// <summary>
+        /// Full constructor with dependency injection.
+        /// </summary>
         public SharedFuturesBrokerage(
             string exchangeName,
             IFuturesOrderRestClient orderClient,
             IBalanceRestClient balanceClient,
-            ITickerSocketClient tickerSocket,
+            IKlineSocketClient klineSocket,
             IFuturesOrderSocketClient orderSocket,
             IFundingRateRestClient fundingRateClient,
             IKlineRestClient klineClient,
@@ -86,7 +86,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         {
             _orderClient = orderClient;
             _balanceClient = balanceClient;
-            _tickerSocket = tickerSocket;
+            _klineSocket = klineSocket;
             _orderSocket = orderSocket;
             _fundingRateClient = fundingRateClient;
             _klineClient = klineClient;
@@ -113,11 +113,14 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             {
                 if (_isConnected) return;
 
+                if (_balanceClient == null || _orderSocket == null)
+                    throw new InvalidOperationException("Clients not configured. Use the DI constructor.");
+
                 var auth = RunSync(() =>
                     _balanceClient.GetBalancesAsync(new GetBalancesRequest()));
 
                 if (!auth.Success)
-                    throw new Exception(auth.Error?.Message);
+                    throw new Exception($"Authentication failed: {auth.Error?.Message}");
 
                 var sub = RunSync(() =>
                     _orderSocket.SubscribeToFuturesOrderUpdatesAsync(
@@ -125,7 +128,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         HandleSocket));
 
                 if (!sub.Success)
-                    throw new Exception(sub.Error?.Message);
+                    throw new Exception($"Order socket subscription failed: {sub.Error?.Message}");
 
                 _orderSocketSub = sub.Data;
                 _isConnected = true;
@@ -144,7 +147,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             _reconcileCts?.Cancel();
             try { _reconcileTask?.Wait(5000); } catch { }
 
-            RunSync(() => _orderSocketSub?.CloseAsync());
+            if (_orderSocketSub != null)
+                RunSync(() => _orderSocketSub.CloseAsync());
+
             _orderSocketSub = null;
 
             foreach (var kv in _subscriptionMap)
@@ -346,9 +351,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         #region History
 
-        /// <summary>
-        /// Handles MarginInterestRate and TradeBar history for warmup.
-        /// </summary>
         public override IEnumerable<BaseData> GetHistory(LeanHistoryRequest request)
         {
             if (request.DataType == typeof(MarginInterestRate))
@@ -410,7 +412,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     EndTime = batchEnd
                 };
 
-                PageRequest? nextPage = null;
+                PageRequest nextPage = null;
 
                 do
                 {
@@ -445,11 +447,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         #region IDataQueueHandler
 
-        /// <summary>
-        /// Subscribes to live price ticks via ticker socket.
-        /// Override in derived class to handle additional data types
-        /// (e.g. MarginInterestRate via exchange-specific WebSocket).
-        /// </summary>
         public virtual IEnumerator<BaseData> Subscribe(
             SubscriptionDataConfig config,
             EventHandler handler)
@@ -457,35 +454,46 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             var symbol = config.Symbol;
             var shared = GetSharedSymbol(symbol);
 
+            // Use Kline socket to avoid stale 24h ticker data
+            var interval = config.Resolution switch
+            {
+                Resolution.Minute => SharedKlineInterval.OneMinute,
+                Resolution.Hour => SharedKlineInterval.OneHour,
+                _ => SharedKlineInterval.OneMinute
+            };
+
             var sub = RunSync(() =>
-                _tickerSocket.SubscribeToTickerUpdatesAsync(
-                    new SubscribeTickerRequest(shared),
+                _klineSocket.SubscribeToKlineUpdatesAsync(
+                    new SubscribeKlineRequest(shared, interval),
                     update =>
                     {
-                        var price = update.Data.LastPrice;
+                        var k = update.Data;
 
-                        if (price == null || price <= 0m) return;
-
-                        if (_ticks.Count > MaxQueueSize)
+                        // Create a real TradeBar from the Kline update
+                        var bar = new TradeBar
                         {
-                            _ticks.TryDequeue(out _);
-                        }
-
-                        var time = update.DataTimeLocal ?? DateTime.UtcNow;
-
-                        BaseData data = config.Type switch
-                        {
-                            Type t when t == typeof(TradeBar) => CreateTradeBar(symbol, price.Value, time, config),
-                            Type t when t == typeof(QuoteBar) => CreateQuoteBar(symbol, price.Value, time, config),
-                            _ => CreateTick(symbol, price.Value, time)
+                            Symbol = symbol,
+                            Time = k.OpenTime.ToUniversalTime(),
+                            Open = k.OpenPrice,
+                            High = k.HighPrice,
+                            Low = k.LowPrice,
+                            Close = k.ClosePrice,
+                            Volume = k.Volume,
+                            Period = config.Resolution.ToTimeSpan(),
+                            DataType = MarketDataType.TradeBar
                         };
 
-                        _ticks.Enqueue(data);
+                        if (_ticks.Count > MaxQueueSize)
+                            _ticks.TryDequeue(out _);
+
+                        _ticks.Enqueue(bar);
                         handler?.Invoke(this, EventArgs.Empty);
                     }));
 
             if (sub.Success)
                 _subscriptionMap[symbol] = sub.Data;
+            else
+                Log.Error($"{Name}.Subscribe: Failed for {symbol}: {sub.Error}");
 
             return Enumerable.Empty<BaseData>().GetEnumerator();
         }
@@ -503,50 +511,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         }
 
         public void SetJob(LiveNodePacket job) { }
-
-        #endregion
-
-        #region Factory Methods
-
-        private TradeBar CreateTradeBar(Symbol symbol, decimal price, DateTime time, SubscriptionDataConfig config)
-        {
-            return new TradeBar
-            {
-                Symbol = symbol,
-                Time = time,
-                Open = price,
-                High = price,
-                Low = price,
-                Close = price,
-                Volume = 0m, // Wichtig: 24h Volumen hier ignorieren
-                Period = config.Resolution.ToTimeSpan()
-            };
-        }
-
-        private QuoteBar CreateQuoteBar(Symbol symbol, decimal price, DateTime time, SubscriptionDataConfig config)
-        {
-            return new QuoteBar
-            {
-                Symbol = symbol,
-                Time = time,
-                Value = price,
-                Ask = new Bar(price, price, price, price),
-                Bid = new Bar(price, price, price, price),
-                Period = config.Resolution.ToTimeSpan()
-            };
-        }
-
-        private Tick CreateTick(Symbol symbol, decimal price, DateTime time)
-        {
-            return new Tick
-            {
-                Symbol = symbol,
-                Time = time,
-                Value = price,
-                TickType = TickType.Trade,
-                Quantity = 0m // Wichtig: 24h Volumen hier ignorieren
-            };
-        }
 
         #endregion
 
