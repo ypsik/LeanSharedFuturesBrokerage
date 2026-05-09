@@ -1,12 +1,16 @@
 ﻿using Aster.Net;
 using Aster.Net.Clients;
 using Aster.Net.Objects;
+using CryptoExchange.Net.Interfaces.Clients;
 using QuantConnect;
 using QuantConnect.Brokerages;
 using QuantConnect.Configuration;
 using QuantConnect.Interfaces;
 using QuantConnect.Packets;
 using QuantConnect.Securities;
+using QuantConnect.Util;
+using RestSharp;
+using SilverQuant.Lean.Brokerages.Futures.Hyperliquid;
 using SilverQuant.Lean.Brokerages.Futures.Implementations;
 using SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageModels;
 using System;
@@ -93,14 +97,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
             };
 
             // Unsere Brokerage-Instanz erstellen und zurückgeben
-            return new SharedFuturesBrokerage(
-                "Aster",
-                asterRestClient.FuturesApi.SharedClient,
-                asterRestClient.FuturesApi.SharedClient,
-                asterSocketClient.FuturesApi.SharedClient,
-                asterSocketClient.FuturesApi.SharedClient,
-                getHoldingsFunc
-            );
+            var brokerage = new AsterFuturesBrokerage(asterRestClient, asterSocketClient, getHoldingsFunc);
+
+            // Register with MEF Composer so Lean reuses this instance when
+            // resolving IDataQueueHandler instead of trying to construct a new one
+            Composer.Instance.AddPart<IDataQueueHandler>(brokerage);
+
+            return brokerage;
         }
 
         public override void Dispose()

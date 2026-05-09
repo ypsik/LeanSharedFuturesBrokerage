@@ -12,6 +12,10 @@ using QuantConnect.Packets;
 using QuantConnect.Securities;
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 
 using CxCancelOrderRequest = CryptoExchange.Net.SharedApis.CancelOrderRequest;
 // Explicit alias resolves ambiguity between QuantConnect.Data.HistoryRequest
@@ -24,16 +28,14 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
     /// Exchange-agnostic base brokerage for perpetual futures via CryptoExchange.Net SharedApis.
     ///
     /// Provides:
-    ///   - Order execution  (PlaceOrder / CancelOrder / reconcile loop)
-    ///   - Live price ticks (IDataQueueHandler — ticker socket → _ticks)
-    ///   - Funding history  (GetHistory for warmup via IFundingRateRestClient)
+    ///  - Order execution  (PlaceOrder / CancelOrder / reconcile loop)
+    ///  - Live price ticks (IDataQueueHandler — ticker socket → _ticks)
+    ///  - Funding & Kline history (GetHistory for warmup via RestClients)
     ///
     /// Derived classes must override:
-    ///   - NormalizeSymbol()      exchange symbol → LEAN ticker
-    ///   - GetSharedSymbol()      LEAN symbol     → exchange SharedSymbol
-    ///   - GetHistory()           warmup bars (TradeBar) + delegates MarginInterestRate to base
-    ///   - FundingRateRestClient  provides IFundingRateRestClient (or null to disable)
-    ///   - Subscribe()            override for exchange-specific live data types
+    ///  - NormalizeSymbol()      exchange symbol → LEAN ticker
+    ///  - GetSharedSymbol()      LEAN symbol      → exchange SharedSymbol
+    ///  - Subscribe()            override for exchange-specific live data types
     /// </summary>
     public class SharedFuturesBrokerage : Brokerage, IDataQueueHandler
     {
@@ -41,6 +43,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         private readonly IBalanceRestClient _balanceClient;
         protected readonly ITickerSocketClient _tickerSocket;
         private readonly IFuturesOrderSocketClient _orderSocket;
+        private readonly IFundingRateRestClient _fundingRateClient;
+        private readonly IKlineRestClient _klineClient;
         private readonly Func<List<Holding>> _getHoldingsFunc;
 
         private readonly ConcurrentDictionary<string, Order> _orderCache = new();
@@ -75,6 +79,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             IBalanceRestClient balanceClient,
             ITickerSocketClient tickerSocket,
             IFuturesOrderSocketClient orderSocket,
+            IFundingRateRestClient fundingRateClient,
+            IKlineRestClient klineClient,
             Func<List<Holding>> getHoldingsFunc)
             : base(exchangeName)
         {
@@ -82,16 +88,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             _balanceClient = balanceClient;
             _tickerSocket = tickerSocket;
             _orderSocket = orderSocket;
+            _fundingRateClient = fundingRateClient;
+            _klineClient = klineClient;
             _getHoldingsFunc = getHoldingsFunc;
         }
-
-        // ── Funding rate client (override in derived class) ──────────────
-
-        /// <summary>
-        /// Return the exchange's IFundingRateRestClient to enable funding rate
-        /// history for warmup. Return null to disable.
-        /// </summary>
-        protected virtual IFundingRateRestClient FundingRateRestClient => null;
 
         #region Sync
 
@@ -347,40 +347,97 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         #region History
 
         /// <summary>
-        /// Handles MarginInterestRate history for warmup.
-        /// Derived classes override for TradeBar and call base for MarginInterestRate.
+        /// Handles MarginInterestRate and TradeBar history for warmup.
         /// </summary>
         public override IEnumerable<BaseData> GetHistory(LeanHistoryRequest request)
         {
-            if (request.DataType != typeof(MarginInterestRate))
-                yield break;
-
-            var client = FundingRateRestClient;
-            if (client == null)
+            if (request.DataType == typeof(MarginInterestRate))
             {
-                Log.Trace($"{Name} GetHistory: FundingRateRestClient not configured — skipping");
-                yield break;
-            }
-
-            var res = RunSync(() =>
-                client.GetFundingRateHistoryAsync(
-                    new GetFundingRateHistoryRequest(GetSharedSymbol(request.Symbol))
-                    {
-                        StartTime = request.StartTimeUtc,
-                        EndTime = request.EndTimeUtc
-                    }));
-
-            if (!res.Success || res.Data == null)
-                yield break;
-
-            foreach (var rate in res.Data.OrderBy(r => r.Timestamp))
-            {
-                yield return new MarginInterestRate
+                if (_fundingRateClient == null)
                 {
-                    Symbol = request.Symbol,
-                    Time = rate.Timestamp,
-                    InterestRate = rate.FundingRate
+                    Log.Trace($"{Name} GetHistory: FundingRateRestClient not configured — skipping");
+                    yield break;
+                }
+
+                var res = RunSync(() =>
+                    _fundingRateClient.GetFundingRateHistoryAsync(
+                        new GetFundingRateHistoryRequest(GetSharedSymbol(request.Symbol))
+                        {
+                            StartTime = request.StartTimeUtc,
+                            EndTime = request.EndTimeUtc
+                        }));
+
+                if (!res.Success || res.Data == null)
+                    yield break;
+
+                foreach (var rate in res.Data.OrderBy(r => r.Timestamp))
+                {
+                    yield return new MarginInterestRate
+                    {
+                        Symbol = request.Symbol,
+                        Time = rate.Timestamp,
+                        InterestRate = rate.FundingRate
+                    };
+                }
+            }
+            else
+            {
+                if (_klineClient == null)
+                {
+                    Log.Trace($"{Name} GetHistory: KlineRestClient not configured — skipping");
+                    yield break;
+                }
+
+                var shared = GetSharedSymbol(request.Symbol);
+
+                var interval = request.Resolution switch
+                {
+                    Resolution.Minute => (SharedKlineInterval?)SharedKlineInterval.OneMinute,
+                    Resolution.Hour => SharedKlineInterval.OneHour,
+                    Resolution.Daily => SharedKlineInterval.OneDay,
+                    _ => null
                 };
+
+                if (interval == null) yield break;
+
+                var barSize = request.Resolution.ToTimeSpan();
+                var batchEnd = request.EndTimeUtc;
+                var current = request.StartTimeUtc;
+
+                var klineRequest = new GetKlinesRequest(shared, interval.Value)
+                {
+                    StartTime = current,
+                    EndTime = batchEnd
+                };
+
+                PageRequest? nextPage = null;
+
+                do
+                {
+                    var res = RunSync(() =>
+                        _klineClient.GetKlinesAsync(klineRequest, nextPage));
+
+                    if (!res.Success || res.Data == null || !res.Data.Any())
+                        yield break;
+
+                    foreach (var bar in res.Data.OrderBy(b => b.OpenTime))
+                    {
+                        yield return new TradeBar
+                        {
+                            Symbol = request.Symbol,
+                            Time = bar.OpenTime,
+                            Open = bar.OpenPrice,
+                            High = bar.HighPrice,
+                            Low = bar.LowPrice,
+                            Close = bar.ClosePrice,
+                            Volume = bar.Volume,
+                            Period = barSize
+                        };
+                    }
+
+                    nextPage = res.NextPageRequest;
+                }
+                while (nextPage != null);
             }
         }
 
@@ -394,8 +451,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         /// (e.g. MarginInterestRate via exchange-specific WebSocket).
         /// </summary>
         public virtual IEnumerator<BaseData> Subscribe(
-     SubscriptionDataConfig config,
-     EventHandler handler)
+            SubscriptionDataConfig config,
+            EventHandler handler)
         {
             var symbol = config.Symbol;
             var shared = GetSharedSymbol(symbol);
@@ -405,10 +462,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     new SubscribeTickerRequest(shared),
                     update =>
                     {
-                        // HIER wird 'price' definiert:
                         var price = update.Data.LastPrice;
 
-                        // Sicherheitscheck: Wenn kein Preis da ist oder er <= 0, abbrechen
                         if (price == null || price <= 0m) return;
 
                         if (_ticks.Count > MaxQueueSize)
@@ -416,10 +471,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                             _ticks.TryDequeue(out _);
                         }
 
-
                         var time = update.DataTimeLocal ?? DateTime.UtcNow;
 
-                        // Hier nutzen wir jetzt 'price.Value', da 'price' ein nullable decimal (decimal?) ist
                         BaseData data = config.Type switch
                         {
                             Type t when t == typeof(TradeBar) => CreateTradeBar(symbol, price.Value, time, config),
@@ -442,7 +495,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             if (_subscriptionMap.TryRemove(config.Symbol, out var sub))
                 RunSync(() => sub.CloseAsync());
         }
-
 
         public IEnumerable<BaseData> GetNextTicks()
         {

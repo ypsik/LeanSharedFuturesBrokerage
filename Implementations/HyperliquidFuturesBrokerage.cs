@@ -39,13 +39,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Hyperliquid
                 restClient.FuturesApi.SharedClient,
                 socketClient.FuturesApi.SharedClient,
                 socketClient.FuturesApi.SharedClient,
+                restClient.FuturesApi.SharedClient,
+                restClient.FuturesApi.SharedClient,
                 getHoldingsFunc)
         {
             _restClient = restClient;
             _socketClient = socketClient;
         }
-
-        protected override IFundingRateRestClient FundingRateRestClient => _restClient.FuturesApi.SharedClient;
 
         protected override string NormalizeSymbol(string rawSymbol)
             => rawSymbol.EndsWith("USDC", StringComparison.OrdinalIgnoreCase)
@@ -96,68 +96,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Hyperliquid
             }
 
             return base.Subscribe(config, handler);
-        }
-
-        public override IEnumerable<BaseData> GetHistory(LeanHistoryRequest request)
-        {
-            if (request.DataType == typeof(MarginInterestRate)) return base.GetHistory(request);
-            return GetKlineHistory(request);
-        }
-
-        private IEnumerable<BaseData> GetKlineHistory(LeanHistoryRequest request)
-        {
-            var ticker = request.Symbol.Value.ToUpperInvariant();
-            var coin = ticker.EndsWith("USDC") ? ticker[..^4] : ticker;
-            var shared = new SharedSymbol(TradingMode.PerpetualLinear, coin, "USDC");
-
-            var interval = request.Resolution switch
-            {
-                Resolution.Minute => (SharedKlineInterval?)SharedKlineInterval.OneMinute,
-                Resolution.Hour => SharedKlineInterval.OneHour,
-                Resolution.Daily => SharedKlineInterval.OneDay,
-                _ => null
-            };
-
-            if (interval == null) yield break;
-
-            var barSize = request.Resolution.ToTimeSpan();
-            var batchEnd = request.EndTimeUtc;
-            var current = request.StartTimeUtc;
-
-            var klineRequest = new GetKlinesRequest(shared, interval.Value)
-            {
-                StartTime = current,
-                EndTime = batchEnd
-            };
-
-            PageRequest? nextPage = null;
-
-            do
-            {
-                var res = RunSync(() =>
-                    _restClient.FuturesApi.SharedClient.GetKlinesAsync(klineRequest, nextPage));
-
-                if (!res.Success || res.Data == null || !res.Data.Any())
-                    yield break;
-
-                foreach (var bar in res.Data.OrderBy(b => b.OpenTime))
-                {
-                    yield return new TradeBar
-                    {
-                        Symbol = request.Symbol,
-                        Time = bar.OpenTime,
-                        Open = bar.OpenPrice,
-                        High = bar.HighPrice,
-                        Low = bar.LowPrice,
-                        Close = bar.ClosePrice,
-                        Volume = bar.Volume,
-                        Period = barSize
-                    };
-                }
-
-                nextPage = res.NextPageRequest;
-            }
-            while (nextPage != null);
         }
     }
 }

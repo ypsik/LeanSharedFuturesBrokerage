@@ -33,6 +33,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 restClient.FuturesApi.SharedClient,    // IBalanceRestClient
                 socketClient.FuturesApi.SharedClient,  // ITickerSocketClient
                 socketClient.FuturesApi.SharedClient,  // IFuturesOrderSocketClient
+                restClient.FuturesApi.SharedClient,
+                restClient.FuturesApi.SharedClient,
                 getHoldingsFunc)
         {
         }
