@@ -25,7 +25,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Hyperliquid
         private CryptoExchange.Net.Objects.Sockets.UpdateSubscription _fundingSubscription;
         private readonly object _fundingSubLock = new();
 
-        public HyperliquidFuturesBrokerage() : base("Hyperliquid")
+        public HyperliquidFuturesBrokerage() : base("hyperliquid")
         {
         }
 
@@ -34,7 +34,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Hyperliquid
             HyperLiquidSocketClient socketClient,
             Func<List<Holding>> getHoldingsFunc)
             : base(
-                "Hyperliquid",
+                "hyperliquid",
                 restClient.FuturesApi.SharedClient,
                 restClient.FuturesApi.SharedClient,
                 socketClient.FuturesApi.SharedClient,
@@ -77,7 +77,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Hyperliquid
                                         if (_ticks.Count >= MaxQueueSize) break;
 
                                         var leanTicker = NormalizeSymbol(funding.Symbol);
-                                        var sym = Symbol.Create(leanTicker, SecurityType.CryptoFuture, "HyperLiquid");
+                                        var sym = Symbol.Create(leanTicker, SecurityType.CryptoFuture, "hyperliquid");
 
                                         _ticks.Enqueue(new MarginInterestRate
                                         {

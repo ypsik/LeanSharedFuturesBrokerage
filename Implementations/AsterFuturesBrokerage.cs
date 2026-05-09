@@ -19,7 +19,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
     /// </summary>
     public class AsterFuturesBrokerage : SharedFuturesBrokerage
     {
-        public AsterFuturesBrokerage() : base("Aster")
+        public AsterFuturesBrokerage() : base("aster")
         {
         }
 
@@ -28,7 +28,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             AsterSocketClient socketClient,
             Func<List<Holding>> getHoldingsFunc)
             : base(
-                "Aster",
+                "aster",
                 restClient.FuturesApi.SharedClient,    // IFuturesOrderRestClient
                 restClient.FuturesApi.SharedClient,    // IBalanceRestClient
                 socketClient.FuturesApi.SharedClient,  // ITickerSocketClient
