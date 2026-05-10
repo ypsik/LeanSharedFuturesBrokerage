@@ -76,32 +76,21 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
             var spdb = SymbolPropertiesDatabase.FromDataFolder();
 
             var result = restClient.FuturesApi.ExchangeData
-                .GetExchangeInfoAndTickersAsync()
-                .GetAwaiter().GetResult();
+                 .GetExchangeInfoAsync()
+                 .GetAwaiter().GetResult();
 
             if (!result.Success)
                 throw new Exception($"Failed to load Hyperliquid assets: {result.Error}");
 
-            var symbols = result.Data.ExchangeInfo.Symbols;
-            var tickers = result.Data.Tickers;
+            const int MAX_DECIMALS_PERP = 6;
 
-            for (int i = 0; i < symbols.Length; i++)
+            foreach (var symbol in result.Data.Where(s => !s.IsDelisted))
             {
-                var symbol = symbols[i];
-                if (symbol.IsDelisted) continue;
-
-                var ctx = i < tickers.Length ? tickers[i] : null;
                 var ticker = symbol.Name + "USDC";
                 var lotSize = (decimal)Math.Pow(10, -symbol.QuantityDecimals);
 
-                var price = ctx?.MarkPrice ?? ctx?.OraclePrice ?? 0m;
-                var tickSize = 0.001m;
-
-                if (price > 0)
-                {
-                    var magnitude = (int)Math.Floor(Math.Log10((double)price));
-                    tickSize = (decimal)Math.Pow(10, magnitude - 4);
-                }
+                var maxPriceDecimals = MAX_DECIMALS_PERP - symbol.QuantityDecimals;
+                var tickSize = (decimal)Math.Pow(10, -maxPriceDecimals);
 
                 var symbolProperties = new SymbolProperties(
                     description: $"Hyperliquid {symbol.Name} Perpetual",
@@ -113,7 +102,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
                 );
 
                 spdb.SetEntry("hyperliquid", ticker, SecurityType.CryptoFuture, symbolProperties);
-            } 
+            }
+        
             var brokerage = new HyperliquidFuturesBrokerage(restClient, socketClient, aggregator, getHoldingsFunc);
 
             // Register with MEF Composer so Lean reuses this instance when
