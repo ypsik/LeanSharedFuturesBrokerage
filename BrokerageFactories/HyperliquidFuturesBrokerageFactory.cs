@@ -92,13 +92,17 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
             foreach (var symbol in result.Data.Where(s => !s.IsDelisted))
             {
                 var ticker = symbol.Name + "USDC";
+
                 var lotSize = (decimal)Math.Pow(10, -symbol.QuantityDecimals);
 
-                // Der "Magische Fix" für Hyperliquid:
-                // pxDecimals = 5 - szDecimals. 
-                // Falls szDecimals > 5 (selten), nehmen wir 0 Nachkommastellen für den Preis.
-                var priceDecimals = Math.Max(0, HL_SUM_DECIMALS - symbol.QuantityDecimals);
-                var tickSize = (decimal)Math.Pow(10, -priceDecimals);
+                var priceDecimals = HL_SUM_DECIMALS - symbol.QuantityDecimals;
+
+                decimal tickSize;
+
+                if (priceDecimals >= 0)
+                    tickSize = (decimal)Math.Pow(10, -priceDecimals);
+                else
+                    tickSize = 1m;
 
                 var symbolProperties = new SymbolProperties(
                     description: $"Hyperliquid {symbol.Name} Perpetual",
