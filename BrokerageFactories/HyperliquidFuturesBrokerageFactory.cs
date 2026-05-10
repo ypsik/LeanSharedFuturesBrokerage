@@ -7,7 +7,7 @@ using QuantConnect.Interfaces;
 using QuantConnect.Packets;
 using QuantConnect.Securities;
 using QuantConnect.Util;
-using SilverQuant.Lean.Brokerages.Futures.Hyperliquid;
+using QuantConnect.Data; // Wichtig für IDataAggregator
 using SilverQuant.Lean.Brokerages.Futures.Implementations;
 using SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageModels;
 using System;
@@ -17,7 +17,6 @@ using System.Linq;
 
 namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
 {
-
     public class HyperliquidFuturesBrokerageFactory : BrokerageFactory
     {
         public HyperliquidFuturesBrokerageFactory() : base(typeof(HyperliquidFuturesBrokerage))
@@ -64,6 +63,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
                 options.ApiCredentials = credentials;
             });
 
+            // --- Aggregator & Holdings Setup ---
+            var aggregator = Composer.Instance.GetPart<IDataAggregator>();
+
             Func<List<Holding>> getHoldingsFunc = () =>
                 algorithm.Securities.Values
                     .Where(x => x.Holdings.Quantity != 0)
@@ -82,8 +84,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
 
             foreach (var symbol in metaResult.Data.Where(s => !s.IsDelisted))
             {
-                var ticker = symbol.Name + "USDC"; // Main DEX = always USDC
-                var lotSize = Math.Pow(10, -symbol.QuantityDecimals);  // QuantityDecimals nutzen!
+                var ticker = symbol.Name + "USDC";
+                var lotSize = Math.Pow(10, -symbol.QuantityDecimals);
 
                 var symbolProperties = new SymbolProperties(
                     description: $"Hyperliquid {symbol.Name} Perpetual",
@@ -91,12 +93,14 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
                     contractMultiplier: 1m,
                     minimumPriceVariation: 0.0001m,
                     lotSize: (decimal)lotSize,
-                    marketTicker: symbol.Name  // HL erwartet nur "BTC", nicht "BTCUSDC"
+                    marketTicker: symbol.Name
                 );
 
                 spdb.SetEntry("hyperliquid", ticker, SecurityType.CryptoFuture, symbolProperties);
             }
-            var brokerage = new HyperliquidFuturesBrokerage(restClient, socketClient, getHoldingsFunc);
+
+            // --- Fix: Konstruktor mit allen 4 Parametern aufrufen ---
+            var brokerage = new HyperliquidFuturesBrokerage(restClient, socketClient, aggregator, getHoldingsFunc);
 
             // Register with MEF Composer so Lean reuses this instance when
             // resolving IDataQueueHandler instead of trying to construct a new one
