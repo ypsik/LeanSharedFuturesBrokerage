@@ -26,7 +26,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Hyperliquid
         // Trackt offene Socket Subscriptions
         private readonly ConcurrentDictionary<Symbol, UpdateSubscription> _klineSubscriptions = new();
 
-        public HyperliquidFuturesBrokerage() : base("hyperliquid", null, null, null, null, null)
+        public HyperliquidFuturesBrokerage() : base("hyperliquid", null, null, null, null, null, null)
         {
         }
 
@@ -39,8 +39,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Hyperliquid
                 restClient.FuturesApi.SharedClient,    // 2. IFuturesOrderRestClient
                 restClient.FuturesApi.SharedClient,    // 3. IBalanceRestClient
                 socketClient.FuturesApi.SharedClient,  // 4. IFuturesOrderSocketClient
-                restClient.FuturesApi.SharedClient,    // 5. IKlineRestClient (Neu hinzugefügt)
-                getHoldingsFunc)                       // 6. getHoldingsFunc
+                restClient.FuturesApi.SharedClient,    // 5. IFundingRateRestClient (Neu hinzugefügt)
+                restClient.FuturesApi.SharedClient,    // 6. IKlineRestClient (Neu hinzugefügt)
+                getHoldingsFunc)                       // 7. getHoldingsFunc
         {
             _restClient = restClient;
             _socketClient = socketClient;

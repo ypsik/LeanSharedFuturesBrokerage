@@ -30,7 +30,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         private readonly ConcurrentDictionary<Symbol, UpdateSubscription> _dataSubscriptions = new();
 
         // Parameterloser Konstruktor für die BrokerageFactory
-        public AsterFuturesBrokerage() : base("aster", null, null, null, null, null)
+        public AsterFuturesBrokerage() : base("aster", null, null, null, null, null, null)
         {
         }
 
@@ -43,8 +43,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 restClient.FuturesApi.SharedClient,    // 2. IFuturesOrderRestClient
                 restClient.FuturesApi.SharedClient,    // 3. IBalanceRestClient
                 socketClient.FuturesApi.SharedClient,  // 4. IFuturesOrderSocketClient
-                restClient.FuturesApi.SharedClient,    // 5. IKlineRestClient (Neu hinzugefügt)
-                getHoldingsFunc)                       // 6. getHoldingsFunc
+                restClient.FuturesApi.SharedClient,    // 5. IFundingRateRestClient (Neu hinzugefügt)
+                restClient.FuturesApi.SharedClient,    // 6. IKlineRestClient (Neu hinzugefügt)
+                getHoldingsFunc)                       // 7. getHoldingsFunc
         {
             _restClient = restClient;
             _socketClient = socketClient;

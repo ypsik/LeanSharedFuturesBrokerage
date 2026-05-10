@@ -30,6 +30,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         private readonly IBalanceRestClient _balanceClient;
         private readonly IFuturesOrderSocketClient _orderSocket;
         private readonly IKlineRestClient _klineClient;
+        private readonly IFundingRateRestClient _fundingRateClient;
         private readonly Func<List<Holding>> _getHoldingsFunc;
 
         // --- CACHES ---
@@ -53,7 +54,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             IFuturesOrderRestClient orderClient,
             IBalanceRestClient balanceClient,
             IFuturesOrderSocketClient orderSocket,
-            IKlineRestClient klineClient,
+            IFundingRateRestClient fundingRateClient, // 🔥 Neu
+            IKlineRestClient klineClient,             
             Func<List<Holding>> getHoldingsFunc)
             : base(exchangeName)
         {
@@ -72,53 +74,102 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         #region History Implementation
 
+        #region History Implementation
+
         public override IEnumerable<BaseData> GetHistory(LeanHistoryRequest request)
         {
-            if (request.Symbol.Value.Contains("UNMAPPED") || request.Symbol.IsCanonical())
+            if (request.DataType == typeof(MarginInterestRate))
             {
-                return null;
+                if (_fundingRateClient == null)
+                {
+                    Log.Trace($"{Name} GetHistory: FundingRateRestClient not configured — skipping");
+                    yield break;
+                }
+
+                var res = RunSync(() =>
+                    _fundingRateClient.GetFundingRateHistoryAsync(
+                        new GetFundingRateHistoryRequest(GetSharedSymbol(request.Symbol))
+                        {
+                            StartTime = request.StartTimeUtc,
+                            EndTime = request.EndTimeUtc
+                        }));
+
+                if (!res.Success || res.Data == null)
+                    yield break;
+
+                foreach (var rate in res.Data.OrderBy(r => r.Timestamp))
+                {
+                    yield return new MarginInterestRate
+                    {
+                        Symbol = request.Symbol,
+                        Time = rate.Timestamp,
+                        InterestRate = rate.FundingRate
+                    };
+                }
             }
-
-            if (request.TickType != TickType.Trade)
+            else
             {
-                return null;
+                if (_klineClient == null)
+                {
+                    Log.Trace($"{Name} GetHistory: KlineRestClient not configured — skipping");
+                    yield break;
+                }
+
+                var shared = GetSharedSymbol(request.Symbol);
+
+                var interval = request.Resolution switch
+                {
+                    Resolution.Minute => (SharedKlineInterval?)SharedKlineInterval.OneMinute,
+                    Resolution.Hour => SharedKlineInterval.OneHour,
+                    Resolution.Daily => SharedKlineInterval.OneDay,
+                    _ => null
+                };
+
+                if (interval == null) yield break;
+
+                var barSize = request.Resolution.ToTimeSpan();
+                var batchEnd = request.EndTimeUtc;
+                var current = request.StartTimeUtc;
+
+                var klineRequest = new GetKlinesRequest(shared, interval.Value)
+                {
+                    StartTime = current,
+                    EndTime = batchEnd
+                };
+
+                PageRequest? nextPage = null;
+
+                do
+                {
+                    var res = RunSync(() =>
+                        _klineClient.GetKlinesAsync(klineRequest, nextPage));
+
+                    if (!res.Success || res.Data == null || !res.Data.Any())
+                        yield break;
+
+                    foreach (var bar in res.Data.OrderBy(b => b.OpenTime))
+                    {
+                        yield return new TradeBar
+                        {
+                            Symbol = request.Symbol,
+                            Time = bar.OpenTime,
+                            Open = bar.OpenPrice,
+                            High = bar.HighPrice,
+                            Low = bar.LowPrice,
+                            Close = bar.ClosePrice,
+                            Volume = bar.Volume,
+                            Period = barSize
+                        };
+                    }
+
+                    nextPage = res.NextPageRequest;
+                }
+                while (nextPage != null);
             }
-
-            var sharedSymbol = GetSharedSymbol(request.Symbol);
-            var interval = request.Resolution switch
-            {
-                Resolution.Minute => SharedKlineInterval.OneMinute,
-                Resolution.Hour => SharedKlineInterval.OneHour,
-                Resolution.Daily => SharedKlineInterval.OneDay,
-                _ => SharedKlineInterval.OneMinute
-            };
-
-            var res = RunSync(() => _klineClient.GetKlinesAsync(new GetKlinesRequest(sharedSymbol, interval)
-            {
-                StartTime = request.StartTimeUtc,
-                EndTime = request.EndTimeUtc
-            }));
-
-            if (!res.Success || res.Data == null)
-            {
-                OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "History",
-                    $"History fetch failed for {request.Symbol.Value}: {res.Error}"));
-                return null;
-            }
-
-            return res.Data.Select(k => new TradeBar
-            {
-                Symbol = request.Symbol,
-                Time = k.OpenTime.ToUniversalTime(),
-                Open = k.OpenPrice,
-                High = k.HighPrice,
-                Low = k.LowPrice,
-                Close = k.ClosePrice,
-                Volume = k.Volume,
-                Period = request.Resolution.ToTimeSpan(),
-                DataType = MarketDataType.TradeBar
-            });
         }
+
+        #endregion
+
 
         #endregion
 
