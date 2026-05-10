@@ -124,12 +124,14 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 if (delta == 0 && status == OrderStatus.Submitted) continue;
 
                 _filledQtyCache[o.OrderId] = totalFilled;
-                OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero)
+                decimal exchangeFee = o.Fee ?? 0m;
+                string feeCurrency = o.FeeAsset ?? "USDC";
+                OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, new OrderFee(new CashAmount(exchangeFee, feeCurrency)))
                 {
                     Status = status,
                     FillPrice = o.AveragePrice ?? o.OrderPrice ?? 0m,
                     FillQuantity = delta * (order.Quantity > 0 ? 1 : -1),
-                    Message = "socket"
+                    Message = string.Empty
                 });
 
                 if (status is OrderStatus.Filled or OrderStatus.Canceled or OrderStatus.Invalid)
