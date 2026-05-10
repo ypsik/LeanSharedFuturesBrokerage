@@ -7,6 +7,7 @@ using QuantConnect.Data;
 using QuantConnect.Interfaces;
 using QuantConnect.Packets;
 using QuantConnect.Util;
+using QuantConnect.Logging;
 using System;
 using System.Collections.Generic;
 using System.Threading;
@@ -46,10 +47,20 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             IFuturesOrderSocketClient orderSocket,
             IFundingRateRestClient fundingRateClient,
             IKlineRestClient klineClient,
-            IDataAggregator aggregator,
+            IDataAggregator aggregator, // <-- Der kommt jetzt an
             Func<List<Holding>> getHoldingsFunc = null)
         {
-            if (_isInitialized) return;
+            // SICHERHEITSGURT: Wenn wir schon initialisiert sind, der Aggregator aber null war 
+            // (z.B. weil die Factory zu früh dran war), dann updaten wir ihn hier durch den SetJob-Aufruf!
+            if (_isInitialized)
+            {
+                if (_aggregator == null && aggregator != null)
+                {
+                    _aggregator = aggregator;
+                    Log.Trace($"{Name}: Aggregator loaded on SetJob.");
+                }
+                return;
+            }
 
             _orderClient = orderClient;
             _balanceClient = balanceClient;
