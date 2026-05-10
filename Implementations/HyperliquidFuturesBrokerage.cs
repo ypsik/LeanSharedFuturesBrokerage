@@ -233,7 +233,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             if (!res.Success)
                 return new ExchangeWebResult<SharedId>(Name, res.Error);
 
-            return new ExchangeWebResult<SharedId>(Name, null);
+            return new ExchangeWebResult<SharedId>(
+                    Name,
+                    TradingMode.PerpetualLinear,
+                    res.As(new SharedId(res.Data.OrderId.ToString()))
+                );
         }
 
         protected override async Task<ExchangeWebResult<SharedId>> ExecuteCancelOrderAsync(CxCancelOrderRequest request)
@@ -246,7 +250,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             if (!res.Success)
                 return new ExchangeWebResult<SharedId>(Name, res.Error);
 
-            return new ExchangeWebResult<SharedId>(Name, null);
+            return new ExchangeWebResult<SharedId>(
+                    Name,
+                    TradingMode.PerpetualLinear,
+                    res.As(new SharedId(request.OrderId.ToString()))
+                );
         }
     }
 }
