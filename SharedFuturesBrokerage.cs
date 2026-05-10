@@ -94,8 +94,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 if (_isConnected) return;
                 if (_balanceClient == null || _orderSocket == null) throw new InvalidOperationException("Clients not configured");
 
-                InitialPositionAndCashSync();
-
                 var sub = RunSync(() => _orderSocket.SubscribeToFuturesOrderUpdatesAsync(new SubscribeFuturesOrderRequest(), HandleSocket));
                 if (sub.Success)
                 {
@@ -125,31 +123,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 _reconcileTask = Task.Run(() => ReconcileLoop(_reconcileCts.Token));
             }
         }
-
-        private void InitialPositionAndCashSync()
-        {
-            try
-            {
-                // 1. Cash laden (hast du bereits implementiert)
-                var auth = RunSync(() => _balanceClient.GetBalancesAsync(new GetBalancesRequest()));
-                if (!auth.Success) throw new Exception("Authentication failed");
-
-                // 2. Positionen laden
-                var holdings = GetAccountHoldings();
-                foreach (var holding in holdings)
-                {
-                    if (holding.Quantity != 0)
-                    {
-                        Log.Trace($"{Name}.InitialSync: Vorhandene Position gefunden: {holding.Symbol} {holding.Quantity}");
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Log.Error($"{Name}.InitialPositionAndCashSync(): {ex.Message}");
-            }
-        }
-
+        
         public virtual void SetJob(LiveNodePacket job)
         {
             _job = job;
