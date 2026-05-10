@@ -21,6 +21,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         protected IFuturesOrderRestClient _orderClient;
         protected IBalanceRestClient _balanceClient;
         protected IFuturesOrderSocketClient _orderSocket;
+        protected IUserTradeSocketClient _tradeSocket;
         protected IKlineRestClient _klineClient;
         protected IFundingRateRestClient _fundingRateClient;
         protected Func<List<Holding>> _getHoldingsFunc;
@@ -45,6 +46,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             IFuturesOrderRestClient orderClient,
             IBalanceRestClient balanceClient,
             IFuturesOrderSocketClient orderSocket,
+            IUserTradeSocketClient tradeSocket,
             IFundingRateRestClient fundingRateClient,
             IKlineRestClient klineClient,
             IDataAggregator aggregator, // <-- Der kommt jetzt an
@@ -65,6 +67,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             _orderClient = orderClient;
             _balanceClient = balanceClient;
             _orderSocket = orderSocket;
+            _tradeSocket = tradeSocket;
             _fundingRateClient = fundingRateClient;
             _klineClient = klineClient;
             _aggregator = aggregator;
@@ -89,10 +92,29 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 if (_balanceClient == null || _orderSocket == null) throw new InvalidOperationException("Clients not configured");
 
                 var auth = RunSync(() => _balanceClient.GetBalancesAsync(new GetBalancesRequest()));
-                if (!auth.Success) throw new Exception("Authentication failed");
+                    if (!auth.Success) throw new Exception("Authentication failed");
 
                 var sub = RunSync(() => _orderSocket.SubscribeToFuturesOrderUpdatesAsync(new SubscribeFuturesOrderRequest(), HandleSocket));
-                if (!sub.Success) throw new Exception("Order socket failed");
+                if (sub.Success)
+                {
+                    var subscription = sub.Data;
+
+                    subscription.ConnectionLost += () =>
+                    {
+                        _isConnected = false;
+                        OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "Disconnect", "Order stream lost."));
+                    };
+
+                    subscription.ConnectionRestored += (duration) =>
+                    {
+                        _isConnected = true;
+                        Log.Trace($"{Name}: Connection restored after {duration}.");
+                        OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Information, "Reconnect", $"Order stream restored. Syncing..."));
+                        //Task.Run(async () => await ForceReconcile());
+                    };
+                }
+                else
+                    throw new Exception("Order socket failed");
 
 
                 _orderSocketSub = sub.Data;
@@ -100,45 +122,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 _reconcileCts = new CancellationTokenSource();
                 _reconcileTask = Task.Run(() => ReconcileLoop(_reconcileCts.Token));
             }
-        }
-        private async Task SubscribeToOrderUpdates()
-        {
-            // 🔥 FIX: Wir müssen ein 'SubscribeFuturesOrderRequest' Objekt vorne dran hängen
-            var result = await _orderSocket.SubscribeToFuturesOrderUpdatesAsync(new SubscribeFuturesOrderRequest(), update =>
-            {
-                // Das ist jetzt der zweite Parameter (der Handler)
-                HandleSocket(update);
-            });
-
-            if (result.Success)
-            {
-                var subscription = result.Data;
-
-                subscription.ConnectionLost += () =>
-                {
-                    _isConnected = false;
-                    OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "Disconnect", "Order stream lost."));
-                };
-
-                subscription.ConnectionRestored += (duration) =>
-                {
-                    _isConnected = true;
-                    OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Information, "Reconnect", $"Order stream restored. Syncing..."));
-                    //Task.Run(async () => await ForceReconcile());
-                };
-
-                // ... restliche Events wie vorhin ...
-            }
-        }
-
-        protected void HandleConnectionRestored(TimeSpan duration)
-        {
-            _isConnected = true;
-            Log.Trace($"{Name}: Connection restored after {duration}.");
-            OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Information, "Reconnect", "Connection restored."));
-
-            // Sofortiger Sync der Orders, genau wie Bybit es nach einem Drop macht
-//            Task.Run(() => ForceReconcile());
         }
 
         public virtual void SetJob(LiveNodePacket job)

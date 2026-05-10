@@ -170,16 +170,59 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 foreach (var kv in _orderCache.ToArray())
                 {
                     if (map.ContainsKey(kv.Key)) continue;
-                    OnOrderEvent(new OrderEvent(kv.Value, DateTime.UtcNow, OrderFee.Zero) { Status = OrderStatus.Canceled, Message = "reconcile" });
+
+                    var symbol = kv.Value.Symbol;
+
+                    var symbolProperties = SymbolPropertiesDatabase.FromDataFolder()
+                        .GetSymbolProperties(symbol.ID.Market, symbol, symbol.SecurityType, "USD");
+
+                    string baseAsset = kv.Value.Symbol.ID.Symbol;   // z.B. "TRX"
+                    string quoteAsset = symbolProperties.QuoteCurrency; // z.B. "USDC"
+
+                    var tradingMode = kv.Value.SecurityType == SecurityType.CryptoFuture || kv.Value.SecurityType == SecurityType.Future
+                        ? TradingMode.PerpetualLinear
+                        : TradingMode.Spot;
+
+                    var sharedSymbol = new SharedSymbol(tradingMode, baseAsset, quoteAsset, symbol.Value);
+
+                    // Wenn die Order nicht mehr offen ist, prüfen wir den exakten Status beim Broker (History/Details)
+                    var statusCheck = await _orderClient.GetFuturesOrderAsync(new GetOrderRequest(sharedSymbol, kv.Key)).ConfigureAwait(false);
+
+                    if (statusCheck.Success && statusCheck.Data != null)
+                    {
+                        var brokerOrder = statusCheck.Data;
+
+                        // Prüfen, ob die Order gefüllt wurde (Status enthält "Filled")
+                        if (brokerOrder.Status == SharedOrderStatus.Filled)
+                        {
+                            OnOrderEvent(new OrderEvent(kv.Value, DateTime.UtcNow, OrderFee.Zero)
+                            {
+                                Status = OrderStatus.Filled,
+                                FillPrice = brokerOrder.AveragePrice ?? 0,
+                                FillQuantity = brokerOrder.QuantityFilled?.QuantityInContracts ?? 0,
+                                OrderFee = new OrderFee(new CashAmount(brokerOrder.Fee ?? 0, brokerOrder.FeeAsset ?? "USDC")),
+                                Message = ""
+                            });
+                        }
+                        else
+                        {
+                            OnOrderEvent(new OrderEvent(kv.Value, DateTime.UtcNow, OrderFee.Zero) { Status = OrderStatus.Canceled, Message = "reconcile" });
+                        }
+                    }
+                    else
+                    {
+                        // Fallback, falls die Order-Details nicht mehr abrufbar sind
+                        OnOrderEvent(new OrderEvent(kv.Value, DateTime.UtcNow, OrderFee.Zero) { Status = OrderStatus.Canceled, Message = "reconcile-notfound" });
+                    }
+
                     _orderCache.TryRemove(kv.Key, out _);
                     _filledQtyCache.TryRemove(kv.Key, out _);
                 }
             }
         }
-
         #endregion
 
-        #region Cash / Holdings
+            #region Cash / Holdings
 
         public override List<CashAmount> GetCashBalance()
         {
