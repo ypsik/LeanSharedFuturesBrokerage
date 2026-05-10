@@ -34,7 +34,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
         {
             { "hyperliquid-address", Config.Get("hyperliquid-address") },
             { "hyperliquid-secret",  Config.Get("hyperliquid-secret")  },
-            { "hyperliquid-vaultAddress", Config.Get("hyperliquid-vault-address") },            
+            { "hyperliquid-vault-address", Config.Get("hyperliquid-vault-address") },            
         };
 
         public override IBrokerageModel GetBrokerageModel(IOrderProvider orderProvider)
@@ -55,7 +55,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
             errors = new List<string>();
             var vaultAddress = Read<string>(job.BrokerageData, "hyperliquid-vault-address", errors);
 
-            var credentials = new HyperLiquidCredentials(address, secret);
+            var credentials = new HyperLiquidCredentials(String.IsNullOrEmpty(vaultAddress) ? address : vaultAddress, secret);
 
             var restClient = new HyperLiquidRestClient(options =>
             {
