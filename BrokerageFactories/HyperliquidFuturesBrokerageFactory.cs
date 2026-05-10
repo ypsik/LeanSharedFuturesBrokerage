@@ -14,6 +14,7 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel.Composition;
 using System.Linq;
+using Aster.Net.Objects;
 
 namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
 {
@@ -32,7 +33,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
         public override Dictionary<string, string> BrokerageData => new Dictionary<string, string>
         {
             { "hyperliquid-address", Config.Get("hyperliquid-address") },
-            { "hyperliquid-secret",  Config.Get("hyperliquid-secret")  }
+            { "hyperliquid-secret",  Config.Get("hyperliquid-secret")  },
+            { "hyperliquid-vaultAddress", Config.Get("hyperliquid-vaultAddress") },            
         };
 
         public override IBrokerageModel GetBrokerageModel(IOrderProvider orderProvider)
@@ -49,6 +51,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
 
             if (errors.Any())
                 throw new ArgumentException(string.Join(Environment.NewLine, errors));
+
+            errors = new List<string>();
+            var vaultAddress = Read<string>(job.BrokerageData, "hyperliquid-vaultAddress", errors);
 
             var credentials = new HyperLiquidCredentials(address, secret);
 
@@ -103,8 +108,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
 
                 spdb.SetEntry("hyperliquid", ticker, SecurityType.CryptoFuture, symbolProperties);
             }
-        
-            var brokerage = new HyperliquidFuturesBrokerage(restClient, socketClient, aggregator, getHoldingsFunc);
+            
+            var brokerage = new HyperliquidFuturesBrokerage(restClient, socketClient, vaultAddress, aggregator, getHoldingsFunc); 
 
             // Register with MEF Composer so Lean reuses this instance when
             // resolving IDataQueueHandler instead of trying to construct a new one

@@ -1,6 +1,7 @@
 ﻿using CryptoExchange.Net.Objects.Sockets;
 using CryptoExchange.Net.SharedApis;
 using HyperLiquid.Net.Clients;
+using HyperLiquid.Net.Enums;
 using QuantConnect;
 using QuantConnect.Data;
 using QuantConnect.Data.Market;
@@ -13,12 +14,17 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 
+using CxCancelOrderRequest = CryptoExchange.Net.SharedApis.CancelOrderRequest;
+
+
 namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 {
     public class HyperliquidFuturesBrokerage : SharedFuturesBrokerage
     {
         private HyperLiquidRestClient _restClient;
         private HyperLiquidSocketClient _socketClient;
+
+        private string _vaultAdress;
 
         private UpdateSubscription _fundingSubscription;
         private readonly object _fundingLock = new();
@@ -33,10 +39,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         internal HyperliquidFuturesBrokerage(
             HyperLiquidRestClient restClient,
             HyperLiquidSocketClient socketClient,
+            string vaultAddress,
             IDataAggregator aggregator,
             Func<List<Holding>> getHoldingsFunc = null) // 🔥 Fix: Optional gemacht
             : base("hyperliquid")
         {
+            _vaultAdress = vaultAddress;
             _restClient = restClient;
             _socketClient = socketClient;
 
@@ -185,5 +193,34 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             return base.Subscribe(config, handler);
         }
         #endregion
+
+        protected override async Task<ExchangeWebResult<SharedId>> ExecutePlaceOrderAsync(PlaceFuturesOrderRequest request)
+        {
+            var res = await _restClient.FuturesApi.Trading.PlaceOrderAsync(
+                symbol: request.Symbol.BaseAsset,
+                side: request.Side == SharedOrderSide.Buy ? OrderSide.Buy : OrderSide.Sell,
+                orderType: request.OrderType == SharedOrderType.Limit ? OrderType.Limit : OrderType.Market,
+                quantity: request.Quantity?.QuantityInBaseAsset ?? 0m,
+                price: request.Price ?? 0m,
+                vaultAddress: _vaultAdress);
+
+            if (!res.Success)
+                return new ExchangeWebResult<SharedId>(Name, res.Error);
+
+            return new ExchangeWebResult<SharedId>(Name, null);
+        }
+
+        protected override async Task<ExchangeWebResult<SharedId>> ExecuteCancelOrderAsync(CxCancelOrderRequest request)
+        {
+            var res = await _restClient.FuturesApi.Trading.CancelOrderAsync(
+                symbol: request.Symbol.BaseAsset,
+                orderId: long.Parse(request.OrderId),
+                vaultAddress: _vaultAdress);
+
+            if (!res.Success)
+                return new ExchangeWebResult<SharedId>(Name, res.Error);
+
+            return new ExchangeWebResult<SharedId>(Name, null);
+        }
     }
 }

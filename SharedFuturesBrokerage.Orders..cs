@@ -1,4 +1,5 @@
-﻿using CryptoExchange.Net.Objects.Sockets;
+﻿using CryptoExchange.Net.Objects;
+using CryptoExchange.Net.Objects.Sockets;
 using CryptoExchange.Net.SharedApis;
 using QuantConnect;
 using QuantConnect.Brokerages;
@@ -60,7 +61,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 Price = (order as LimitOrder)?.LimitPrice
             };
 
-            var res = RunSync(() => _orderClient.PlaceFuturesOrderAsync(request));
+            var res = RunSync(() => ExecutePlaceOrderAsync(request));
             if (!res.Success)
             {
                 var errorMsg = res.Error?.ToString() ?? "Unknown exchange error";
@@ -81,11 +82,32 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         {
             if (!order.BrokerId.Any()) return false;
             var id = order.BrokerId.First();
-            var res = RunSync(() => _orderClient.CancelFuturesOrderAsync(new CxCancelOrderRequest(GetSharedSymbol(order.Symbol), id)));
-            return res.Success;
+
+            var res = RunSync(() => ExecuteCancelOrderAsync(new CxCancelOrderRequest(GetSharedSymbol(order.Symbol), id)));
+            if (!res.Success)
+            {
+                var errorMsg = res.Error?.ToString() ?? "Unknown exchange error";
+                Log.Error($"{Name}.CancelOrder({order.Symbol.Value}): {errorMsg}");
+                OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "CancelOrder", errorMsg));
+                return false;
+            }
+
+            return true;
         }
 
         public override bool UpdateOrder(Order order) => false;
+
+        // --- Virtual hooks for exchange-specific overrides (e.g. HL vaultAddress) ---
+
+        protected virtual Task<ExchangeWebResult<SharedId>> ExecutePlaceOrderAsync(PlaceFuturesOrderRequest request)
+            => _orderClient.PlaceFuturesOrderAsync(request);
+
+        protected virtual Task<ExchangeWebResult<SharedId>> ExecuteCancelOrderAsync(CxCancelOrderRequest request)
+            => _orderClient.CancelFuturesOrderAsync(request);
+
+        #endregion
+
+        #region Socket / Reconcile
 
         private void HandleSocket(DataEvent<SharedFuturesOrder[]> update)
         {
@@ -118,7 +140,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             }
         }
 
-
         public override void Disconnect()
         {
             _reconcileCts?.Cancel();
@@ -132,10 +153,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         {
             _isConnected = false;
             Log.Error($"{Name}: Connection lost!");
-            // Das ist der Bybit-Weg: Eine Nachricht an LEAN senden
             OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "Disconnect", "Connection to exchange lost."));
         }
-
 
         private async Task ReconcileLoop(CancellationToken ct)
         {
@@ -155,9 +174,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 }
             }
         }
+
         #endregion
 
         #region Cash / Holdings
+
         public override List<CashAmount> GetCashBalance()
         {
             var res = RunSync(() => _balanceClient.GetBalancesAsync(new GetBalancesRequest()));
@@ -167,9 +188,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         }
 
         public override List<Holding> GetAccountHoldings() => _getHoldingsFunc?.Invoke() ?? new List<Holding>();
+
         #endregion
 
         #region Order Helpers
+
         protected virtual string NormalizeSymbol(string rawSymbol) => rawSymbol;
 
         protected virtual SharedSymbol GetSharedSymbol(Symbol s) => new SharedSymbol(TradingMode.PerpetualLinear, s.Value, "USDC");
@@ -186,6 +209,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 _ => OrderStatus.None
             };
         }
+
         #endregion
     }
 }
