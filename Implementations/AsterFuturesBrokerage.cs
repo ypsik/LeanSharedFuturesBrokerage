@@ -42,6 +42,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             InitializeBase(
                 restClient.FuturesApi.SharedClient,
                 restClient.FuturesApi.SharedClient,
+                restClient.FuturesApi.SharedClient,
                 socketClient.FuturesApi.SharedClient,
                 null,
                 restClient.FuturesApi.SharedClient,
@@ -59,6 +60,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             _socketClient = new AsterSocketClient();
 
             InitializeBase(
+                _restClient.FuturesApi.SharedClient,
                 _restClient.FuturesApi.SharedClient,
                 _restClient.FuturesApi.SharedClient,
                 _socketClient.FuturesApi.SharedClient,
