@@ -94,20 +94,51 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 var sub = RunSync(() => _orderSocket.SubscribeToFuturesOrderUpdatesAsync(new SubscribeFuturesOrderRequest(), HandleSocket));
                 if (!sub.Success) throw new Exception("Order socket failed");
 
+
                 _orderSocketSub = sub.Data;
                 _isConnected = true;
                 _reconcileCts = new CancellationTokenSource();
                 _reconcileTask = Task.Run(() => ReconcileLoop(_reconcileCts.Token));
             }
         }
-
-        public override void Disconnect()
+        private async Task SubscribeToOrderUpdates()
         {
-            _reconcileCts?.Cancel();
-            if (_orderSocketSub != null) RunSync(() => _orderSocketSub.CloseAsync());
-            _orderCache.Clear();
-            _filledQtyCache.Clear();
-            _isConnected = false;
+            // 🔥 FIX: Wir müssen ein 'SubscribeFuturesOrderRequest' Objekt vorne dran hängen
+            var result = await _orderSocket.SubscribeToFuturesOrderUpdatesAsync(new SubscribeFuturesOrderRequest(), update =>
+            {
+                // Das ist jetzt der zweite Parameter (der Handler)
+                HandleSocket(update);
+            });
+
+            if (result.Success)
+            {
+                var subscription = result.Data;
+
+                subscription.ConnectionLost += () =>
+                {
+                    _isConnected = false;
+                    OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "Disconnect", "Order stream lost."));
+                };
+
+                subscription.ConnectionRestored += (duration) =>
+                {
+                    _isConnected = true;
+                    OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Information, "Reconnect", $"Order stream restored. Syncing..."));
+                    //Task.Run(async () => await ForceReconcile());
+                };
+
+                // ... restliche Events wie vorhin ...
+            }
+        }
+
+        protected void HandleConnectionRestored(TimeSpan duration)
+        {
+            _isConnected = true;
+            Log.Trace($"{Name}: Connection restored after {duration}.");
+            OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Information, "Reconnect", "Connection restored."));
+
+            // Sofortiger Sync der Orders, genau wie Bybit es nach einem Drop macht
+//            Task.Run(() => ForceReconcile());
         }
 
         public virtual void SetJob(LiveNodePacket job)

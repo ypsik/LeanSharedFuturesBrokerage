@@ -112,6 +112,25 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             }
         }
 
+
+        public override void Disconnect()
+        {
+            _reconcileCts?.Cancel();
+            if (_orderSocketSub != null) RunSync(() => _orderSocketSub.CloseAsync());
+            _orderCache.Clear();
+            _filledQtyCache.Clear();
+            _isConnected = false;
+        }
+
+        protected void HandleConnectionLost()
+        {
+            _isConnected = false;
+            Log.Error($"{Name}: Connection lost!");
+            // Das ist der Bybit-Weg: Eine Nachricht an LEAN senden
+            OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "Disconnect", "Connection to exchange lost."));
+        }
+
+
         private async Task ReconcileLoop(CancellationToken ct)
         {
             while (!ct.IsCancellationRequested)
