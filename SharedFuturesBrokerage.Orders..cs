@@ -61,7 +61,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             };
 
             var res = RunSync(() => _orderClient.PlaceFuturesOrderAsync(request));
-            if (!res.Success) return false;
+            if (!res.Success)
+            {
+                var errorMsg = res.Error?.ToString() ?? "Unknown exchange error";
+                Log.Error($"{Name}.PlaceOrder({order.Symbol.Value}): {errorMsg}");
+                OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "PlaceOrder", errorMsg));
+                return false;
+            }
 
             order.BrokerId.Add(res.Data.Id);
             _orderCache[res.Data.Id] = order;

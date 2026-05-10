@@ -75,31 +75,45 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
             // --- Populate SPDB with all live HL assets ---
             var spdb = SymbolPropertiesDatabase.FromDataFolder();
 
-            var metaResult = restClient.FuturesApi.ExchangeData
-                .GetExchangeInfoAsync()
+            var result = restClient.FuturesApi.ExchangeData
+                .GetExchangeInfoAndTickersAsync()
                 .GetAwaiter().GetResult();
 
-            if (!metaResult.Success)
-                throw new Exception($"Failed to load Hyperliquid assets: {metaResult.Error}");
+            if (!result.Success)
+                throw new Exception($"Failed to load Hyperliquid assets: {result.Error}");
 
-            foreach (var symbol in metaResult.Data.Where(s => !s.IsDelisted))
+            var symbols = result.Data.ExchangeInfo.Symbols;
+            var tickers = result.Data.Tickers;
+
+            for (int i = 0; i < symbols.Length; i++)
             {
+                var symbol = symbols[i];
+                if (symbol.IsDelisted) continue;
+
+                var ctx = i < tickers.Length ? tickers[i] : null;
                 var ticker = symbol.Name + "USDC";
-                var lotSize = Math.Pow(10, -symbol.QuantityDecimals);
+                var lotSize = (decimal)Math.Pow(10, -symbol.QuantityDecimals);
+
+                var price = ctx?.MarkPrice ?? ctx?.OraclePrice ?? 0m;
+                var tickSize = 0.001m;
+
+                if (price > 0)
+                {
+                    var magnitude = (int)Math.Floor(Math.Log10((double)price));
+                    tickSize = (decimal)Math.Pow(10, magnitude - 4);
+                }
 
                 var symbolProperties = new SymbolProperties(
                     description: $"Hyperliquid {symbol.Name} Perpetual",
                     quoteCurrency: "USDC",
                     contractMultiplier: 1m,
-                    minimumPriceVariation: 0.0001m,
-                    lotSize: (decimal)lotSize,
+                    minimumPriceVariation: tickSize,
+                    lotSize: lotSize,
                     marketTicker: symbol.Name
                 );
 
                 spdb.SetEntry("hyperliquid", ticker, SecurityType.CryptoFuture, symbolProperties);
-            }
-
-            // --- Fix: Konstruktor mit allen 4 Parametern aufrufen ---
+            } 
             var brokerage = new HyperliquidFuturesBrokerage(restClient, socketClient, aggregator, getHoldingsFunc);
 
             // Register with MEF Composer so Lean reuses this instance when
