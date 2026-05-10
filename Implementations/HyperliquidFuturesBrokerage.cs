@@ -1,5 +1,7 @@
-﻿using CryptoExchange.Net.Objects.Sockets;
+﻿using CryptoExchange.Net.Authentication;
+using CryptoExchange.Net.Objects.Sockets;
 using CryptoExchange.Net.SharedApis;
+using HyperLiquid.Net;
 using HyperLiquid.Net.Clients;
 using HyperLiquid.Net.Enums;
 using QuantConnect;
@@ -60,16 +62,40 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         protected override void InitializeFromJob(QuantConnect.Packets.LiveNodePacket job, IDataAggregator aggregator)
         {
-            _restClient = new HyperLiquidRestClient();
-            _socketClient = new HyperLiquidSocketClient();
+            // 1. Instanzen schützen: Nur erstellen, wenn sie null sind
+            if (_restClient == null)
+            {
+                // Falls wir im Live-Modus sind, brauchen wir die Keys aus dem Job
+                job.BrokerageData.TryGetValue("hyperliquid-address", out var key);
+                job.BrokerageData.TryGetValue("hyperliquid-secret", out var secret);
 
+                _restClient = new HyperLiquidRestClient(options => {
+                    if (!string.IsNullOrEmpty(key) && !string.IsNullOrEmpty(secret))
+                        options.ApiCredentials = new HyperLiquidCredentials(key, secret);
+                });
+            }
+
+            if (_socketClient == null)
+            {
+                _socketClient = new HyperLiquidSocketClient();
+            }
+
+            // 2. User-Details schützen: Nur überschreiben, wenn der Job explizit etwas Neues liefert
+            if (String.IsNullOrEmpty(_vaultAdress) && job.BrokerageData.TryGetValue("hyperliquid-vault-address", out var vault) && !string.IsNullOrEmpty(vault))
+            {
+                _vaultAdress = vault;
+            }
+
+            // 3. Basisklasse synchronisieren
+            // Wir nutzen die bestehenden (oder gerade erstellten) Instanzen
             InitializeBase(
                 _restClient.FuturesApi.SharedClient,
                 _restClient.FuturesApi.SharedClient,
                 _socketClient.FuturesApi.SharedClient,
                 _restClient.FuturesApi.SharedClient,
                 _restClient.FuturesApi.SharedClient,
-                aggregator
+                aggregator,
+                _getHoldingsFunc
             );
         }
 
