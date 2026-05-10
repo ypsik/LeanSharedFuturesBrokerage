@@ -79,7 +79,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
 
             // --- Populate SPDB with all live HL assets ---
             var spdb = SymbolPropertiesDatabase.FromDataFolder();
-
             var result = restClient.FuturesApi.ExchangeData
                  .GetExchangeInfoAsync()
                  .GetAwaiter().GetResult();
@@ -87,15 +86,19 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
             if (!result.Success)
                 throw new Exception($"Failed to load Hyperliquid assets: {result.Error}");
 
-            const int MAX_DECIMALS_PERP = 6;
+            // WICHTIG: Die Summe aus szDecimals und pxDecimals ist bei HL Perps 5!
+            const int HL_SUM_DECIMALS = 5;
 
             foreach (var symbol in result.Data.Where(s => !s.IsDelisted))
             {
                 var ticker = symbol.Name + "USDC";
                 var lotSize = (decimal)Math.Pow(10, -symbol.QuantityDecimals);
 
-                var maxPriceDecimals = MAX_DECIMALS_PERP - symbol.QuantityDecimals;
-                var tickSize = (decimal)Math.Pow(10, -maxPriceDecimals);
+                // Der "Magische Fix" für Hyperliquid:
+                // pxDecimals = 5 - szDecimals. 
+                // Falls szDecimals > 5 (selten), nehmen wir 0 Nachkommastellen für den Preis.
+                var priceDecimals = Math.Max(0, HL_SUM_DECIMALS - symbol.QuantityDecimals);
+                var tickSize = (decimal)Math.Pow(10, -priceDecimals);
 
                 var symbolProperties = new SymbolProperties(
                     description: $"Hyperliquid {symbol.Name} Perpetual",
@@ -108,7 +111,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
 
                 spdb.SetEntry("hyperliquid", ticker, SecurityType.CryptoFuture, symbolProperties);
             }
-            
+
             var brokerage = new HyperliquidFuturesBrokerage(restClient, socketClient, vaultAddress, aggregator, getHoldingsFunc); 
 
             // Register with MEF Composer so Lean reuses this instance when
