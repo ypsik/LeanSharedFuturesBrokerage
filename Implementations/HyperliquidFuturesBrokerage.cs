@@ -256,6 +256,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             );
             if (sub.Success)
             {
+                Log.Trace($"{Name} Symbol updates: Subscribed.");
+
                 var subscription = sub.Data;
 
                 subscription.ConnectionLost += () =>
