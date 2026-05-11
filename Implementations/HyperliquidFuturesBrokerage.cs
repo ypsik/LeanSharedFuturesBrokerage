@@ -56,6 +56,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 restClient.FuturesApi.SharedClient,
                 socketClient.FuturesApi.SharedClient,
                 socketClient.FuturesApi.SharedClient,
+                socketClient.FuturesApi.SharedClient,
                 restClient.FuturesApi.SharedClient,
                 restClient.FuturesApi.SharedClient,
                 aggregator,
@@ -93,6 +94,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             InitializeBase(
                 _restClient.FuturesApi.SharedClient,
                 _restClient.FuturesApi.SharedClient,
+                _socketClient.FuturesApi.SharedClient,
                 _socketClient.FuturesApi.SharedClient,
                 _socketClient.FuturesApi.SharedClient,
                 _restClient.FuturesApi.SharedClient,

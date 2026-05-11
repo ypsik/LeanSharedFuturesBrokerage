@@ -16,6 +16,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 ? res.Data.Select(x => new CashAmount(x.Total, x.Asset ?? "USDC")).ToList()
                 : new List<CashAmount>();
         }
+
         public override List<Holding> GetAccountHoldings()
         {
             var res = RunSync(() => _orderClient.GetPositionsAsync(new GetPositionsRequest()));
@@ -61,6 +62,31 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             // Fallback auf die lokale Funktion
             return _getHoldingsFunc?.Invoke() ?? new List<Holding>();
         }
+        private async Task SubscribeToAccountUpdatesAsync()
+        {
+            var result = await _balanceSocket.SubscribeToBalanceUpdatesAsync(new SubscribeBalancesRequest(), update =>
+            {
+                foreach (var balance in update.Data)
+                {
+                    var accountEvent = new AccountEvent(balance.Asset, balance.Total);
+                    OnAccountChanged(accountEvent);
+                }
 
-    }
+            });
+
+            if (result.Success)
+            {
+                // Connection-Management
+                result.Data.ConnectionLost += () => _isConnectedBalance = false;
+                result.Data.ConnectionRestored += (d) =>
+                {                    
+                    _isConnectedBalance = true;
+                };
+            }
+            else
+                throw new Exception("Balance socket socket failed");
+
+            _isConnectedBalance = true;
+        }
+    }   
 }

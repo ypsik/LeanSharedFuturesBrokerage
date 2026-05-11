@@ -148,14 +148,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             if (_orderSocketSub != null) RunSync(() => _orderSocketSub.CloseAsync());
             _orderCache.Clear();
             _filledQtyCache.Clear();
-            _isConnected = false;
-        }
-
-        protected void HandleConnectionLost()
-        {
-            _isConnected = false;
-            Log.Error($"{Name}: Connection lost!");
-            OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "Disconnect", "Connection to exchange lost."));
+            _isConnectedOrder = false;
+            _isConnectedBalance = false;
         }
 
         private async Task ReconcileLoop(CancellationToken ct)

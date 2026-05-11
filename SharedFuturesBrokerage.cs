@@ -22,6 +22,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         protected IBalanceRestClient _balanceClient;
         protected IFuturesOrderSocketClient _orderSocket;
         protected IUserTradeSocketClient _tradeSocket;
+        protected IBalanceSocketClient _balanceSocket;
         protected IKlineRestClient _klineClient;
         protected IFundingRateRestClient _fundingRateClient;
         protected Func<List<Holding>> _getHoldingsFunc;
@@ -33,7 +34,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         protected UpdateSubscription _orderSocketSub;
         protected readonly object _connectLock = new();
-        protected bool _isConnected;
+        protected bool _isConnectedOrder, _isConnectedBalance;
         protected CancellationTokenSource _reconcileCts;
         protected Task _reconcileTask;
         protected readonly TimeSpan _reconciliationInterval = TimeSpan.FromSeconds(30);
@@ -47,6 +48,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             IBalanceRestClient balanceClient,
             IFuturesOrderSocketClient orderSocket,
             IUserTradeSocketClient tradeSocket,
+            IBalanceSocketClient balanceSocket,
             IFundingRateRestClient fundingRateClient,
             IKlineRestClient klineClient,
             IDataAggregator aggregator, // <-- Der kommt jetzt an
@@ -68,6 +70,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             _balanceClient = balanceClient;
             _orderSocket = orderSocket;
             _tradeSocket = tradeSocket;
+            _balanceSocket = balanceSocket;
             _fundingRateClient = fundingRateClient;
             _klineClient = klineClient;
             _aggregator = aggregator;
@@ -80,44 +83,49 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             _isInitialized = true;
         }
 
-        // --- HIER SIND DIE METHODEN, DIE DEIN COMPILER VERMISST HAT ---
-
-        public override bool IsConnected => _isConnected;
+        public override bool IsConnected => _isConnectedOrder && _isConnectedBalance;
 
         public override void Connect()
         {
             lock (_connectLock)
             {
-                if (_isConnected) return;
                 if (_balanceClient == null || _orderSocket == null) throw new InvalidOperationException("Clients not configured");
 
-                var sub = RunSync(() => _orderSocket.SubscribeToFuturesOrderUpdatesAsync(new SubscribeFuturesOrderRequest(), HandleSocket));
-                if (sub.Success)
+                if (!_isConnectedOrder)
                 {
-                    var subscription = sub.Data;
-
-                    subscription.ConnectionLost += () =>
+                    var sub = RunSync(() => _orderSocket.SubscribeToFuturesOrderUpdatesAsync(new SubscribeFuturesOrderRequest(), HandleSocket));
+                    if (sub.Success)
                     {
-                        _isConnected = false;
-                        OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "Disconnect", "Order stream lost."));
-                    };
+                        var subscription = sub.Data;
 
-                    subscription.ConnectionRestored += (duration) =>
-                    {
-                        _isConnected = true;
-                        Log.Trace($"{Name}: Connection restored after {duration}.");
-                        OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Information, "Reconnect", $"Order stream restored. Syncing..."));
-                        //Task.Run(async () => await ForceReconcile());
-                    };
+                        subscription.ConnectionLost += () =>
+                        {
+                            _isConnectedOrder = false;
+                            Log.Error($"{Name}: Connection lost!");
+                            OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "Disconnect", "Order stream lost."));
+                        };
+
+                        subscription.ConnectionRestored += (duration) =>
+                        {
+                            _isConnectedOrder = true;
+                            Log.Trace($"{Name}: Connection restored after {duration}.");
+                            OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Information, "Reconnect", $"Order stream restored. Syncing..."));
+                            //Task.Run(async () => await ForceReconcile());
+                        };
+                    }
+                    else
+                        throw new Exception("Order socket failed");
+
+
+                    _orderSocketSub = sub.Data;
+                    _isConnectedOrder = true;
+                    _reconcileCts = new CancellationTokenSource();
+                    _reconcileTask = Task.Run(() => ReconcileLoop(_reconcileCts.Token));
                 }
-                else
-                    throw new Exception("Order socket failed");
-
-
-                _orderSocketSub = sub.Data;
-                _isConnected = true;
-                _reconcileCts = new CancellationTokenSource();
-                _reconcileTask = Task.Run(() => ReconcileLoop(_reconcileCts.Token));
+                if(!_isConnectedBalance)
+                {
+                    RunSync(() => SubscribeToAccountUpdatesAsync());
+                }
             }
         }
         
