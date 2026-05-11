@@ -68,7 +68,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             {
                 foreach (var balance in update.Data)
                 {
-                    var accountEvent = new AccountEvent(balance.Asset, balance.Total);
+                    var accountEvent = new AccountEvent(balance.Asset, balance.Available);
                     OnAccountChanged(accountEvent);
                 }
 
