@@ -13,7 +13,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         {
             var res = RunSync(() => _balanceClient.GetBalancesAsync(new GetBalancesRequest()));
             return res.Success && res.Data != null
-                ? res.Data.Select(x => new CashAmount(x.Available, x.Asset ?? "USDC")).ToList()
+                ? res.Data.Select(x => new CashAmount(x.Total, x.Asset ?? "USDC")).ToList()
                 : new List<CashAmount>();
         }
 
@@ -68,7 +68,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             {
                 foreach (var balance in update.Data)
                 {
-                    var accountEvent = new AccountEvent(balance.Asset, balance.Available);
+                    var accountEvent = new AccountEvent(balance.Asset, balance.Total);
                     OnAccountChanged(accountEvent);
                 }
 

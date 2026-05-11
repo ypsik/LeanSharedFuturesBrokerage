@@ -122,10 +122,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     _reconcileCts = new CancellationTokenSource();
                     _reconcileTask = Task.Run(() => ReconcileLoop(_reconcileCts.Token));
                 }
-                if(!_isConnectedBalance)
-                {
-                    RunSync(() => SubscribeToAccountUpdatesAsync());
-                }
+//                if(!_isConnectedBalance)
+//                {
+//                    RunSync(() => SubscribeToAccountUpdatesAsync());
+//                }
             }
         }
         
