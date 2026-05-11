@@ -14,17 +14,15 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         #region IDataQueueHandler
         public virtual IEnumerator<BaseData> Subscribe(SubscriptionDataConfig config, EventHandler handler)
         {
+            Log.Trace($"Subscribe() called: {config.Symbol} | {config.Type.Name}");
+
             if (!_isInitialized || config.Symbol.Value.Contains("UNMAPPED")) return null;
 
             var enumerator = _aggregator.Add(config, handler);
             if (config.Type == typeof(MarginInterestRate))
-            {
                 SubscribeFunding(config.Symbol);
-                return enumerator;
-            }
-
-
-            _subscriptionManager.Subscribe(config);
+            else 
+                _subscriptionManager.Subscribe(config);
             return enumerator;
         }
 
