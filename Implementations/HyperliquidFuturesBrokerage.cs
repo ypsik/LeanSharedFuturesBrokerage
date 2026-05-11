@@ -232,10 +232,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         */
         protected override bool SubscribeFunding(Symbol symbol)
         {
-            var brokerageSymbol = NormalizeSymbol(symbol.Value);
-
             var sub = RunSync(() =>
-                _socketClient.FuturesApi.ExchangeData.SubscribeToSymbolUpdatesAsync(brokerageSymbol, data =>
+                _socketClient.FuturesApi.ExchangeData.SubscribeToSymbolUpdatesAsync(symbol.Value, data =>
                 {
                     var ticker = data.Data;
                     var currentFunding = ticker.FundingRate;
@@ -275,7 +273,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 };
             }
             else
-                throw new Exception("Symbol updates socket failed");
+            {
+                Log.Error($"{Name} SubscribeFunding failed for {symbol}: {sub.Error?.Message}");
+                return false;
+            }
 
             return true;
         }
