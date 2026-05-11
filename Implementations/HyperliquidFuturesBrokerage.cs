@@ -232,11 +232,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         */
         protected override bool SubscribeFunding(Symbol symbol)
         {
-            var shared = GetSharedSymbol(symbol);
+            var ticker = symbol.Value.ToUpperInvariant();
+            var hyperliquidCoin = ticker.EndsWith("USDC") ? ticker[..^4] : ticker;
             var sub = RunSync(() =>
-                _socketClient.FuturesApi.ExchangeData.SubscribeToSymbolUpdatesAsync(shared.SymbolName, data =>
+                _socketClient.FuturesApi.ExchangeData.SubscribeToSymbolUpdatesAsync(hyperliquidCoin, data =>
                 {
                     var ticker = data.Data;
+
                     var currentFunding = ticker.FundingRate;
                     var now = DateTime.UtcNow;
                     var rounded = new DateTime(now.Year, now.Month, now.Day, now.Hour, 0, 0, DateTimeKind.Utc);
