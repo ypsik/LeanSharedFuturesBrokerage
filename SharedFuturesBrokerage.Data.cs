@@ -17,6 +17,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             if (!_isInitialized || config.Symbol.Value.Contains("UNMAPPED")) return null;
 
             var enumerator = _aggregator.Add(config, handler);
+            if (config.Type == typeof(MarginInterestRate))
+            {
+                SubscribeFunding(config.Symbol);
+                return enumerator;
+            }
+
+
             _subscriptionManager.Subscribe(config);
             return enumerator;
         }
@@ -62,7 +69,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 if (interval == null) yield break;
 
                 var klineReq = new GetKlinesRequest(shared, interval.Value) { StartTime = request.StartTimeUtc, EndTime = request.EndTimeUtc };
-                PageRequest nextPage = null;
+                PageRequest? nextPage = null;
                 do
                 {
                     var res = RunSync(() => _klineClient.GetKlinesAsync(klineReq, nextPage));
@@ -75,6 +82,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         }
         #endregion
 
+        protected abstract bool SubscribeFunding(Symbol symbol);
         protected abstract bool SubscribeSymbols(IEnumerable<Symbol> symbols, TickType tickType);
         protected abstract bool UnsubscribeSymbols(IEnumerable<Symbol> symbols, TickType tickType);
         protected void EmitTick(Tick tick) => _aggregator?.Update(tick);

@@ -157,5 +157,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             }
             return true;
         }
+
+        protected override bool SubscribeFunding(Symbol symbol)
+        {
+            var brokerageSymbol = symbol.Value;
+            return true;
+        }
+
     }
 }

@@ -6,6 +6,7 @@ using HyperLiquid.Net;
 using HyperLiquid.Net.Clients;
 using HyperLiquid.Net.Enums;
 using QuantConnect;
+using QuantConnect.Brokerages;
 using QuantConnect.Data;
 using QuantConnect.Data.Market;
 using QuantConnect.Interfaces;
@@ -61,6 +62,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 restClient.FuturesApi.SharedClient,
                 aggregator,
                 getHoldingsFunc);
+
         }
 
         protected override void InitializeFromJob(QuantConnect.Packets.LiveNodePacket job, IDataAggregator aggregator)
@@ -189,10 +191,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             return true;
         }
         #endregion
-
+        /*
         #region Funding Special Case
         public override IEnumerator<BaseData> Subscribe(SubscriptionDataConfig config, EventHandler handler)
         {
+
             if (config.Type == typeof(MarginInterestRate))
             {
                 lock (_fundingLock)
@@ -200,6 +203,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                     if (_fundingSubscription == null && _socketClient != null)
                     {
                         var sub = RunSync(() =>
+                        
                             _socketClient.FuturesApi.Account.SubscribeToUserFundingUpdatesAsync(
                                 null,
                                 update =>
@@ -216,6 +220,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                                         handler?.Invoke(rate, EventArgs.Empty);
                                     }
                                 }));
+                        
                         if (sub.Success) _fundingSubscription = sub.Data;
                     }
                 }
@@ -224,6 +229,54 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             return base.Subscribe(config, handler);
         }
         #endregion
+        */
+        protected override bool SubscribeFunding(Symbol symbol)
+        {
+            var brokerageSymbol = NormalizeSymbol(symbol.Value);
+
+            var sub = RunSync(() =>
+                _socketClient.FuturesApi.ExchangeData.SubscribeToSymbolUpdatesAsync(brokerageSymbol, data =>
+                {
+                    var ticker = data.Data;
+                    var currentFunding = ticker.FundingRate;
+                    var now = DateTime.UtcNow;
+                    var rounded = new DateTime(now.Year, now.Month, now.Day, now.Hour, 0, 0, DateTimeKind.Utc);
+
+                    Log.Trace($"Hyperliquid Funding Update: {ticker.Symbol} -> Rate: {currentFunding}");
+
+                    var funding = new MarginInterestRate
+                    {
+                        Symbol = symbol,
+                        Time = rounded,
+                        InterestRate = currentFunding ?? 0
+                    };
+
+                    _aggregator.Update(funding);
+                })
+            );
+            if (sub.Success)
+            {
+                var subscription = sub.Data;
+
+                subscription.ConnectionLost += () =>
+                {
+                    _isConnectedOrder = false;
+                    Log.Error($"{Name} Symbol updates: Connection lost!");
+                    OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "Disconnect", "Symbol updates stream lost."));
+                };
+
+                subscription.ConnectionRestored += (duration) =>
+                {
+                    _isConnectedOrder = true;
+                    Log.Trace($"{Name} Symbol updates: Connection restored after {duration}.");
+                    OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Information, "Reconnect", $"Symbol updates stream restored. Syncing..."));
+                };
+            }
+            else
+                throw new Exception("Symbol updates socket failed");
+
+            return true;
+        }
 
         protected override async Task<ExchangeWebResult<SharedId>> ExecutePlaceOrderAsync(PlaceFuturesOrderRequest request)
         {
