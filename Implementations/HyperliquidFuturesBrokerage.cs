@@ -232,8 +232,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         */
         protected override bool SubscribeFunding(Symbol symbol)
         {
+            var shared = GetSharedSymbol(symbol);
             var sub = RunSync(() =>
-                _socketClient.FuturesApi.ExchangeData.SubscribeToSymbolUpdatesAsync(symbol.Value, data =>
+                _socketClient.FuturesApi.ExchangeData.SubscribeToSymbolUpdatesAsync(shared.SymbolName, data =>
                 {
                     var ticker = data.Data;
                     var currentFunding = ticker.FundingRate;
