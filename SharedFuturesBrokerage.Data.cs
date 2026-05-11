@@ -29,8 +29,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 _aggregator.Remove(config);
             }
         }
-
-        public IEnumerable<BaseData> GetNextTicks() => Enumerable.Empty<BaseData>();
         #endregion
 
         #region History Implementation

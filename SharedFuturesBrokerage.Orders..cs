@@ -131,7 +131,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     Status = status,
                     FillPrice = o.AveragePrice ?? o.OrderPrice ?? 0m,
                     FillQuantity = delta * (order.Quantity > 0 ? 1 : -1),
-                    Message = string.Empty
+                    Message = "socket"
                 });
 
                 if (status is OrderStatus.Filled or OrderStatus.Canceled or OrderStatus.Invalid)
@@ -160,63 +160,82 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         private async Task ReconcileLoop(CancellationToken ct)
         {
+            // Datenbank einmalig laden, um Disk-I/O und Memory-Swapping in der Schleife zu verhindern
+            var symbolPropertiesDb = SymbolPropertiesDatabase.FromDataFolder();
+
             while (!ct.IsCancellationRequested)
             {
-                await Task.Delay(_reconciliationInterval, ct);
-                var open = await _orderClient.GetOpenFuturesOrdersAsync(new GetOpenOrdersRequest()).ConfigureAwait(false);
-                if (!open.Success || open.Data == null) continue;
-
-                var map = open.Data.ToDictionary(x => x.OrderId);
-                foreach (var kv in _orderCache.ToArray())
+                try
                 {
-                    if (map.ContainsKey(kv.Key)) continue;
+                    await Task.Delay(_reconciliationInterval, ct).ConfigureAwait(false);
 
-                    var symbol = kv.Value.Symbol;
-
-                    var symbolProperties = SymbolPropertiesDatabase.FromDataFolder()
-                        .GetSymbolProperties(symbol.ID.Market, symbol, symbol.SecurityType, "USD");
-
-                    string baseAsset = kv.Value.Symbol.ID.Symbol;   // z.B. "TRX"
-                    string quoteAsset = symbolProperties.QuoteCurrency; // z.B. "USDC"
-
-                    var tradingMode = kv.Value.SecurityType == SecurityType.CryptoFuture || kv.Value.SecurityType == SecurityType.Future
-                        ? TradingMode.PerpetualLinear
-                        : TradingMode.Spot;
-
-                    var sharedSymbol = new SharedSymbol(tradingMode, baseAsset, quoteAsset, symbol.Value);
-
-                    // Wenn die Order nicht mehr offen ist, prüfen wir den exakten Status beim Broker (History/Details)
-                    var statusCheck = await _orderClient.GetFuturesOrderAsync(new GetOrderRequest(sharedSymbol, kv.Key)).ConfigureAwait(false);
-
-                    if (statusCheck.Success && statusCheck.Data != null)
+                    var open = await _orderClient.GetOpenFuturesOrdersAsync(new GetOpenOrdersRequest()).ConfigureAwait(false);
+                    if (!open.Success || open.Data == null)
                     {
-                        var brokerOrder = statusCheck.Data;
+                        Log.Error($"{Name}.ReconcileLoop: Failed to fetch open orders: {open.Error}");
+                        continue;
+                    }
 
-                        // Prüfen, ob die Order gefüllt wurde (Status enthält "Filled")
-                        if (brokerOrder.Status == SharedOrderStatus.Filled)
+                    var map = open.Data.ToDictionary(x => x.OrderId);
+                    foreach (var kv in _orderCache.ToArray())
+                    {
+                        if (map.ContainsKey(kv.Key)) continue;
+
+                        var symbol = kv.Value.Symbol;
+                        var symbolProperties = symbolPropertiesDb.GetSymbolProperties(symbol.ID.Market, symbol, symbol.SecurityType, "USD");
+
+                        string baseAsset = symbol.ID.Symbol;
+                        string quoteAsset = symbolProperties.QuoteCurrency;
+
+                        var tradingMode = symbol.SecurityType == SecurityType.CryptoFuture || symbol.SecurityType == SecurityType.Future
+                            ? TradingMode.PerpetualLinear
+                            : TradingMode.Spot;
+
+                        var sharedSymbol = new SharedSymbol(tradingMode, baseAsset, quoteAsset, symbol.Value);
+
+                        var statusCheck = await _orderClient.GetFuturesOrderAsync(new GetOrderRequest(sharedSymbol, kv.Key)).ConfigureAwait(false);
+
+                        if (statusCheck.Success && statusCheck.Data != null)
                         {
-                            OnOrderEvent(new OrderEvent(kv.Value, DateTime.UtcNow, OrderFee.Zero)
+                            var brokerOrder = statusCheck.Data;
+
+                            if (brokerOrder.Status == SharedOrderStatus.Filled)
                             {
-                                Status = OrderStatus.Filled,
-                                FillPrice = brokerOrder.AveragePrice ?? 0,
-                                FillQuantity = brokerOrder.QuantityFilled?.QuantityInContracts ?? 0,
-                                OrderFee = new OrderFee(new CashAmount(brokerOrder.Fee ?? 0, brokerOrder.FeeAsset ?? "USDC")),
-                                Message = ""
-                            });
+                                OnOrderEvent(new OrderEvent(kv.Value, DateTime.UtcNow, OrderFee.Zero)
+                                {
+                                    Status = OrderStatus.Filled,
+                                    FillPrice = brokerOrder.AveragePrice ?? 0,
+                                    FillQuantity = (brokerOrder.QuantityFilled?.QuantityInBaseAsset ?? 0) * (kv.Value.Quantity > 0 ? 1 : -1),
+                                    OrderFee = new OrderFee(new CashAmount(brokerOrder.Fee ?? 0, brokerOrder.FeeAsset ?? "USDC")),
+                                    Message = "Reconciled Fill"
+                                });
+                            }
+                            else
+                            {
+                                OnOrderEvent(new OrderEvent(kv.Value, DateTime.UtcNow, OrderFee.Zero)
+                                {
+                                    Status = OrderStatus.Canceled,
+                                    Message = "Reconciled Cancel"
+                                });
+                            }
                         }
                         else
                         {
-                            OnOrderEvent(new OrderEvent(kv.Value, DateTime.UtcNow, OrderFee.Zero) { Status = OrderStatus.Canceled, Message = "reconcile" });
+                            OnOrderEvent(new OrderEvent(kv.Value, DateTime.UtcNow, OrderFee.Zero)
+                            {
+                                Status = OrderStatus.Canceled,
+                                Message = "Reconcile: Order not found on exchange"
+                            });
                         }
-                    }
-                    else
-                    {
-                        // Fallback, falls die Order-Details nicht mehr abrufbar sind
-                        OnOrderEvent(new OrderEvent(kv.Value, DateTime.UtcNow, OrderFee.Zero) { Status = OrderStatus.Canceled, Message = "reconcile-notfound" });
-                    }
 
-                    _orderCache.TryRemove(kv.Key, out _);
-                    _filledQtyCache.TryRemove(kv.Key, out _);
+                        _orderCache.TryRemove(kv.Key, out _);
+                        _filledQtyCache.TryRemove(kv.Key, out _);
+                    }
+                }
+                catch (OperationCanceledException) { break; }
+                catch (Exception ex)
+                {
+                    Log.Error($"{Name}.ReconcileLoop Error: {ex.Message}");
                 }
             }
         }
