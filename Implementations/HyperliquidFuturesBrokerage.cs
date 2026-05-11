@@ -54,7 +54,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             InitializeBase(
                 restClient.FuturesApi.SharedClient,
                 restClient.FuturesApi.SharedClient,
-                restClient.FuturesApi.SharedClient,
                 socketClient.FuturesApi.SharedClient,
                 socketClient.FuturesApi.SharedClient,
                 restClient.FuturesApi.SharedClient,
@@ -92,7 +91,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             // 3. Basisklasse synchronisieren
             // Wir nutzen die bestehenden (oder gerade erstellten) Instanzen
             InitializeBase(
-                _restClient.FuturesApi.SharedClient,
                 _restClient.FuturesApi.SharedClient,
                 _restClient.FuturesApi.SharedClient,
                 _socketClient.FuturesApi.SharedClient,

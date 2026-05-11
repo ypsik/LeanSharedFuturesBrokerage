@@ -20,7 +20,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
     {
         protected IFuturesOrderRestClient _orderClient;
         protected IBalanceRestClient _balanceClient;
-        protected IFuturesOrderRestClient _futuresOrderClient;
         protected IFuturesOrderSocketClient _orderSocket;
         protected IUserTradeSocketClient _tradeSocket;
         protected IKlineRestClient _klineClient;
@@ -46,13 +45,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         protected void InitializeBase(
             IFuturesOrderRestClient orderClient,
             IBalanceRestClient balanceClient,
-            IFuturesOrderRestClient futuresOrderClient,
             IFuturesOrderSocketClient orderSocket,
             IUserTradeSocketClient tradeSocket,
             IFundingRateRestClient fundingRateClient,
             IKlineRestClient klineClient,
             IDataAggregator aggregator, // <-- Der kommt jetzt an
-            Func<List<Holding?>> getHoldingsFunc = null)
+            Func<List<Holding>> getHoldingsFunc = null)
         {
             // SICHERHEITSGURT: Wenn wir schon initialisiert sind, der Aggregator aber null war 
             // (z.B. weil die Factory zu früh dran war), dann updaten wir ihn hier durch den SetJob-Aufruf!
@@ -68,7 +66,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
             _orderClient = orderClient;
             _balanceClient = balanceClient;
-            _futuresOrderClient = futuresOrderClient;
             _orderSocket = orderSocket;
             _tradeSocket = tradeSocket;
             _fundingRateClient = fundingRateClient;
