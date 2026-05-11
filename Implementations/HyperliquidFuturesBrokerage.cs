@@ -32,6 +32,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         private UpdateSubscription _fundingSubscription;
         private readonly object _fundingLock = new();
+        private readonly ConcurrentDictionary<Symbol, int> _lastFundingHour = new();
         private readonly ConcurrentDictionary<string, UpdateSubscription> _subscriptions = new();
 
         // 1. LEAN DataQueueHandler Konstruktor
@@ -122,7 +123,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         #endregion
 
         #region LEAN Data Manager
-
         protected override bool SubscribeSymbols(IEnumerable<Symbol> symbols, TickType tickType)
         {
             foreach (var symbol in symbols)
@@ -241,8 +241,18 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
                     var currentFunding = ticker.FundingRate;
                     var now = DateTime.UtcNow;
-                    var rounded = new DateTime(now.Year, now.Month, now.Day, now.Hour, 0, 0, DateTimeKind.Utc);
+                    var currentHour = now.Hour;
 
+                    // Präzisions-Trigger: Wir vergleichen die aktuelle Stunde mit der letzten gespeicherten.
+                    // Sobald die Systemzeit umspringt, wird das nächste eintreffende Paket sofort verarbeitet.
+                    if (_lastFundingHour.TryGetValue(symbol, out var lastHour) && currentHour == lastHour)
+                    {
+                        return;
+                    }
+
+                    // Sofortiger Lock für die restliche Stunde
+                    _lastFundingHour[symbol] = currentHour;
+                    var rounded = new DateTime(now.Year, now.Month, now.Day, currentHour, 0, 0, DateTimeKind.Utc);
                     Log.Trace($"Hyperliquid Funding Update: {ticker.Symbol} -> Rate: {currentFunding}");
 
                     var funding = new MarginInterestRate
