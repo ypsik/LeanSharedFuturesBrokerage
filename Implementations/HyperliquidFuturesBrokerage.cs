@@ -301,36 +301,42 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             var ticker = symbol.Value.ToUpperInvariant();
             var hyperliquidCoin = ticker.EndsWith("USDC") ? ticker[..^4] : ticker;
             var sub = RunSync(() =>
-                _socketClient.FuturesApi.ExchangeData.SubscribeToSymbolUpdatesAsync(hyperliquidCoin, data =>
-                {
-                    var ticker = data.Data;
-
-                    var currentFunding = ticker.FundingRate;
-                    var now = DateTime.UtcNow;
-                    var currentHour = now.Hour;
-
-                    // Präzisions-Trigger: Wir vergleichen die aktuelle Stunde mit der letzten gespeicherten.
-                    // Sobald die Systemzeit umspringt, wird das nächste eintreffende Paket sofort verarbeitet.
-                    if (_lastFundingHour.TryGetValue(symbol, out var lastHour) && currentHour == lastHour)
+                    _socketClient.FuturesApi.ExchangeData.SubscribeToSymbolUpdatesAsync(hyperliquidCoin, data =>
                     {
-                        return;
-                    }
+                        var tickerData = data.Data;
+                        var currentFunding = tickerData.FundingRate;
+                        var now = DateTime.UtcNow;
+                        var currentHour = now.Hour;
 
-                    // Sofortiger Lock für die restliche Stunde
-                    _lastFundingHour[symbol] = currentHour;
-                    var rounded = new DateTime(now.Year, now.Month, now.Day, currentHour, 0, 0, DateTimeKind.Utc);
-                    Log.Trace($"Hyperliquid Funding Update: {ticker.Symbol} -> Rate: {currentFunding}");
+                        // Atomares Update: Wir versuchen die Stunde zu aktualisieren. 
+                        // Die Logik wird nur ausgeführt, wenn der neue Wert ungleich dem alten Wert ist.
+                        var updated = false;
+                        _lastFundingHour.AddOrUpdate(symbol, currentHour, (key, oldHour) =>
+                        {
+                            if (oldHour != currentHour)
+                            {
+                                updated = true;
+                                return currentHour;
+                            }
+                            return oldHour;
+                        });
 
-                    var funding = new MarginInterestRate
-                    {
-                        Symbol = symbol,
-                        Time = rounded,
-                        InterestRate = currentFunding ?? 0
-                    };
+                        if (!updated) return;
 
-                    _aggregator.Update(funding);
-                })
-            );
+                        // Ab hier wird der Code pro Symbol nur noch einmal pro Stunde ausgeführt
+                        var rounded = new DateTime(now.Year, now.Month, now.Day, currentHour, 0, 0, DateTimeKind.Utc);
+                        Log.Trace($"Hyperliquid Funding Update: {tickerData.Symbol} -> Rate: {currentFunding}");
+
+                        var funding = new MarginInterestRate
+                        {
+                            Symbol = symbol,
+                            Time = rounded,
+                            InterestRate = currentFunding ?? 0
+                        };
+
+                        _aggregator.Update(funding);
+                    })
+                );
             if (sub.Success)
             {
                 Log.Trace($"{Name} Symbol updates: Subscribed.");
