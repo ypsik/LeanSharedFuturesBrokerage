@@ -425,8 +425,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         protected override async Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(Order order)
         {
+            var ticker = order.Symbol.Value.ToUpperInvariant();
+            var hyperliquidCoin = ticker.EndsWith("USDC") ? ticker[..^4] : ticker;
             var res = await _restClient.FuturesApi.Trading.EditOrderAsync(
-                          symbol: order.Symbol.Value,
+                          symbol: hyperliquidCoin,
                           orderId: order.Id,
                           clientOrderId: null,
                           side: order.Quantity > 0 ? OrderSide.Buy : OrderSide.Sell,
