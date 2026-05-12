@@ -97,7 +97,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         public override bool UpdateOrder(Order order) 
         {
-            if (!order.BrokerId.Any()) return false;
+            if (!order.BrokerId.Any() || ExecuteUpdateOrderAsync == null) return false;
             var id = order.BrokerId.First();
 
             var res = RunSync(() => ExecuteUpdateOrderAsync(order));
