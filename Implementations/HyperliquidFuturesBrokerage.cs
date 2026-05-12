@@ -171,6 +171,30 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             var baseAsset = ticker.EndsWith(quoteAsset) ? ticker[..^4] : ticker;
             return new SharedSymbol(TradingMode.PerpetualLinear, baseAsset, quoteAsset);
         }
+
+        private string GetHyperliquidTicker(Symbol symbol)
+        {
+            var symbolProperties = _spdb.GetSymbolProperties(
+                symbol.ID.Market,
+                symbol,
+                symbol.SecurityType,
+                "USDC"); // Default Quote Currency als Fallback
+
+            // Die QuoteCurrency ist hier z.B. "USDC"
+            var quoteCurrency = symbolProperties.QuoteCurrency;
+
+            var ticker = symbol.Value;
+
+            if (ticker.EndsWith(quoteCurrency))
+            {
+                return ticker.Remove(ticker.Length - quoteCurrency.Length);
+            }
+            else
+            {
+                return ticker;
+            }
+        }
+
         #endregion
 
         #region Balance
@@ -297,8 +321,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         */
         protected override bool SubscribeFunding(Symbol symbol)
         {
-            var ticker = symbol.Value.ToUpperInvariant();
-            var hyperliquidCoin = ticker.EndsWith("USDC") ? ticker[..^4] : ticker;
+            var hyperliquidCoin = GetHyperliquidTicker(symbol);
             var subKey = $"{symbol.Value}_FUNDING";
 
             lock (_fundingLock)
@@ -425,8 +448,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         protected override async Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(Order order)
         {
-            var ticker = order.Symbol.Value.ToUpperInvariant();
-            var hyperliquidCoin = ticker.EndsWith("USDC") ? ticker[..^4] : ticker;
+            var hyperliquidCoin = GetHyperliquidTicker(order.Symbol);
             var res = await _restClient.FuturesApi.Trading.EditOrderAsync(
                           symbol: hyperliquidCoin,
                           orderId: order.Id,
