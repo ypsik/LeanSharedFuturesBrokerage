@@ -174,9 +174,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         private async Task ReconcileLoop(CancellationToken ct)
         {
-            // Datenbank einmalig laden, um Disk-I/O und Memory-Swapping in der Schleife zu verhindern
-            var symbolPropertiesDb = SymbolPropertiesDatabase.FromDataFolder();
-
             while (!ct.IsCancellationRequested)
             {
                 try
@@ -196,7 +193,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         if (map.ContainsKey(kv.Key)) continue;
 
                         var symbol = kv.Value.Symbol;
-                        var symbolProperties = symbolPropertiesDb.GetSymbolProperties(symbol.ID.Market, symbol, symbol.SecurityType, "USD");
+                        var symbolProperties = _spdb.GetSymbolProperties(symbol.ID.Market, symbol, symbol.SecurityType, "USD");
 
                         string baseAsset = symbol.ID.Symbol;
                         string quoteAsset = symbolProperties.QuoteCurrency;
