@@ -129,7 +129,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         #region Socket / Reconcile
 
-        private void HandleSocket(DataEvent<SharedFuturesOrder[]> update)
+        private void HandleOrderSocket(DataEvent<SharedFuturesOrder[]> update)
         {
             foreach (var o in update.Data)
             {
@@ -205,7 +205,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                             ? TradingMode.PerpetualLinear
                             : TradingMode.Spot;
 
-                        var sharedSymbol = new SharedSymbol(tradingMode, baseAsset, quoteAsset, symbol.Value);
+                        var sharedSymbol = GetSharedSymbol(symbol);
 
                         var statusCheck = await _orderClient.GetFuturesOrderAsync(new GetOrderRequest(sharedSymbol, kv.Key)).ConfigureAwait(false);
 

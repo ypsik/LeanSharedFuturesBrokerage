@@ -93,7 +93,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                 if (!_isConnectedOrder)
                 {
-                    var sub = RunSync(() => _orderSocket.SubscribeToFuturesOrderUpdatesAsync(new SubscribeFuturesOrderRequest(), HandleSocket));
+                    var sub = RunSync(() => _orderSocket.SubscribeToFuturesOrderUpdatesAsync(new SubscribeFuturesOrderRequest(), HandleOrderSocket));
                     if (sub.Success)
                     {
                         var subscription = sub.Data;
