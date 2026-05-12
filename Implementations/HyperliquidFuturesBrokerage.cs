@@ -303,7 +303,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
             lock (_fundingLock)
             {
-                UnsubscribeFunding(symbol);
+                if (_subscriptions.ContainsKey(subKey))
+                {
+                    return true;
+                }
                 _lastFundingHour[symbol] = DateTime.UtcNow.Hour;
 
                 var sub = RunSync(() =>
