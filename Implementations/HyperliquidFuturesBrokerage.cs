@@ -24,6 +24,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Timers;
 using CxCancelOrderRequest = CryptoExchange.Net.SharedApis.CancelOrderRequest;
 
 
@@ -373,8 +374,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         }
         protected override bool UnsubscribeFunding(Symbol symbol)
         {
-            if (_subscriptions.TryRemove($"{symbol.Value}_FUNDING", out var sub))
+            var subKey = $"{symbol.Value}_FUNDING";
+            if (_subscriptions.TryRemove(subKey, out var sub))
             {
+                Log.Trace($"{Name}.UnsubscribeFunding: Found and closing subscription for {subKey}");
                 RunSync(() => sub.CloseAsync());
             }
             return true;
