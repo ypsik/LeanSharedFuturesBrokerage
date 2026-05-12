@@ -232,6 +232,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         */
         protected override bool SubscribeFunding(Symbol symbol)
         {
+            _lastFundingHour[symbol] = DateTime.UtcNow.Hour;
+
             var ticker = symbol.Value.ToUpperInvariant();
             var hyperliquidCoin = ticker.EndsWith("USDC") ? ticker[..^4] : ticker;
             var sub = RunSync(() =>
