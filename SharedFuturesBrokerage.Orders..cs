@@ -95,9 +95,29 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             return true;
         }
 
-        public override bool UpdateOrder(Order order) => false;
+        public override bool UpdateOrder(Order order) 
+        {
+            if (!order.BrokerId.Any()) return false;
+            var id = order.BrokerId.First();
+
+            var res = RunSync(() => ExecuteUpdateOrderAsync(order));
+             if (!res.Success)
+             {
+                    var errorMsg = res.Error?.ToString() ?? "Unknown exchange error";
+                    Log.Error($"{Name}.UpdateOrder({order.Symbol.Value}): {errorMsg}");
+                    OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "UpdateOrder", errorMsg));
+                    return false;
+            }
+
+            return true;
+        }
+
+
 
         // --- Virtual hooks for exchange-specific overrides (e.g. HL vaultAddress) ---
+
+        protected virtual Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(Order order)
+            => null; // Not implemented by default, as many exchanges don't support order modifications
 
         protected virtual Task<ExchangeWebResult<SharedId>> ExecutePlaceOrderAsync(PlaceFuturesOrderRequest request)
             => _orderClient.PlaceFuturesOrderAsync(request);

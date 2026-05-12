@@ -1,23 +1,25 @@
 ﻿using CryptoExchange.Net.Authentication;
 using CryptoExchange.Net.Interfaces.Clients;
 using CryptoExchange.Net.Objects.Sockets;
+using CryptoExchange.Net.Requests;
 using CryptoExchange.Net.SharedApis;
 using HyperLiquid.Net;
 using HyperLiquid.Net.Clients;
 using HyperLiquid.Net.Enums;
+using HyperLiquid.Net.Objects.Models;
 using QuantConnect;
 using QuantConnect.Brokerages;
 using QuantConnect.Data;
 using QuantConnect.Data.Market;
 using QuantConnect.Interfaces;
 using QuantConnect.Logging;
+using QuantConnect.Orders;
 using QuantConnect.Securities;
 using SilverQuant.Lean.Brokerages.Futures.Shared;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
-
 using CxCancelOrderRequest = CryptoExchange.Net.SharedApis.CancelOrderRequest;
 
 
@@ -301,7 +303,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             var res = await _restClient.FuturesApi.Trading.PlaceOrderAsync(
                 symbol: request.Symbol.BaseAsset,
                 side: request.Side == SharedOrderSide.Buy ? OrderSide.Buy : OrderSide.Sell,
-                orderType: request.OrderType == SharedOrderType.Limit ? OrderType.Limit : OrderType.Market,
+                orderType: request.OrderType == SharedOrderType.Limit ? HyperLiquid.Net.Enums.OrderType.Limit : HyperLiquid.Net.Enums.OrderType.Market,
                 quantity: request.Quantity?.QuantityInBaseAsset ?? 0m,
                 price: request.Price ?? 0m,
                 vaultAddress: _vaultAdress);
@@ -330,6 +332,28 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                     Name,
                     TradingMode.PerpetualLinear,
                     res.As(new SharedId(request.OrderId.ToString()))
+                );
+        }
+
+        protected override async Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(Order order)
+        {
+            var res = await _restClient.FuturesApi.Trading.EditOrderAsync(
+                          symbol: order.Symbol.Value,
+                          orderId: order.Id,
+                          clientOrderId: null,
+                          side: order.Quantity > 0 ? OrderSide.Buy : OrderSide.Sell,
+                          orderType: order.Type == QuantConnect.Orders.OrderType.Limit ? HyperLiquid.Net.Enums.OrderType.Limit : HyperLiquid.Net.Enums.OrderType.Market,
+                          quantity: Math.Abs(order.Quantity),
+                          price: order.Price,
+                          vaultAddress: _vaultAdress);
+
+            if (!res.Success)
+                return new ExchangeWebResult<SharedId>(Name, res.Error);
+
+            return new ExchangeWebResult<SharedId>(
+                    Name,
+                    TradingMode.PerpetualLinear,
+                    res.As(new SharedId(order.Id.ToString()))
                 );
         }
     }
