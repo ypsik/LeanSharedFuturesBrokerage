@@ -3,11 +3,13 @@ using CryptoExchange.Net.Interfaces.Clients;
 using CryptoExchange.Net.Objects.Sockets;
 using CryptoExchange.Net.Requests;
 using CryptoExchange.Net.SharedApis;
+using Fasterflect;
 using HyperLiquid.Net;
 using HyperLiquid.Net.Clients;
 using HyperLiquid.Net.Enums;
 using HyperLiquid.Net.Objects.Models;
 using QuantConnect;
+using QuantConnect.Api;
 using QuantConnect.Brokerages;
 using QuantConnect.Data;
 using QuantConnect.Data.Market;
@@ -123,6 +125,20 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             return new SharedSymbol(TradingMode.PerpetualLinear, baseAsset, "USDC");
         }
         #endregion
+
+        #region Balance
+        public override List<CashAmount> GetCashBalance()
+        {
+            var result = new List<CashAmount>();
+            var accountInfo = RunSync(() => _restClient.FuturesApi.Account.GetAccountInfoAsync());
+            if (accountInfo)
+            {
+                result.Add(new CashAmount(accountInfo.Data.MarginSummary?.AccountValue??accountInfo.Data.CrossMarginSummary?.AccountValue??0m, "USDC"));
+            }
+            return result;                            
+        }
+        #endregion
+
 
         #region LEAN Data Manager
         protected override bool SubscribeSymbols(IEnumerable<Symbol> symbols, TickType tickType)
