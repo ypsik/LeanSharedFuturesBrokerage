@@ -164,5 +164,15 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             return true;
         }
 
+        protected override bool UnsubscribeFunding(Symbol symbol)
+        {
+            if (_subscriptions.TryRemove($"{symbol.Value}_FUNDING", out var sub))
+            {
+                RunSync(() => sub.CloseAsync());
+            }
+            return true;
+        }
+
+
     }
 }

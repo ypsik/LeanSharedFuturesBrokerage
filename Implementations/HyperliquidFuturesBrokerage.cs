@@ -296,11 +296,16 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         */
         protected override bool SubscribeFunding(Symbol symbol)
         {
-            _lastFundingHour[symbol] = DateTime.UtcNow.Hour;
-
             var ticker = symbol.Value.ToUpperInvariant();
             var hyperliquidCoin = ticker.EndsWith("USDC") ? ticker[..^4] : ticker;
-            var sub = RunSync(() =>
+            var subKey = $"{symbol.Value}_FUNDING";
+
+            lock (_fundingLock)
+            {
+                UnsubscribeFunding(symbol);
+                _lastFundingHour[symbol] = DateTime.UtcNow.Hour;
+
+                var sub = RunSync(() =>
                     _socketClient.FuturesApi.ExchangeData.SubscribeToSymbolUpdatesAsync(hyperliquidCoin, data =>
                     {
                         var tickerData = data.Data;
@@ -337,32 +342,41 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                         _aggregator.Update(funding);
                     })
                 );
-            if (sub.Success)
-            {
-                Log.Trace($"{Name} Symbol updates: Subscribed.");
-
-                var subscription = sub.Data;
-
-                subscription.ConnectionLost += () =>
+                if (sub.Success)
                 {
-                    _isConnectedOrder = false;
-                    Log.Error($"{Name} Symbol updates: Connection lost!");
-                    OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "Disconnect", "Symbol updates stream lost."));
-                };
+                    _subscriptions.TryAdd(subKey, sub.Data);
+                    Log.Trace($"{Name} Symbol updates: Subscribed.");
 
-                subscription.ConnectionRestored += (duration) =>
+                    var subscription = sub.Data;
+
+                    subscription.ConnectionLost += () =>
+                    {
+                        _isConnectedOrder = false;
+                        Log.Error($"{Name} Symbol updates: Connection lost!");
+                        OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "Disconnect", "Symbol updates stream lost."));
+                    };
+
+                    subscription.ConnectionRestored += (duration) =>
+                    {
+                        _isConnectedOrder = true;
+                        Log.Trace($"{Name} Symbol updates: Connection restored after {duration}.");
+                        OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Information, "Reconnect", $"Symbol updates stream restored. Syncing..."));
+                    };
+                }
+                else
                 {
-                    _isConnectedOrder = true;
-                    Log.Trace($"{Name} Symbol updates: Connection restored after {duration}.");
-                    OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Information, "Reconnect", $"Symbol updates stream restored. Syncing..."));
-                };
+                    Log.Error($"{Name} SubscribeFunding failed for {symbol}: {sub.Error?.Message}");
+                    return false;
+                }
             }
-            else
+            return true;
+        }
+        protected override bool UnsubscribeFunding(Symbol symbol)
+        {
+            if (_subscriptions.TryRemove($"{symbol.Value}_FUNDING", out var sub))
             {
-                Log.Error($"{Name} SubscribeFunding failed for {symbol}: {sub.Error?.Message}");
-                return false;
+                RunSync(() => sub.CloseAsync());
             }
-
             return true;
         }
 
