@@ -330,52 +330,88 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 {
                     return true;
                 }
-                _lastFundingHour[symbol] = DateTime.UtcNow.Hour;
 
                 var sub = RunSync(() =>
                     _socketClient.FuturesApi.ExchangeData.SubscribeToSymbolUpdatesAsync(hyperliquidCoin, data =>
                     {
                         var tickerData = data.Data;
-                        var currentFunding = tickerData.FundingRate;
                         var now = DateTime.UtcNow;
                         var currentHour = now.Hour;
 
-                        // Atomares Update: Wir versuchen die Stunde zu aktualisieren. 
-                        // Die Logik wird nur ausgeführt, wenn der neue Wert ungleich dem alten Wert ist.
-                        var updated = false;
-                        _lastFundingHour.AddOrUpdate(symbol, currentHour, (key, oldHour) =>
-                        {
-                            if (oldHour != currentHour)
+                        bool isFirstTick = false;
+                        bool isHourRollover = false;
+
+                        _lastFundingHour.AddOrUpdate(
+                            symbol,
+                            addValueFactory: (key) =>
                             {
-                                updated = true;
+                                isFirstTick = true;
                                 return currentHour;
-                            }
-                            return oldHour;
-                        });
+                            },
+                            updateValueFactory: (key, oldHour) =>
+                            {
+                                if (oldHour != currentHour)
+                                {
+                                    isHourRollover = true;
+                                    return currentHour;
+                                }
+                                return oldHour;
+                            });
 
-                        if (!updated) return;
-
-                        // Ab hier wird der Code pro Symbol nur noch einmal pro Stunde ausgeführt
-                        var rounded = new DateTime(now.Year, now.Month, now.Day, currentHour, 0, 0, DateTimeKind.Utc);
-                        Log.Trace($"Hyperliquid Funding Update: {tickerData.Symbol} -> Rate: {currentFunding}");
-
-                        var funding = new MarginInterestRate
+                        if (!isFirstTick && !isHourRollover)
                         {
-                            Symbol = symbol,
-                            Time = rounded,
-                            InterestRate = currentFunding ?? 0
-                        };
+                            return;
+                        }
 
-                        _aggregator.Update(funding);
+                        // --- 1. FUNDING UPDATE (Priorität: Direkt an LEAN senden) ---
+                        if (isHourRollover)
+                        {
+                            var currentFunding = tickerData.FundingRate ?? 0;
+                            var roundedTime = new DateTime(now.Year, now.Month, now.Day, currentHour, 0, 0, DateTimeKind.Utc);
+
+                            _aggregator.Update(new MarginInterestRate
+                            {
+                                Symbol = symbol,
+                                Time = roundedTime,
+                                InterestRate = currentFunding
+                            });
+
+                            Log.Trace($"Hyperliquid Funding Update: {tickerData.Symbol} -> Rate: {currentFunding}");
+                        }
+
+                        // --- 2. SPDB FIX (Läuft direkt im Anschluss) ---
+                        var oraclePrice = tickerData.OraclePrice ?? tickerData.MarkPrice;
+                        if (oraclePrice > 0)
+                        {
+                            var exponent = (int)Math.Floor(Math.Log10((double)oraclePrice));
+                            var decimalPlaces = Math.Max(0, Math.Min(6, 5 - (exponent + 1)));
+                            decimal tickSize = (decimal)Math.Pow(10, -decimalPlaces);
+
+                            var props = _spdb.GetSymbolProperties(symbol.ID.Market, symbol, symbol.SecurityType, "USDC");
+
+                            if (props == null || props.MinimumPriceVariation != tickSize)
+                            {
+                                var newProps = new SymbolProperties(
+                                    props?.Description ?? $"Hyperliquid {symbol.Value} Perpetual",
+                                    props?.QuoteCurrency ?? "USDC",
+                                    props?.ContractMultiplier ?? 1m,
+                                    tickSize,
+                                    props?.LotSize ?? (decimal)Math.Pow(10, -6),
+                                    props?.MarketTicker ?? symbol.Value
+                                );
+                                _spdb.SetEntry(symbol.ID.Market, symbol.Value, symbol.SecurityType, newProps);
+                                Log.Trace($"{Name}: SPDB Fix for {symbol.Value} - TickSize: {tickSize} (Price: {oraclePrice})");
+                            }
+                        }
                     })
                 );
+
                 if (sub.Success)
                 {
                     _subscriptions.TryAdd(subKey, sub.Data);
-                    Log.Trace($"{Name} Symbol updates: Subscribed.");
+                    Log.Trace($"{Name} Symbol updates: Subscribed for {symbol.Value}.");
 
                     var subscription = sub.Data;
-
                     subscription.ConnectionLost += () =>
                     {
                         _isConnectedOrder = false;
@@ -389,14 +425,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                         Log.Trace($"{Name} Symbol updates: Connection restored after {duration}.");
                         OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Information, "Reconnect", $"Symbol updates stream restored. Syncing..."));
                     };
+
+                    return true;
                 }
-                else
-                {
-                    Log.Error($"{Name} SubscribeFunding failed for {symbol}: {sub.Error?.Message}");
-                    return false;
-                }
+
+                Log.Error($"{Name} SubscribeFunding failed for {symbol}: {sub.Error?.Message}");
+                return false;
             }
-            return true;
         }
         protected override bool UnsubscribeFunding(Symbol symbol)
         {
