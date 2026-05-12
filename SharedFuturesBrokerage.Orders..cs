@@ -205,7 +205,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                             ? TradingMode.PerpetualLinear
                             : TradingMode.Spot;
 
-                        var sharedSymbol = GetSharedSymbol(symbol);
+                        var sharedSymbol = GetSharedSymbol(symbol, quoteAsset);
 
                         var statusCheck = await _orderClient.GetFuturesOrderAsync(new GetOrderRequest(sharedSymbol, kv.Key)).ConfigureAwait(false);
 
@@ -259,7 +259,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         protected virtual string NormalizeSymbol(string rawSymbol) => rawSymbol;
 
-        protected virtual SharedSymbol GetSharedSymbol(Symbol s) => new SharedSymbol(TradingMode.PerpetualLinear, s.Value, "USDC");
+        protected virtual SharedSymbol GetSharedSymbol(Symbol s, string quoteAsset = "USDC") => new SharedSymbol(TradingMode.PerpetualLinear, s.Value, quoteAsset);
 
         private OrderStatus MapStatus(SharedOrderStatus status, decimal filled)
         {

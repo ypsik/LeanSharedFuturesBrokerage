@@ -8,6 +8,7 @@ using HyperLiquid.Net;
 using HyperLiquid.Net.Clients;
 using HyperLiquid.Net.Enums;
 using HyperLiquid.Net.Objects.Models;
+using QLNet;
 using QuantConnect;
 using QuantConnect.Api;
 using QuantConnect.Brokerages;
@@ -118,11 +119,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             return upper.EndsWith("USDC") ? upper : upper + "USDC";
         }
 
-        protected override SharedSymbol GetSharedSymbol(Symbol s)
+        protected override SharedSymbol GetSharedSymbol(Symbol s, string quoteAsset = "USDC")
         {
             var ticker = s.Value.ToUpperInvariant();
             var baseAsset = ticker.EndsWith("USDC") ? ticker[..^4] : ticker;
-            return new SharedSymbol(TradingMode.PerpetualLinear, baseAsset, "USDC");
+            return new SharedSymbol(TradingMode.PerpetualLinear, baseAsset, quoteAsset);
         }
         #endregion
 
@@ -131,7 +132,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         {
             var result = new List<CashAmount>();
             var accountInfo = RunSync(() => _restClient.FuturesApi.Account.GetAccountInfoAsync());
-            if (accountInfo)
+            if (accountInfo.Success)
             {
                 result.Add(new CashAmount(accountInfo.Data.MarginSummary?.AccountValue??accountInfo.Data.CrossMarginSummary?.AccountValue??0m, "USDC"));
             }
