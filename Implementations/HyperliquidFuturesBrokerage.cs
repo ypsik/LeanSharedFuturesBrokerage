@@ -18,6 +18,7 @@ using QuantConnect.Interfaces;
 using QuantConnect.Logging;
 using QuantConnect.Orders;
 using QuantConnect.Securities;
+using RestSharp;
 using SilverQuant.Lean.Brokerages.Futures.Shared;
 using System;
 using System.Collections.Concurrent;
@@ -57,6 +58,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             _vaultAdress = vaultAddress;
             _restClient = restClient;
             _socketClient = socketClient;
+
+            PopulateSPDB();
 
             InitializeBase(
                 restClient.FuturesApi.SharedClient,
@@ -111,6 +114,48 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 _getHoldingsFunc
             );
         }
+ 
+        private void PopulateSPDB()
+        {
+            // --- Populate SPDB with all live HL assets ---
+            var result = _restClient.FuturesApi.ExchangeData
+                 .GetExchangeInfoAsync()
+                 .GetAwaiter().GetResult();
+
+            if (!result.Success)
+                throw new Exception($"Failed to load Hyperliquid assets: {result.Error}");
+
+            // WICHTIG: Die Summe aus szDecimals und pxDecimals ist bei HL Perps 5!
+            const int HL_SUM_DECIMALS = 5;
+
+            foreach (var symbol in result.Data.Where(s => !s.IsDelisted))
+            {
+                var ticker = symbol.Name + "USDC";
+
+                var lotSize = (decimal)Math.Pow(10, -symbol.QuantityDecimals);
+
+                var priceDecimals = HL_SUM_DECIMALS - symbol.QuantityDecimals;
+
+                decimal tickSize;
+
+                if (priceDecimals >= 0)
+                    tickSize = (decimal)Math.Pow(10, -priceDecimals);
+                else
+                    tickSize = 1m;
+
+                var symbolProperties = new SymbolProperties(
+                    description: $"Hyperliquid {symbol.Name} Perpetual",
+                    quoteCurrency: "USDC",
+                    contractMultiplier: 1m,
+                    minimumPriceVariation: tickSize,
+                    lotSize: lotSize,
+                    marketTicker: symbol.Name
+                );
+
+                _spdb.SetEntry("hyperliquid", ticker, SecurityType.CryptoFuture, symbolProperties);
+            }
+
+        }
 
         #region Symbol Mapping
         protected override string NormalizeSymbol(string rawSymbol)
@@ -122,7 +167,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         protected override SharedSymbol GetSharedSymbol(Symbol s, string quoteAsset = "USDC")
         {
             var ticker = s.Value.ToUpperInvariant();
-            var baseAsset = ticker.EndsWith("USDC") ? ticker[..^4] : ticker;
+            var baseAsset = ticker.EndsWith(quoteAsset) ? ticker[..^4] : ticker;
             return new SharedSymbol(TradingMode.PerpetualLinear, baseAsset, quoteAsset);
         }
         #endregion

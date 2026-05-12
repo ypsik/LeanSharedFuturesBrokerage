@@ -77,45 +77,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
                     .Select(x => new Holding(x))
                     .ToList();
 
-            // --- Populate SPDB with all live HL assets ---
-            var spdb = SymbolPropertiesDatabase.FromDataFolder();
-            var result = restClient.FuturesApi.ExchangeData
-                 .GetExchangeInfoAsync()
-                 .GetAwaiter().GetResult();
-
-            if (!result.Success)
-                throw new Exception($"Failed to load Hyperliquid assets: {result.Error}");
-
-            // WICHTIG: Die Summe aus szDecimals und pxDecimals ist bei HL Perps 5!
-            const int HL_SUM_DECIMALS = 5;
-
-            foreach (var symbol in result.Data.Where(s => !s.IsDelisted))
-            {
-                var ticker = symbol.Name + "USDC";
-
-                var lotSize = (decimal)Math.Pow(10, -symbol.QuantityDecimals);
-
-                var priceDecimals = HL_SUM_DECIMALS - symbol.QuantityDecimals;
-
-                decimal tickSize;
-
-                if (priceDecimals >= 0)
-                    tickSize = (decimal)Math.Pow(10, -priceDecimals);
-                else
-                    tickSize = 1m;
-
-                var symbolProperties = new SymbolProperties(
-                    description: $"Hyperliquid {symbol.Name} Perpetual",
-                    quoteCurrency: "USDC",
-                    contractMultiplier: 1m,
-                    minimumPriceVariation: tickSize,
-                    lotSize: lotSize,
-                    marketTicker: symbol.Name
-                );
-
-                spdb.SetEntry("hyperliquid", ticker, SecurityType.CryptoFuture, symbolProperties);
-            }
-
             var brokerage = new HyperliquidFuturesBrokerage(restClient, socketClient, vaultAddress, aggregator, getHoldingsFunc); 
 
             // Register with MEF Composer so Lean reuses this instance when

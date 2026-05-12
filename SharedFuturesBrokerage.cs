@@ -12,6 +12,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using QuantConnect.Securities;
 
 namespace SilverQuant.Lean.Brokerages.Futures.Shared
 {
@@ -27,6 +28,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         protected IFundingRateRestClient _fundingRateClient;
         protected Func<List<Holding>> _getHoldingsFunc;
 
+        protected SymbolPropertiesDatabase _spdb;
+
         protected IDataAggregator _aggregator;
         protected EventBasedDataQueueHandlerSubscriptionManager _subscriptionManager;
         protected bool _isInitialized;
@@ -41,6 +44,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         protected SharedFuturesBrokerage(string exchangeName) : base(exchangeName)
         {
+            _spdb = SymbolPropertiesDatabase.FromDataFolder();
         }
 
         protected void InitializeBase(
@@ -75,6 +79,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             _klineClient = klineClient;
             _aggregator = aggregator;
             _getHoldingsFunc = getHoldingsFunc;
+
+            _spdb = SymbolPropertiesDatabase.FromDataFolder();
 
             _subscriptionManager = new EventBasedDataQueueHandlerSubscriptionManager();
             _subscriptionManager.SubscribeImpl += (symbols, tickType) => SubscribeSymbols(symbols, tickType);

@@ -30,18 +30,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
             var alwaysOpen = SecurityExchangeHours.AlwaysOpen(TimeZones.Utc);
 
             mhdb.SetEntry("aster", null, SecurityType.CryptoFuture, alwaysOpen, TimeZones.Utc);
-
-            var spdb = SymbolPropertiesDatabase.FromDataFolder();
-            var symbolProperties = new SymbolProperties(
-                description: "Aster Perpetual",
-                quoteCurrency: "USDT",
-                contractMultiplier: 1m,
-                minimumPriceVariation: 0.0001m,
-                lotSize: 0.0001m,
-                marketTicker: string.Empty
-            );
-
-            spdb.SetEntry("aster", "*", SecurityType.CryptoFuture, symbolProperties);
         }
 
         public override Dictionary<string, string> BrokerageData => new Dictionary<string, string>
