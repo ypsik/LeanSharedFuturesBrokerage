@@ -16,6 +16,7 @@ using QuantConnect.Api;
 using QuantConnect.Brokerages;
 using QuantConnect.Data;
 using QuantConnect.Data.Market;
+using QuantConnect.Indicators;
 using QuantConnect.Interfaces;
 using QuantConnect.Logging;
 using QuantConnect.Orders;
@@ -42,9 +43,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         private string _vaultAdress;
 
-        private readonly object _balanceUpdateLock = new();
-        private bool _balanceUpdateConnected = false;
-        private UpdateSubscription _balanceUpdateSubscription;
+        private readonly object _fundingUpdateLock = new();
+        private bool _fundingUpdateConnected = false;
+        private UpdateSubscription _fundingUpdateSubscription;
         private readonly object _fundingLock = new();
         private readonly ConcurrentDictionary<Symbol, int> _lastFundingHour = new();
         private readonly ConcurrentDictionary<string, UpdateSubscription> _subscriptions = new();
@@ -84,7 +85,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         }
 
-        public override bool IsConnected => base.IsConnected && _balanceUpdateConnected;
+        public override bool IsConnected => base.IsConnected && _fundingUpdateConnected;
 
         protected override void InitializeFromJob(QuantConnect.Packets.LiveNodePacket job, IDataAggregator aggregator)
         {
@@ -294,39 +295,38 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         #region Connect
         public override void Connect()
         {
-            lock (_balanceUpdateLock)
+            lock (_fundingUpdateLock)
             {
-                if (_balanceUpdateSubscription == null && _socketClient != null)
+                if (_fundingUpdateSubscription == null && _socketClient != null)
                 {
                     var sub = RunSync(() =>
 
-                    _socketClient.FuturesApi.Trading.SubscribeToBalanceAndPositionUpdatesAsync(null, null,
+                    _socketClient.FuturesApi.Account.SubscribeToUserFundingUpdatesAsync(null, 
                         update =>
                         {
-                            var balance = update.Data.Data.MarginSummary.AccountValue;
-                            OnAccountChanged(new AccountEvent("USDC", balance));
+                            OnBalanceUpdated();
                         }));
 
                     if (sub.Success)
                     {
-                        _balanceUpdateSubscription = sub.Data;
-                        _balanceUpdateConnected = true;
+                        _fundingUpdateSubscription = sub.Data;
+                        _fundingUpdateConnected = true;
 
-                        Log.Trace($"{Name} Balance updates: Subscribed.");
+                        Log.Trace($"{Name} Funding updates: Subscribed.");
 
                         var subscription = sub.Data;
                         subscription.ConnectionLost += () =>
                         {
-                            _balanceUpdateConnected = false;
-                            Log.Error($"{Name} Balance updates: Connection lost!");
-                            OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "Disconnect", "Balance updates stream lost."));
+                            _fundingUpdateConnected = false;
+                            Log.Error($"{Name} Funding updates: Connection lost!");
+                            OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "Disconnect", "Funding updates stream lost."));
                         };
 
                         subscription.ConnectionRestored += (duration) =>
                         {
-                            _balanceUpdateConnected = true;
-                            Log.Trace($"{Name} Balance updates: Connection restored after {duration}.");
-                            OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Information, "Reconnect", $"Balance updates stream restored. Syncing..."));
+                            _fundingUpdateConnected = true;
+                            Log.Trace($"{Name} Funding updates: Connection restored after {duration}.");
+                            OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Information, "Reconnect", $"Funding updates stream restored. Syncing..."));
                         };
                     }                    
                 }
@@ -336,7 +336,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         }
         public override void Disconnect()
         {
-            RunSync(() => _balanceUpdateSubscription?.CloseAsync()?? Task.CompletedTask);
+            RunSync(() => _fundingUpdateSubscription?.CloseAsync()?? Task.CompletedTask);
             base.Disconnect();
         }
         #endregion

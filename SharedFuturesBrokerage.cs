@@ -128,11 +128,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     _reconcileCts = new CancellationTokenSource();
                     _reconcileTask = Task.Run(() => ReconcileLoop(_reconcileCts.Token));
                 }
-                //                if(!_isConnectedBalance)
-                //                {
-                //                    RunSync(() => SubscribeToAccountUpdatesAsync());
-                //                }
-                _isConnectedBalance = true;
+                if(!_isConnectedBalance)
+                {
+                    RunSync(() => SubscribeToBalanceUpdatesAsync());
+                }
             }
         }
 
@@ -140,6 +139,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         {
             _reconcileCts?.Cancel();
             if (_orderSocketSub != null) RunSync(() => _orderSocketSub.CloseAsync());
+            if (_balanceUpdatesSocketSub != null) RunSync(() => _balanceUpdatesSocketSub.CloseAsync());            
             _orderCache.Clear();
             _filledQtyCache.Clear();
             _isConnectedOrder = false;

@@ -1,5 +1,9 @@
-﻿using CryptoExchange.Net.SharedApis;
+﻿using CryptoExchange.Net.Objects.Sockets;
+using CryptoExchange.Net.SharedApis;
 using QuantConnect;
+using QuantConnect.Brokerages;
+using QuantConnect.Indicators;
+using QuantConnect.Logging;
 using QuantConnect.Securities;
 using System;
 using System.Collections.Generic;
@@ -9,8 +13,14 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 {
     public abstract partial class SharedFuturesBrokerage
     {
+        private decimal? _balance;
+        private UpdateSubscription _balanceUpdatesSocketSub;
+        bool _balanceUpdated;
         public override List<CashAmount> GetCashBalance()
         {
+            if(_balance.HasValue)
+                return new List<CashAmount> { new CashAmount(_balance.Value, "USDC") };
+
             var res = RunSync(() => _balanceClient.GetBalancesAsync(new GetBalancesRequest()));
             return res.Success && res.Data != null
                 ? res.Data.Select(x => new CashAmount(x.Total, x.Asset ?? "USDC")).ToList()
@@ -62,30 +72,50 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             // Fallback auf die lokale Funktion
             return _getHoldingsFunc?.Invoke() ?? new List<Holding>();
         }
-        private async Task SubscribeToAccountUpdatesAsync()
+
+        protected void OnBalanceUpdated()
         {
-            var result = await _balanceSocket.SubscribeToBalanceUpdatesAsync(new SubscribeBalancesRequest(), update =>
+            _balanceUpdated = true;
+        }
+
+        private async Task SubscribeToBalanceUpdatesAsync()
+        {
+            var sub = await _balanceSocket.SubscribeToBalanceUpdatesAsync(new SubscribeBalancesRequest(), update =>
             {
                 foreach (var balance in update.Data)
                 {
-                    var accountEvent = new AccountEvent(balance.Asset, balance.Total);
-                    OnAccountChanged(accountEvent);
+                    _balance = balance.Total;
+                    if (_balanceUpdated)
+                    {
+                        OnAccountChanged(new AccountEvent("USDC", _balance.Value));
+                        _balanceUpdated = false;
+                    }
                 }
 
             });
 
-            if (result.Success)
+            if (sub.Success)
             {
-                // Connection-Management
-                result.Data.ConnectionLost += () => _isConnectedBalance = false;
-                result.Data.ConnectionRestored += (d) =>
-                {                    
-                    _isConnectedBalance = true;
+                var subscription = sub.Data;
+
+                subscription.ConnectionLost += () =>
+                {
+                    _isConnectedOrder = false;
+                    Log.Error($"{Name}: Connection lost!");
+                    OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "Disconnect", "Balance updates stream lost."));
+                };
+
+                subscription.ConnectionRestored += (duration) =>
+                {
+                    _isConnectedOrder = true;
+                    Log.Trace($"{Name}: Connection restored after {duration}.");
+                    OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Information, "Reconnect", $"Balance updates stream restored. Syncing..."));
                 };
             }
             else
-                throw new Exception("Balance socket socket failed");
+                throw new Exception("Balance updates socket failed");
 
+            _balanceUpdatesSocketSub = sub.Data;
             _isConnectedBalance = true;
         }
     }   
