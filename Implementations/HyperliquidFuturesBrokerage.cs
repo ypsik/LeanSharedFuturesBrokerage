@@ -1,4 +1,5 @@
-﻿using CryptoExchange.Net.Authentication;
+﻿using Accord.IO;
+using CryptoExchange.Net.Authentication;
 using CryptoExchange.Net.Interfaces.Clients;
 using CryptoExchange.Net.Objects.Sockets;
 using CryptoExchange.Net.Requests;
@@ -24,6 +25,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net;
 using System.Timers;
 using CxCancelOrderRequest = CryptoExchange.Net.SharedApis.CancelOrderRequest;
 
@@ -37,7 +39,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         private string _vaultAdress;
 
-        private UpdateSubscription _fundingSubscription;
+        private UpdateSubscription _balanceUpdateSubscription;
         private readonly object _fundingLock = new();
         private readonly ConcurrentDictionary<Symbol, int> _lastFundingHour = new();
         private readonly ConcurrentDictionary<string, UpdateSubscription> _subscriptions = new();
@@ -155,6 +157,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
                 _spdb.SetEntry("hyperliquid", ticker, SecurityType.CryptoFuture, symbolProperties);
             }
+            _spdb.Save();
 
         }
 
@@ -282,40 +285,21 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         #endregion
         /*
         #region Funding Special Case
-        public override IEnumerator<BaseData> Subscribe(SubscriptionDataConfig config, EventHandler handler)
+        public override IEnumerator<BaseData> Subscribe()
         {
-
-            if (config.Type == typeof(MarginInterestRate))
-            {
-                lock (_fundingLock)
+                if (_balanceUpdateSubscription == null && _socketClient != null)
                 {
-                    if (_fundingSubscription == null && _socketClient != null)
+                    var sub = RunSync(() =>
+
+                _socketClient.FuturesApi.Trading.SubscribeToBalanceAndPositionUpdatesAsync( null, null,
+                    update =>
                     {
-                        var sub = RunSync(() =>
+                        var balance = update.Data.Data.MarginSummary.TotalRawUsd;
+                        OnAccountChanged(new AccountEvent("USDC", balance));
+                    }));
                         
-                            _socketClient.FuturesApi.Account.SubscribeToUserFundingUpdatesAsync(
-                                null,
-                                update =>
-                                {
-                                    foreach (var funding in update.Data)
-                                    {
-                                        var leanSymbol = Symbol.Create(NormalizeSymbol(funding.Symbol), SecurityType.CryptoFuture, Name);
-                                        var rate = new MarginInterestRate
-                                        {
-                                            Symbol = leanSymbol,
-                                            Time = funding.Timestamp ?? DateTime.UtcNow,
-                                            InterestRate = funding.FundingRate
-                                        };
-                                        handler?.Invoke(rate, EventArgs.Empty);
-                                    }
-                                }));
-                        
-                        if (sub.Success) _fundingSubscription = sub.Data;
-                    }
+                    if (sub.Success) _balanceUpdateSubscription = sub.Data;
                 }
-                return Enumerable.Empty<BaseData>().GetEnumerator();
-            }
-            return base.Subscribe(config, handler);
         }
         #endregion
         */
@@ -400,6 +384,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                                     props?.MarketTicker ?? symbol.Value
                                 );
                                 _spdb.SetEntry(symbol.ID.Market, symbol.Value, symbol.SecurityType, newProps);
+                                _spdb.Save();
                                 Log.Trace($"{Name}: SPDB Fix for {symbol.Value} - TickSize: {tickSize} (Price: {oraclePrice})");
                             }
                         }
