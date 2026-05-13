@@ -303,7 +303,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                     _socketClient.FuturesApi.Trading.SubscribeToBalanceAndPositionUpdatesAsync(null, null,
                         update =>
                         {
-                            var balance = update.Data.Data.MarginSummary.TotalRawUsd;
+                            var balance = update.Data.Data.MarginSummary.AccountValue;
                             OnAccountChanged(new AccountEvent("USDC", balance));
                         }));
 
