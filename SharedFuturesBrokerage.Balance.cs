@@ -16,6 +16,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         private decimal? _balance;
         private UpdateSubscription _balanceUpdatesSocketSub;
         bool _balanceUpdated;
+
         public override List<CashAmount> GetCashBalance()
         {
             if(_balance.HasValue)

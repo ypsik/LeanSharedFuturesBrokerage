@@ -37,6 +37,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         protected UpdateSubscription _orderSocketSub;
         protected readonly object _connectLock = new();
+        protected readonly object _balanceUpdatesConnectLock = new();
         private bool _isConnectedOrder, _isConnectedBalance;
         protected CancellationTokenSource _reconcileCts;
         protected Task _reconcileTask;
@@ -130,7 +131,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 }
                 if(!_isConnectedBalance)
                 {
-                    RunSync(() => SubscribeToBalanceUpdatesAsync());
+                    lock (_balanceUpdatesConnectLock)
+                        RunSync(() => SubscribeToBalanceUpdatesAsync());
                 }
             }
         }
