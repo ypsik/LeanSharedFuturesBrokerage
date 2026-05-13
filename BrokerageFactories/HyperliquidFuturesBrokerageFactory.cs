@@ -61,6 +61,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
             {
                 options.ApiCredentials = credentials;
                 options.BuilderFeePercentage = 0;
+                options.OutputOriginalData = true;
             });
 
             var socketClient = new HyperLiquidSocketClient(options =>

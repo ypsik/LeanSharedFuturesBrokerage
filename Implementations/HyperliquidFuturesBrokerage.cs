@@ -30,6 +30,7 @@ using System.Linq;
 using System.Net;
 using System.Reflection;
 using System.Timers;
+
 using CxCancelOrderRequest = CryptoExchange.Net.SharedApis.CancelOrderRequest;
 
 
@@ -486,7 +487,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 vaultAddress: _vaultAdress);
 
             if (!res.Success)
+            {
+                Log.Error($"HL-Update-Error: {res.Error} | " +
+                          $"Price: {request.Price ?? 0m} | " +
+                          $"OriginalData : {res.OriginalData}");
+
                 return new ExchangeWebResult<SharedId>(Name, res.Error);
+            }
 
             return new ExchangeWebResult<SharedId>(
                     Name,
@@ -503,7 +510,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 vaultAddress: _vaultAdress);
 
             if (!res.Success)
+            {
+                Log.Error($"HL-Update-Error: {res.Error} | " +
+                          $"OriginalData : {res.OriginalData}");
+
                 return new ExchangeWebResult<SharedId>(Name, res.Error);
+            }
 
             return new ExchangeWebResult<SharedId>(
                     Name,
@@ -526,7 +538,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                           vaultAddress: _vaultAdress);
 
             if (!res.Success)
+            {
+                Log.Error($"HL-Update-Error: {res.Error} | " +
+                          $"Price: {order.Price} | " +
+                          $"OriginalData : {res.OriginalData}");
+                
                 return new ExchangeWebResult<SharedId>(Name, res.Error);
+            }
 
             return new ExchangeWebResult<SharedId>(
                     Name,
