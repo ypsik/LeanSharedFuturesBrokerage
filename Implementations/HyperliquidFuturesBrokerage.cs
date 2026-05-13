@@ -527,22 +527,39 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         protected override async Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(Order order)
         {
             var hyperliquidCoin = GetHyperliquidTicker(order.Symbol);
+
+            decimal originalQty = order.Quantity;
+            decimal quantity = Math.Abs(order.Quantity);
+
+            if (quantity == 0 && order.BrokerId.Any())
+            {
+                if (_orderCache.TryGetValue(order.BrokerId.Last(), out var cached))
+                {
+                    originalQty = cached.Quantity;
+                    quantity = Math.Abs(cached.Quantity);
+                }
+            }
+
+            decimal price = order.Price;
+            OrderSide side = originalQty > 0 ? OrderSide.Buy : OrderSide.Sell;
+
             var res = await _restClient.FuturesApi.Trading.EditOrderAsync(
                           symbol: hyperliquidCoin,
                           orderId: long.Parse(order.BrokerId.Last()),
                           clientOrderId: null,
-                          side: order.Quantity > 0 ? OrderSide.Buy : OrderSide.Sell,
-                          orderType: order.Type == QuantConnect.Orders.OrderType.Limit ? HyperLiquid.Net.Enums.OrderType.Limit : HyperLiquid.Net.Enums.OrderType.Market,
-                          quantity: Math.Abs(order.Quantity),
-                          price: order.Price,
+                          side: side,
+                          orderType: order.Type == QuantConnect.Orders.OrderType.Limit
+                              ? HyperLiquid.Net.Enums.OrderType.Limit
+                              : HyperLiquid.Net.Enums.OrderType.Market,
+                          quantity: quantity,
+                          price: price,
                           vaultAddress: _vaultAdress);
 
             if (!res.Success)
             {
-                Log.Error($"HL-Update-Error: {res.Error} | " +
-                          $"Price: {order.Price} | " +
+                Log.Error($"Hyperliquid update error: {res.Error} | " +
+                          $"Price: {price} | " +
                           $"OriginalData : {res.OriginalData}");
-                
                 return new ExchangeWebResult<SharedId>(Name, res.Error);
             }
 

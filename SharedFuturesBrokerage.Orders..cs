@@ -21,7 +21,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
     public abstract partial class SharedFuturesBrokerage
     {
         // --- CACHES ---
-        private readonly ConcurrentDictionary<string, Order> _orderCache = new();
+        protected readonly ConcurrentDictionary<string, Order> _orderCache = new();
         private readonly ConcurrentDictionary<string, decimal> _filledQtyCache = new();
 
         #region Order Management
@@ -94,25 +94,21 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
             return true;
         }
-
-        public override bool UpdateOrder(Order order) 
+        public override bool UpdateOrder(Order order)
         {
             if (!order.BrokerId.Any() || ExecuteUpdateOrderAsync == null) return false;
-            var id = order.BrokerId.First();
 
             var res = RunSync(() => ExecuteUpdateOrderAsync(order));
-             if (!res.Success)
-             {
-                    var errorMsg = res.Error?.ToString() ?? "Unknown exchange error";
-                    Log.Error($"{Name}.UpdateOrder({order.Symbol.Value}): {errorMsg}");
-                    OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "UpdateOrder", errorMsg));
-                    return false;
+            if (!res.Success)
+            {
+                var errorMsg = res.Error?.ToString() ?? "Unknown exchange error";
+                Log.Error($"{Name}.UpdateOrder({order.Symbol.Value}): {errorMsg}");
+                OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "UpdateOrder", errorMsg));
+                return false;
             }
 
             return true;
         }
-
-
 
         // --- Virtual hooks for exchange-specific overrides (e.g. HL vaultAddress) ---
 
