@@ -11,6 +11,7 @@ using HyperLiquid.Net.Enums;
 using HyperLiquid.Net.Objects.Models;
 using QLNet;
 using QuantConnect;
+using QuantConnect.Algorithm.Framework.Selection;
 using QuantConnect.Api;
 using QuantConnect.Brokerages;
 using QuantConnect.Data;
@@ -26,6 +27,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
+using System.Reflection;
 using System.Timers;
 using CxCancelOrderRequest = CryptoExchange.Net.SharedApis.CancelOrderRequest;
 
@@ -34,11 +36,14 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 {
     public class HyperliquidFuturesBrokerage : SharedFuturesBrokerage
     {
+        IAlgorithm _algorithm;
         private HyperLiquidRestClient _restClient;
         private HyperLiquidSocketClient _socketClient;
 
         private string _vaultAdress;
 
+        private readonly object _balanceUpdateLock = new();
+        private bool _balanceUpdateConnected = false;
         private UpdateSubscription _balanceUpdateSubscription;
         private readonly object _fundingLock = new();
         private readonly ConcurrentDictionary<Symbol, int> _lastFundingHour = new();
@@ -51,6 +56,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         // 2. Trading-Instanz Konstruktor (Optionaler Parameter fix)
         internal HyperliquidFuturesBrokerage(
+            IAlgorithm algorithm,
             HyperLiquidRestClient restClient,
             HyperLiquidSocketClient socketClient,
             string vaultAddress,
@@ -58,6 +64,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             Func<List<Holding>> getHoldingsFunc = null) // 🔥 Fix: Optional gemacht
             : base("hyperliquid")
         {
+            _algorithm = algorithm;
             _vaultAdress = vaultAddress;
             _restClient = restClient;
             _socketClient = socketClient;
@@ -76,6 +83,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 getHoldingsFunc);
 
         }
+
+        public override bool IsConnected => base.IsConnected && _balanceUpdateConnected;
 
         protected override void InitializeFromJob(QuantConnect.Packets.LiveNodePacket job, IDataAggregator aggregator)
         {
@@ -281,26 +290,57 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             return true;
         }
         #endregion
-        /*
-        #region Funding Special Case
-        public override IEnumerator<BaseData> Subscribe()
+        
+        #region Connect
+        public override void Connect()
         {
+            lock (_balanceUpdateLock)
+            {
                 if (_balanceUpdateSubscription == null && _socketClient != null)
                 {
                     var sub = RunSync(() =>
 
-                _socketClient.FuturesApi.Trading.SubscribeToBalanceAndPositionUpdatesAsync( null, null,
-                    update =>
+                    _socketClient.FuturesApi.Trading.SubscribeToBalanceAndPositionUpdatesAsync(null, null,
+                        update =>
+                        {
+                            var balance = update.Data.Data.MarginSummary.TotalRawUsd;
+                            OnAccountChanged(new AccountEvent("USDC", balance));
+                        }));
+
+                    if (sub.Success)
                     {
-                        var balance = update.Data.Data.MarginSummary.TotalRawUsd;
-                        OnAccountChanged(new AccountEvent("USDC", balance));
-                    }));
-                        
-                    if (sub.Success) _balanceUpdateSubscription = sub.Data;
+                        _balanceUpdateSubscription = sub.Data;
+                        _balanceUpdateConnected = true;
+
+                        Log.Trace($"{Name} Balance updates: Subscribed.");
+
+                        var subscription = sub.Data;
+                        subscription.ConnectionLost += () =>
+                        {
+                            _balanceUpdateConnected = false;
+                            Log.Error($"{Name} Balance updates: Connection lost!");
+                            OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "Disconnect", "Balance updates stream lost."));
+                        };
+
+                        subscription.ConnectionRestored += (duration) =>
+                        {
+                            _balanceUpdateConnected = true;
+                            Log.Trace($"{Name} Balance updates: Connection restored after {duration}.");
+                            OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Information, "Reconnect", $"Balance updates stream restored. Syncing..."));
+                        };
+                    }                    
                 }
+
+                base.Connect();
+            }
+        }
+        public override void Disconnect()
+        {
+            RunSync(() => _balanceUpdateSubscription?.CloseAsync()?? Task.CompletedTask);
+            base.Disconnect();
         }
         #endregion
-        */
+        
         protected override bool SubscribeFunding(Symbol symbol)
         {
             var hyperliquidCoin = GetHyperliquidTicker(symbol);
@@ -382,6 +422,17 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                                     props?.MarketTicker ?? symbol.Value
                                 );
                                 _spdb.SetEntry(symbol.ID.Market, symbol.Value, symbol.SecurityType, newProps);
+                                if (_algorithm.Securities.ContainsKey(symbol))
+                                {
+                                    var method = typeof(Security).GetMethod("UpdateSymbolProperties",
+                                        BindingFlags.NonPublic | BindingFlags.Instance);
+
+                                    if (method != null)
+                                        method.Invoke(_algorithm.Securities[symbol], new object[] { newProps });
+                                    else
+                                        Log.Error($"{Name}: UpdateSymbolProperties method not found on Security — LEAN API may have changed");
+                                }
+
                                 Log.Trace($"{Name}: SPDB Fix for {symbol.Value} - TickSize: {tickSize} (Price: {oraclePrice})");
                             }
                         }
@@ -396,14 +447,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                     var subscription = sub.Data;
                     subscription.ConnectionLost += () =>
                     {
-                        _isConnectedOrder = false;
                         Log.Error($"{Name} Symbol updates: Connection lost!");
                         OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "Disconnect", "Symbol updates stream lost."));
                     };
 
                     subscription.ConnectionRestored += (duration) =>
                     {
-                        _isConnectedOrder = true;
                         Log.Trace($"{Name} Symbol updates: Connection restored after {duration}.");
                         OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Information, "Reconnect", $"Symbol updates stream restored. Syncing..."));
                     };
@@ -468,7 +517,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             var hyperliquidCoin = GetHyperliquidTicker(order.Symbol);
             var res = await _restClient.FuturesApi.Trading.EditOrderAsync(
                           symbol: hyperliquidCoin,
-                          orderId: order.Id,
+                          orderId: long.Parse(order.BrokerId.Last()),
                           clientOrderId: null,
                           side: order.Quantity > 0 ? OrderSide.Buy : OrderSide.Sell,
                           orderType: order.Type == QuantConnect.Orders.OrderType.Limit ? HyperLiquid.Net.Enums.OrderType.Limit : HyperLiquid.Net.Enums.OrderType.Market,

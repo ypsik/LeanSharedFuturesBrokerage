@@ -37,7 +37,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         protected UpdateSubscription _orderSocketSub;
         protected readonly object _connectLock = new();
-        protected bool _isConnectedOrder, _isConnectedBalance;
+        private bool _isConnectedOrder, _isConnectedBalance;
         protected CancellationTokenSource _reconcileCts;
         protected Task _reconcileTask;
         protected readonly TimeSpan _reconciliationInterval = TimeSpan.FromSeconds(30);
@@ -135,7 +135,17 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 _isConnectedBalance = true;
             }
         }
-        
+
+        public override void Disconnect()
+        {
+            _reconcileCts?.Cancel();
+            if (_orderSocketSub != null) RunSync(() => _orderSocketSub.CloseAsync());
+            _orderCache.Clear();
+            _filledQtyCache.Clear();
+            _isConnectedOrder = false;
+            _isConnectedBalance = false;
+        }
+
         public virtual void SetJob(LiveNodePacket job)
         {
             _job = job;

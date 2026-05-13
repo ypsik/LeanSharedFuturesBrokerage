@@ -162,16 +162,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             }
         }
 
-        public override void Disconnect()
-        {
-            _reconcileCts?.Cancel();
-            if (_orderSocketSub != null) RunSync(() => _orderSocketSub.CloseAsync());
-            _orderCache.Clear();
-            _filledQtyCache.Clear();
-            _isConnectedOrder = false;
-            _isConnectedBalance = false;
-        }
-
         private async Task ReconcileLoop(CancellationToken ct)
         {
             while (!ct.IsCancellationRequested)

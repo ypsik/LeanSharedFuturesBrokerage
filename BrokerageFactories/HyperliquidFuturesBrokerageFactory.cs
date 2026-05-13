@@ -78,7 +78,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
                     .ToList();
 
             algorithm.Settings.DatabasesRefreshPeriod = TimeSpan.FromDays(36500);
-            var brokerage = new HyperliquidFuturesBrokerage(restClient, socketClient, vaultAddress, aggregator, getHoldingsFunc); 
+            var brokerage = new HyperliquidFuturesBrokerage(algorithm, restClient, socketClient, vaultAddress, aggregator, getHoldingsFunc); 
 
             // Register with MEF Composer so Lean reuses this instance when
             // resolving IDataQueueHandler instead of trying to construct a new one
