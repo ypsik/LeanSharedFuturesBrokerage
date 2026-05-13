@@ -157,8 +157,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
                 _spdb.SetEntry("hyperliquid", ticker, SecurityType.CryptoFuture, symbolProperties);
             }
-            _spdb.Save();
-
         }
 
         #region Symbol Mapping
@@ -384,7 +382,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                                     props?.MarketTicker ?? symbol.Value
                                 );
                                 _spdb.SetEntry(symbol.ID.Market, symbol.Value, symbol.SecurityType, newProps);
-                                _spdb.Save();
                                 Log.Trace($"{Name}: SPDB Fix for {symbol.Value} - TickSize: {tickSize} (Price: {oraclePrice})");
                             }
                         }
