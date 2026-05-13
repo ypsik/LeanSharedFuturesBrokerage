@@ -90,6 +90,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             _isInitialized = true;
         }
 
+        public override bool AccountInstantlyUpdated { get; } = true;
+
         public override bool IsConnected => _isConnectedOrder && _isConnectedBalance;
 
         public override void Connect()
@@ -136,7 +138,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 }
             }
         }
-
+        
         public override void Disconnect()
         {
             _reconcileCts?.Cancel();
