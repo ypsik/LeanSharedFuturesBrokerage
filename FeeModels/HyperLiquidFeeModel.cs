@@ -17,8 +17,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.FeeModels
             var price = security.Price;
 
             var rate = order.Type == OrderType.Limit
-                ? 0.0002m
-                : 0.0005m;
+                ? 0.00015m
+                : 0.00045m;
 
             var fee = Math.Abs(order.Quantity) * price * rate;
 

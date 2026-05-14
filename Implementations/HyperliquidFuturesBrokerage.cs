@@ -524,7 +524,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
             if (!res.Success)
             {
-                Log.Error($"Hyperliquid update error: {res.Error} | Ticker: {ticker}| Price: {price} | OriginalData: {res.OriginalData}");
+                Log.Error($"Hyperliquid update error: {res.Error} | Ticker: {ticker} | Price: {price} | OriginalData: {res.OriginalData}");
                 return new ExchangeWebResult<SharedId>(Name, res.Error);
             }
 
