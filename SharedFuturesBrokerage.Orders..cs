@@ -103,10 +103,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             decimal price = lastUpdate.LimitPrice ?? order.Price;
 
             decimal quantity = lastUpdate.Quantity.HasValue
-                ? Math.Abs(lastUpdate.Quantity.Value)
+                ? lastUpdate.Quantity.Value                                                          
                 : _orderCache.TryGetValue(order.BrokerId.Last(), out var cached)
-                    ? Math.Abs(cached.Quantity)
-                    : Math.Abs(order.Quantity);
+                    ? cached.Quantity                                                                
+                    : order.Quantity;                                                               
 
             var res = RunSync(() => ExecuteUpdateOrderAsync(order, price, quantity));
             if (!res.Success)

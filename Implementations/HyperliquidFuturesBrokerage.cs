@@ -525,11 +525,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         protected override async Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(Order order, decimal price, decimal quantity)
         {
             var hyperliquidCoin = GetHyperliquidTicker(order.Symbol);
-
-            decimal originalQty = quantity != 0 ? quantity
-                : _orderCache.TryGetValue(order.BrokerId.Last(), out var cached) ? cached.Quantity : order.Quantity;
-
-            OrderSide side = originalQty > 0 ? OrderSide.Buy : OrderSide.Sell;
+            OrderSide side = quantity > 0 ? OrderSide.Buy : OrderSide.Sell;
 
             var res = await _restClient.FuturesApi.Trading.EditOrderAsync(
                           symbol: hyperliquidCoin,
@@ -539,7 +535,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                           orderType: order.Type == QuantConnect.Orders.OrderType.Limit
                               ? HyperLiquid.Net.Enums.OrderType.Limit
                               : HyperLiquid.Net.Enums.OrderType.Market,
-                          quantity: Math.Abs(originalQty),
+                          quantity: Math.Abs(quantity),
                           price: price,
                           vaultAddress: _vaultAdress);
 
