@@ -157,6 +157,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     Status = status,
                     FillPrice = trade.Price,
                     FillQuantity = tradeQty * sign,
+                    OrderFee = new OrderFee(new CashAmount(trade.Fee ?? 0m, trade.FeeAsset ?? "USDC")),
                     Message = "User trade socket"
                 });
 
@@ -176,10 +177,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 if (!_orderCache.TryGetValue(o.OrderId, out var order)) continue;
 
                 var totalFilled = o.QuantityFilled?.QuantityInBaseAsset ?? 0m;
-                var delta = 0;
                 var status = MapStatus(o.Status, totalFilled);
-                var sign = o.Side == SharedOrderSide.Buy ? 1 : -1;
-
+                
                 // Exklusive Trennung: Fills werden nur im HandleUserTradeSocket verarbeitet
                 if (status == OrderStatus.PartiallyFilled || status == OrderStatus.Filled) continue;
 
@@ -191,8 +190,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero)
                 {
                     Status = status,
-                    FillPrice = o.AveragePrice ?? o.OrderPrice ?? 0m,
-                    FillQuantity = delta * sign,
                     Message = "order socket"
                 });
 
