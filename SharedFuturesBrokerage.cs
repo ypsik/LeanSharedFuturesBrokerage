@@ -180,10 +180,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         public override void Disconnect()
         {
             _reconcileCts?.Cancel();
+            if (_userTradeSocketSub != null) RunSync(() => _userTradeSocketSub.CloseAsync());
             if (_orderSocketSub != null) RunSync(() => _orderSocketSub.CloseAsync());
             if (_balanceUpdatesSocketSub != null) RunSync(() => _balanceUpdatesSocketSub.CloseAsync());            
             _orderCache.Clear();
             _filledQtyCache.Clear();
+            _isConnectedUserTrade = false;
             _isConnectedOrder = false;
             _isConnectedBalance = false;
         }

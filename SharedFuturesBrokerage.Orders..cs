@@ -7,6 +7,7 @@ using QuantConnect.Logging;
 using QuantConnect.Orders;
 using QuantConnect.Orders.Fees;
 using QuantConnect.Securities;
+using QuantConnect.Statistics;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -138,7 +139,32 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         {
             foreach (var trade in update.Data)
             {
+                if (string.IsNullOrEmpty(trade.OrderId)) continue;
+                if (!_orderCache.TryGetValue(trade.OrderId, out var order)) continue;
 
+                var tradeQty = trade.Quantity;
+                var prevTotal = _filledQtyCache.TryGetValue(trade.OrderId, out var pf) ? pf : 0m;
+                var totalFilled = prevTotal + tradeQty;
+
+                _filledQtyCache[trade.OrderId] = totalFilled;
+
+                // Status basierend auf Füllgrad bestimmen (Nur Fills hier)
+                var status = totalFilled >= Math.Abs(order.Quantity) ? OrderStatus.Filled : OrderStatus.PartiallyFilled;
+                var sign = trade.Side == SharedOrderSide.Buy ? 1 : -1;
+
+                OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, new OrderFee(new CashAmount(trade.Fee ?? 0m, trade.FeeAsset ?? "USDC")))
+                {
+                    Status = status,
+                    FillPrice = trade.Price,
+                    FillQuantity = tradeQty * sign,
+                    Message = "User trade socket"
+                });
+
+                if (status == OrderStatus.Filled)
+                {
+                    _orderCache.TryRemove(trade.OrderId, out _);
+                    _filledQtyCache.TryRemove(trade.OrderId, out _);
+                }
             }
         }
 
@@ -150,31 +176,33 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 if (!_orderCache.TryGetValue(o.OrderId, out var order)) continue;
 
                 var totalFilled = o.QuantityFilled?.QuantityInBaseAsset ?? 0m;
-                var prev = _filledQtyCache.TryGetValue(o.OrderId, out var pf) ? pf : 0m;
-                var delta = totalFilled - prev;
+                var delta = 0;
                 var status = MapStatus(o.Status, totalFilled);
+                var sign = o.Side == SharedOrderSide.Buy ? 1 : -1;
 
-                if (delta == 0 && status == OrderStatus.Submitted) continue;
+                // Exklusive Trennung: Fills werden nur im HandleUserTradeSocket verarbeitet
+                if (status == OrderStatus.PartiallyFilled || status == OrderStatus.Filled) continue;
+
+                // Beibehaltung der Original-Logik für Submitted
+                if (status == OrderStatus.Submitted || status == OrderStatus.UpdateSubmitted) continue;
 
                 _filledQtyCache[o.OrderId] = totalFilled;
-                decimal exchangeFee = o.Fee ?? 0m;
-                string feeCurrency = o.FeeAsset ?? "USDC";
-                OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, new OrderFee(new CashAmount(exchangeFee, feeCurrency)))
+
+                OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero)
                 {
                     Status = status,
                     FillPrice = o.AveragePrice ?? o.OrderPrice ?? 0m,
-                    FillQuantity = delta * (order.Quantity > 0 ? 1 : -1),
-                    Message = "socket"
+                    FillQuantity = delta * sign,
+                    Message = "order socket"
                 });
 
-                if (status is OrderStatus.Filled or OrderStatus.Canceled or OrderStatus.Invalid)
+                if (status is OrderStatus.Canceled or OrderStatus.Invalid)
                 {
                     _orderCache.TryRemove(o.OrderId, out _);
                     _filledQtyCache.TryRemove(o.OrderId, out _);
                 }
             }
         }
-
         private async Task ReconcileLoop(CancellationToken ct)
         {
             while (!ct.IsCancellationRequested)
