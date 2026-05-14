@@ -21,6 +21,7 @@ using QuantConnect.Interfaces;
 using QuantConnect.Logging;
 using QuantConnect.Orders;
 using QuantConnect.Securities;
+using QuantConnect.Util;
 using RestSharp;
 using SilverQuant.Lean.Brokerages.Futures.Shared;
 using System;
@@ -183,7 +184,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         }
         protected override string NativeTicker(Symbol symbol)
         {
-            return symbol.ID.Symbol;
+            CurrencyPairUtil.DecomposeCurrencyPair(symbol, out var baseAsset, out _);
+            return baseAsset;
         }
 
         #endregion
@@ -505,11 +507,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         protected override async Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(Order order, decimal price, decimal quantity)
         {
-            var hyperliquidCoin = NativeTicker(order.Symbol);
+            var ticker = NativeTicker(order.Symbol);
             OrderSide side = quantity > 0 ? OrderSide.Buy : OrderSide.Sell;
 
             var res = await _restClient.FuturesApi.Trading.EditOrderAsync(
-                          symbol: hyperliquidCoin,
+                          symbol: ticker,
                           orderId: long.Parse(order.BrokerId.Last()),
                           clientOrderId: null,
                           side: side,
@@ -522,7 +524,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
             if (!res.Success)
             {
-                Log.Error($"Hyperliquid update error: {res.Error} | Price: {price} | OriginalData: {res.OriginalData}");
+                Log.Error($"Hyperliquid update error: {res.Error} | Ticker: {ticker}| Price: {price} | OriginalData: {res.OriginalData}");
                 return new ExchangeWebResult<SharedId>(Name, res.Error);
             }
 
