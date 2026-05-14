@@ -184,7 +184,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 if (status == OrderStatus.PartiallyFilled || status == OrderStatus.Filled) continue;
 
                 // Beibehaltung der Original-Logik für Submitted
-                if (status == OrderStatus.Submitted || status == OrderStatus.UpdateSubmitted) continue;
+                if (status is OrderStatus.Submitted or OrderStatus.UpdateSubmitted or OrderStatus.New or OrderStatus.None) continue;
 
                 _filledQtyCache[o.OrderId] = totalFilled;
 
