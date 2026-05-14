@@ -38,10 +38,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         protected bool _isInitialized;
         protected LiveNodePacket _job;
 
-        protected UpdateSubscription _orderSocketSub;
+        protected UpdateSubscription _orderSocketSub, _userTradeSocketSub;
         protected readonly object _connectLock = new();
         protected readonly object _balanceUpdatesConnectLock = new();
-        private bool _isConnectedOrder, _isConnectedBalance;
+        private bool _isConnectedOrder, _isConnectedUserTrade, _isConnectedBalance;
         protected CancellationTokenSource _reconcileCts;
         protected Task _reconcileTask;
         protected readonly TimeSpan _reconciliationInterval = TimeSpan.FromSeconds(30);
@@ -102,15 +102,43 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         public override bool AccountInstantlyUpdated { get; } = true;
 
-        public override bool IsConnected => _isConnectedOrder && _isConnectedBalance;
+        public override bool IsConnected => _isConnectedOrder && _isConnectedUserTrade && _isConnectedBalance;
 
         public override void Connect()
         {
             lock (_connectLock)
             {
-                if (_balanceClient == null || _orderSocket == null) throw new InvalidOperationException("Clients not configured");
+                if (_balanceClient == null || _orderSocket == null || _tradeSocket == null) throw new InvalidOperationException("Clients not configured");
 
-                if (!_isConnectedOrder)
+                if (!_isConnectedUserTrade)
+                {
+                    var sub = RunSync(() => _tradeSocket.SubscribeToUserTradeUpdatesAsync(new SubscribeUserTradeRequest(), HandleUserTradeSocket));
+                    if (sub.Success)
+                    {
+                        var subscription = sub.Data;
+
+                        subscription.ConnectionLost += () =>
+                        {
+                            _isConnectedUserTrade = false;
+                            Log.Error($"{Name}: Connection lost!");
+                            OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "Disconnect", "User trade stream lost."));
+                        };
+
+                        subscription.ConnectionRestored += (duration) =>
+                        {
+                            _isConnectedUserTrade = true;
+                            Log.Trace($"{Name}: Connection restored after {duration}.");
+                            OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Information, "Reconnect", $"User trade stream restored. Syncing..."));
+                            //Task.Run(async () => await ForceReconcile());
+                        };
+                    }
+                    else
+                        throw new Exception("User trade socket failed");
+
+                    _userTradeSocketSub = sub.Data;
+                    _isConnectedUserTrade = true;
+
+                }
                 {
                     var sub = RunSync(() => _orderSocket.SubscribeToFuturesOrderUpdatesAsync(new SubscribeFuturesOrderRequest(), HandleOrderSocket));
                     if (sub.Success)

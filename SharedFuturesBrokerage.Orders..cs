@@ -134,6 +134,14 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         #region Socket / Reconcile
 
+        private void HandleUserTradeSocket(DataEvent<SharedUserTrade[]> update)
+        {
+            foreach (var trade in update.Data)
+            {
+
+            }
+        }
+
         private void HandleOrderSocket(DataEvent<SharedFuturesOrder[]> update)
         {
             foreach (var o in update.Data)
