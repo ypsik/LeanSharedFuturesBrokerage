@@ -181,28 +181,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             var baseAsset = ticker.EndsWith(quoteAsset) ? ticker[..^4] : ticker;
             return new SharedSymbol(TradingMode.PerpetualLinear, baseAsset, quoteAsset);
         }
-
-        private string GetHyperliquidTicker(Symbol symbol)
+        protected override string NativeTicker(Symbol symbol)
         {
-            var symbolProperties = _spdb.GetSymbolProperties(
-                symbol.ID.Market,
-                symbol,
-                symbol.SecurityType,
-                "USDC"); // Default Quote Currency als Fallback
-
-            // Die QuoteCurrency ist hier z.B. "USDC"
-            var quoteCurrency = symbolProperties.QuoteCurrency;
-
-            var ticker = symbol.Value;
-
-            if (ticker.EndsWith(quoteCurrency))
-            {
-                return ticker.Remove(ticker.Length - quoteCurrency.Length);
-            }
-            else
-            {
-                return ticker;
-            }
+            return symbol.ID.Symbol;
         }
 
         #endregion
@@ -342,7 +323,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         
         protected override bool SubscribeFunding(Symbol symbol)
         {
-            var hyperliquidCoin = GetHyperliquidTicker(symbol);
+            var hyperliquidCoin = NativeTicker(symbol);
             var subKey = $"{symbol.Value}_FUNDING";
 
             lock (_fundingLock)
@@ -524,7 +505,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         protected override async Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(Order order, decimal price, decimal quantity)
         {
-            var hyperliquidCoin = GetHyperliquidTicker(order.Symbol);
+            var hyperliquidCoin = NativeTicker(order.Symbol);
             OrderSide side = quantity > 0 ? OrderSide.Buy : OrderSide.Sell;
 
             var res = await _restClient.FuturesApi.Trading.EditOrderAsync(

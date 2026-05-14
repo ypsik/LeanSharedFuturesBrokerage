@@ -249,6 +249,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         #region Order Helpers
 
+        protected virtual string NativeTicker(Symbol symbol)
+        {
+            return symbol.Value;
+        }
+
         protected virtual string NormalizeSymbol(string rawSymbol) => rawSymbol;
 
         protected virtual SharedSymbol GetSharedSymbol(Symbol s, string quoteAsset = "USDC") => new SharedSymbol(TradingMode.PerpetualLinear, s.Value, quoteAsset);
