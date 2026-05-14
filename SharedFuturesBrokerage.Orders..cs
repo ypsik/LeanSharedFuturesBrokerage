@@ -98,7 +98,17 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         {
             if (!order.BrokerId.Any() || ExecuteUpdateOrderAsync == null) return false;
 
-            var res = RunSync(() => ExecuteUpdateOrderAsync(order));
+            var lastUpdate = _orderManager.GetOrderTicket(order.Id).UpdateRequests.Last();
+
+            decimal price = lastUpdate.LimitPrice ?? order.Price;
+
+            decimal quantity = lastUpdate.Quantity.HasValue
+                ? Math.Abs(lastUpdate.Quantity.Value)
+                : _orderCache.TryGetValue(order.BrokerId.Last(), out var cached)
+                    ? Math.Abs(cached.Quantity)
+                    : Math.Abs(order.Quantity);
+
+            var res = RunSync(() => ExecuteUpdateOrderAsync(order, price, quantity));
             if (!res.Success)
             {
                 var errorMsg = res.Error?.ToString() ?? "Unknown exchange error";
@@ -110,10 +120,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             return true;
         }
 
+        protected virtual Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(Order order, decimal price, decimal quantity)
+            => Task.FromResult<ExchangeWebResult<SharedId>>(null);
         // --- Virtual hooks for exchange-specific overrides (e.g. HL vaultAddress) ---
-
-        protected virtual Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(Order order)
-            => null; // Not implemented by default, as many exchanges don't support order modifications
 
         protected virtual Task<ExchangeWebResult<SharedId>> ExecutePlaceOrderAsync(PlaceFuturesOrderRequest request)
             => _orderClient.PlaceFuturesOrderAsync(request);

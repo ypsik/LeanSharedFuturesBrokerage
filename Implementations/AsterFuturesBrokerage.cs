@@ -29,12 +29,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         }
 
         // 2. Trading-Instanz Konstruktor (für die Factory)
-        internal AsterFuturesBrokerage(
+        internal AsterFuturesBrokerage(IAlgorithm algorithm,
             AsterRestClient restClient,
             AsterSocketClient socketClient,
             IDataAggregator aggregator,
             Func<List<Holding>> getHoldingsFunc = null)
-            : base("aster")
+            : base(algorithm, "aster")
         {
             _restClient = restClient;
             _socketClient = socketClient;

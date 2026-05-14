@@ -19,6 +19,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
     // WICHTIG: abstract partial muss hier stehen!
     public abstract partial class SharedFuturesBrokerage : Brokerage, IDataQueueHandler
     {
+        protected IAlgorithm _algorithm;
+        protected SecurityTransactionManager _orderManager;
+
         protected IFuturesOrderRestClient _orderClient;
         protected IBalanceRestClient _balanceClient;
         protected IFuturesOrderSocketClient _orderSocket;
@@ -43,8 +46,15 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         protected Task _reconcileTask;
         protected readonly TimeSpan _reconciliationInterval = TimeSpan.FromSeconds(30);
 
+
         protected SharedFuturesBrokerage(string exchangeName) : base(exchangeName)
         {
+            _spdb = SymbolPropertiesDatabase.FromDataFolder();
+        }
+        protected SharedFuturesBrokerage(IAlgorithm algorithm, string exchangeName) : base(exchangeName)
+        {
+            _algorithm = algorithm;
+            _orderManager = _algorithm.Transactions;
             _spdb = SymbolPropertiesDatabase.FromDataFolder();
         }
 

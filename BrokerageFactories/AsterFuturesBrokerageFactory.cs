@@ -79,7 +79,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
             };
 
             // --- Fix: Konstruktor mit Aggregator aufrufen ---
-            var brokerage = new AsterFuturesBrokerage(asterRestClient, asterSocketClient, aggregator, getHoldingsFunc);
+            var brokerage = new AsterFuturesBrokerage(algorithm, asterRestClient, asterSocketClient, aggregator, getHoldingsFunc);
 
             // Register with MEF Composer so Lean reuses this instance when
             // resolving IDataQueueHandler instead of trying to construct a new one

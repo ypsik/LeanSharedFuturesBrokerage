@@ -38,7 +38,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 {
     public class HyperliquidFuturesBrokerage : SharedFuturesBrokerage
     {
-        IAlgorithm _algorithm;
         private HyperLiquidRestClient _restClient;
         private HyperLiquidSocketClient _socketClient;
 
@@ -64,9 +63,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             string vaultAddress,
             IDataAggregator aggregator,
             Func<List<Holding>> getHoldingsFunc = null) // 🔥 Fix: Optional gemacht
-            : base("hyperliquid")
+            : base(algorithm, "hyperliquid")
         {
-            _algorithm = algorithm;
             _vaultAdress = vaultAddress;
             _restClient = restClient;
             _socketClient = socketClient;
@@ -524,23 +522,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 );
         }
 
-        protected override async Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(Order order)
+        protected override async Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(Order order, decimal price, decimal quantity)
         {
             var hyperliquidCoin = GetHyperliquidTicker(order.Symbol);
 
-            decimal originalQty = order.Quantity;
-            decimal quantity = Math.Abs(order.Quantity);
+            decimal originalQty = quantity != 0 ? quantity
+                : _orderCache.TryGetValue(order.BrokerId.Last(), out var cached) ? cached.Quantity : order.Quantity;
 
-            if (quantity == 0 && order.BrokerId.Any())
-            {
-                if (_orderCache.TryGetValue(order.BrokerId.Last(), out var cached))
-                {
-                    originalQty = cached.Quantity;
-                    quantity = Math.Abs(cached.Quantity);
-                }
-            }
-
-            decimal price = order.Price;
             OrderSide side = originalQty > 0 ? OrderSide.Buy : OrderSide.Sell;
 
             var res = await _restClient.FuturesApi.Trading.EditOrderAsync(
@@ -551,15 +539,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                           orderType: order.Type == QuantConnect.Orders.OrderType.Limit
                               ? HyperLiquid.Net.Enums.OrderType.Limit
                               : HyperLiquid.Net.Enums.OrderType.Market,
-                          quantity: quantity,
+                          quantity: Math.Abs(originalQty),
                           price: price,
                           vaultAddress: _vaultAdress);
 
             if (!res.Success)
             {
-                Log.Error($"Hyperliquid update error: {res.Error} | " +
-                          $"Price: {price} | " +
-                          $"OriginalData : {res.OriginalData}");
+                Log.Error($"Hyperliquid update error: {res.Error} | Price: {price} | OriginalData: {res.OriginalData}");
                 return new ExchangeWebResult<SharedId>(Name, res.Error);
             }
 
