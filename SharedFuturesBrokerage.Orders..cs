@@ -178,25 +178,20 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                 var totalFilled = o.QuantityFilled?.QuantityInBaseAsset ?? 0m;
                 var status = MapStatus(o.Status, totalFilled);
-                
-                // Exklusive Trennung: Fills werden nur im HandleUserTradeSocket verarbeitet
-                if (status == OrderStatus.PartiallyFilled || status == OrderStatus.Filled) continue;
-
-                // Beibehaltung der Original-Logik für Submitted
-                if (status is OrderStatus.Submitted or OrderStatus.UpdateSubmitted or OrderStatus.New or OrderStatus.None) continue;
-
-                _filledQtyCache[o.OrderId] = totalFilled;
-
-                OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero)
-                {
-                    Status = status,
-                    Message = "order socket"
-                });
 
                 if (status is OrderStatus.Canceled or OrderStatus.Invalid)
                 {
-                    _orderCache.TryRemove(o.OrderId, out _);
-                    _filledQtyCache.TryRemove(o.OrderId, out _);
+                    OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero)
+                    {
+                        Status = status,
+                        Message = "order socket"
+                    });
+
+                    if (status is OrderStatus.Canceled or OrderStatus.Invalid)
+                    {
+                        _orderCache.TryRemove(o.OrderId, out _);
+                        _filledQtyCache.TryRemove(o.OrderId, out _);
+                    }
                 }
             }
         }
