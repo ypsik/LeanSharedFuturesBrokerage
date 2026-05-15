@@ -67,7 +67,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
             var socketClient = new HyperLiquidSocketClient(options =>
             {
                 options.ApiCredentials = credentials;
-//                options.MaxConcurrentResubscriptionsPerSocket = 5;
+                options.DelayAfterConnect = TimeSpan.FromMilliseconds(500);
                 options.SocketIndividualSubscriptionCombineTarget = 50;
             });
 
