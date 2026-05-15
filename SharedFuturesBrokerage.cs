@@ -22,10 +22,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         protected IAlgorithm _algorithm;
         protected SecurityTransactionManager _orderManager;
 
+        protected IBookTickerSocketClient _bookTickerSocket;
+        protected ITradeSocketClient _tradeSocket;
         protected IFuturesOrderRestClient _orderClient;
         protected IBalanceRestClient _balanceClient;
         protected IFuturesOrderSocketClient _orderSocket;
-        protected IUserTradeSocketClient _tradeSocket;
+        protected IUserTradeSocketClient _userTradeSocket;
         protected IBalanceSocketClient _balanceSocket;
         protected IKlineRestClient _klineClient;
         protected IFundingRateRestClient _fundingRateClient;
@@ -63,8 +65,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         protected void InitializeBase(
             IFuturesOrderRestClient orderClient,
             IBalanceRestClient balanceClient,
+            IBookTickerSocketClient bookTickerSocket,
             IFuturesOrderSocketClient orderSocket,
-            IUserTradeSocketClient tradeSocket,
+            ITradeSocketClient tradeSocket,
+            IUserTradeSocketClient userTradeSocket,
             IBalanceSocketClient balanceSocket,
             IFundingRateRestClient fundingRateClient,
             IKlineRestClient klineClient,
@@ -85,8 +89,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
             _orderClient = orderClient;
             _balanceClient = balanceClient;
+            _bookTickerSocket = bookTickerSocket;
             _orderSocket = orderSocket;
             _tradeSocket = tradeSocket;
+            _userTradeSocket = userTradeSocket;
             _balanceSocket = balanceSocket;
             _fundingRateClient = fundingRateClient;
             _klineClient = klineClient;
@@ -110,7 +116,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         {
             lock (_connectLock)
             {
-                if (_balanceClient == null || _orderSocket == null || _tradeSocket == null) throw new InvalidOperationException("Clients not configured");
+                if (_balanceClient == null || _orderSocket == null || _userTradeSocket == null) throw new InvalidOperationException("Clients not configured");
 
                 if (_reconcileTask == null)
                 {
@@ -121,7 +127,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 if (!_isConnectedUserTrade)
                 {
                     _subRateGate.WaitToProceed();
-                    var sub = RunSync(() => _tradeSocket.SubscribeToUserTradeUpdatesAsync(new SubscribeUserTradeRequest(), HandleUserTradeSocket));
+                    var sub = RunSync(() => _userTradeSocket.SubscribeToUserTradeUpdatesAsync(new SubscribeUserTradeRequest(), HandleUserTradeSocket));
                     SetupSubscriptionEvents(sub.Success, sub.Data, state => _isConnectedUserTrade = state, "User trade", "User trade socket failed");
                     _userTradeSocketSub = sub.Data;
                 }

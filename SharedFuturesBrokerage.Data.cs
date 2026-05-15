@@ -1,9 +1,12 @@
-﻿using CryptoExchange.Net.SharedApis;
+﻿using CryptoExchange.Net.Interfaces.Clients;
+using CryptoExchange.Net.Objects.Sockets;
+using CryptoExchange.Net.SharedApis;
 using QuantConnect;
 using QuantConnect.Data;
 using QuantConnect.Data.Market;
 using QuantConnect.Logging;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -11,6 +14,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 {
     public abstract partial class SharedFuturesBrokerage
     {
+
+        protected readonly ConcurrentDictionary<string, UpdateSubscription> _subscriptions = new();
+
         #region IDataQueueHandler
         public virtual IEnumerator<BaseData> Subscribe(SubscriptionDataConfig config, EventHandler handler)
         {
@@ -83,10 +89,95 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         }
         #endregion
 
+        #region LEAN Data Manager
+        private bool SubscribeSymbols(IEnumerable<Symbol> symbols, TickType tickType)
+        {
+            foreach (var symbol in symbols)
+            {
+                var shared = GetSharedSymbol(symbol);
+                var subKey = $"{symbol.Value}_{tickType}";
+                if (_subscriptions.ContainsKey(subKey)) continue;
+
+                _subRateGate.WaitToProceed();
+
+                if (tickType == TickType.Trade)
+                {
+                    var sub = RunSync(() => _tradeSocket.SubscribeToTradeUpdatesAsync(
+                        new SubscribeTradeRequest(shared),
+                        update =>
+                        {
+                            foreach (var item in update.Data)
+                            {
+                                EmitTick(new Tick
+                                {
+                                    Symbol = symbol,
+                                    Time = item.Timestamp.ToUniversalTime(),
+                                    TickType = TickType.Trade,
+                                    Value = item.Price,
+                                    Quantity = item.Quantity
+                                });
+                            }
+                        }));
+
+                    if (sub.Success)
+                    {
+                        SetupSubscriptionEvents(sub.Success, sub.Data, _ => { }, $"{symbol.Value} Trade", $"Trade subscription failed for {symbol.Value}");
+                        _subscriptions[subKey] = sub.Data;
+                    }
+                    else
+                        Log.Error($"{Name}: Trade subscription failed for {symbol.Value}: {sub.Error?.Message}");
+
+                }
+                else if (tickType == TickType.Quote)
+                {
+                    var sub = RunSync(() => _bookTickerSocket.SubscribeToBookTickerUpdatesAsync(
+                        new SubscribeBookTickerRequest(shared),
+                        update =>
+                        {
+                            var q = update.Data;
+                            EmitTick(new Tick
+                            {
+                                Symbol = symbol,
+                                Time = DateTime.UtcNow,
+                                TickType = TickType.Quote,
+                                BidPrice = q.BestBidPrice,
+                                BidSize = q.BestBidQuantity,
+                                AskPrice = q.BestAskPrice,
+                                AskSize = q.BestAskQuantity
+                            });
+                        }));
+
+                    if (sub.Success)
+                    {
+                        SetupSubscriptionEvents(sub.Success, sub.Data, _ => { }, $"{symbol.Value} Quote", $"Quote subscription failed for {symbol.Value}");
+                        _subscriptions[subKey] = sub.Data;
+                    }
+                    else
+                        Log.Error($"{Name}: Trade subscription failed for {symbol.Value}: {sub.Error?.Message}");
+
+
+                    if (sub.Success) _subscriptions[subKey] = sub.Data;
+                }
+            }
+            return true;
+        }
+
+        private bool UnsubscribeSymbols(IEnumerable<Symbol> symbols, TickType tickType)
+        {
+            foreach (var symbol in symbols)
+            {
+                if (_subscriptions.TryRemove($"{symbol.Value}_{tickType}", out var sub))
+                {
+                    RunSync(() => sub.CloseAsync());
+                }
+            }
+            return true;
+        }
+        #endregion
+
+
         protected abstract bool SubscribeFunding(Symbol symbol);
         protected abstract bool UnsubscribeFunding(Symbol symbol);
-        protected abstract bool SubscribeSymbols(IEnumerable<Symbol> symbols, TickType tickType);
-        protected abstract bool UnsubscribeSymbols(IEnumerable<Symbol> symbols, TickType tickType);
         protected void EmitTick(Tick tick) => _aggregator?.Update(tick);
     }
 }

@@ -50,7 +50,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         private UpdateSubscription _fundingUpdateSubscription;
         private readonly object _fundingLock = new();
         private readonly ConcurrentDictionary<Symbol, int> _lastFundingHour = new();
-        private readonly ConcurrentDictionary<string, UpdateSubscription> _subscriptions = new();
 
         public override decimal MinimumOrderNotionalValue => 10m;
 
@@ -79,6 +78,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             InitializeBase(
                 restClient.FuturesApi.SharedClient,
                 restClient.FuturesApi.SharedClient,
+                socketClient.FuturesApi.SharedClient,
+                socketClient.FuturesApi.SharedClient,
                 socketClient.FuturesApi.SharedClient,
                 socketClient.FuturesApi.SharedClient,
                 socketClient.FuturesApi.SharedClient,
@@ -127,6 +128,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             InitializeBase(
                 _restClient.FuturesApi.SharedClient,
                 _restClient.FuturesApi.SharedClient,
+                _socketClient.FuturesApi.SharedClient,
+                _socketClient.FuturesApi.SharedClient,
                 _socketClient.FuturesApi.SharedClient,
                 _socketClient.FuturesApi.SharedClient,
                 _socketClient.FuturesApi.SharedClient,
@@ -212,92 +215,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         }
         #endregion
 
-
-        #region LEAN Data Manager
-        protected override bool SubscribeSymbols(IEnumerable<Symbol> symbols, TickType tickType)
-        {
-            foreach (var symbol in symbols)
-            {
-                var shared = GetSharedSymbol(symbol);
-                var subKey = $"{symbol.Value}_{tickType}";
-                if (_subscriptions.ContainsKey(subKey)) continue;
-
-                _subRateGate.WaitToProceed();
-
-                if (tickType == TickType.Trade)
-                {
-                    var sub = RunSync(() => _socketClient.FuturesApi.SharedClient.SubscribeToTradeUpdatesAsync(
-                        new SubscribeTradeRequest(shared),
-                        update =>
-                        {
-                            foreach (var item in update.Data)
-                            {
-                                EmitTick(new Tick
-                                {
-                                    Symbol = symbol,
-                                    Time = item.Timestamp.ToUniversalTime(),
-                                    TickType = TickType.Trade,
-                                    Value = item.Price,
-                                    Quantity = item.Quantity
-                                });
-                            }
-                        }));
-
-                    if (sub.Success)
-                    {
-                        SetupSubscriptionEvents(sub.Success, sub.Data, _ => { }, $"{symbol.Value} Trade", $"Trade subscription failed for {symbol.Value}");
-                        _subscriptions[subKey] = sub.Data;
-                    }
-                    else
-                        Log.Error($"{Name}: Trade subscription failed for {symbol.Value}: {sub.Error?.Message}");
-
-                }
-                else if (tickType == TickType.Quote)
-                {
-                    var sub = RunSync(() => _socketClient.FuturesApi.SharedClient.SubscribeToBookTickerUpdatesAsync(
-                        new SubscribeBookTickerRequest(shared),
-                        update =>
-                        {
-                            var q = update.Data;
-                            EmitTick(new Tick
-                            {
-                                Symbol = symbol,
-                                Time = DateTime.UtcNow,
-                                TickType = TickType.Quote,
-                                BidPrice = q.BestBidPrice,
-                                BidSize = q.BestBidQuantity,
-                                AskPrice = q.BestAskPrice,
-                                AskSize = q.BestAskQuantity
-                            });
-                        }));
-
-                    if (sub.Success)
-                    {
-                        SetupSubscriptionEvents(sub.Success, sub.Data, _ => { }, $"{symbol.Value} Quote", $"Quote subscription failed for {symbol.Value}");
-                        _subscriptions[subKey] = sub.Data;
-                    }
-                    else
-                        Log.Error($"{Name}: Trade subscription failed for {symbol.Value}: {sub.Error?.Message}");
-
-
-                    if (sub.Success) _subscriptions[subKey] = sub.Data;
-                }
-            }
-            return true;
-        }
-
-        protected override bool UnsubscribeSymbols(IEnumerable<Symbol> symbols, TickType tickType)
-        {
-            foreach (var symbol in symbols)
-            {
-                if (_subscriptions.TryRemove($"{symbol.Value}_{tickType}", out var sub))
-                {
-                    RunSync(() => sub.CloseAsync());
-                }
-            }
-            return true;
-        }
-        #endregion
 
         #region Connect
         public override void Connect()
