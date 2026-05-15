@@ -212,11 +212,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 var shared = GetSharedSymbol(symbol);
                 var subKey = $"{symbol.Value}_{tickType}";
                 if (_subscriptions.ContainsKey(subKey)) continue;
+                
+                _subRateGate.WaitToProceed();
 
                 if (tickType == TickType.Trade)
                 {
                     // Trades kommen oft als Array (SharedTrade[])
-                    _subRateGate.WaitToProceed();
                     var sub = RunSync(() => _socketClient.FuturesApi.SharedClient.SubscribeToTradeUpdatesAsync(
                         new SubscribeTradeRequest(shared),
                         update =>
@@ -238,7 +239,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 }
                 else if (tickType == TickType.Quote)
                 {
-                    _subRateGate.WaitToProceed();
                     var sub = RunSync(() => _socketClient.FuturesApi.SharedClient.SubscribeToBookTickerUpdatesAsync(
                         new SubscribeBookTickerRequest(shared),
                         update =>
@@ -336,6 +336,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 {
                     return true;
                 }
+
+                _subRateGate.WaitToProceed();
 
                 var sub = RunSync(() =>
                     _socketClient.FuturesApi.ExchangeData.SubscribeToSymbolUpdatesAsync(hyperliquidCoin, data =>
