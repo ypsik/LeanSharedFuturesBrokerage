@@ -52,6 +52,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         private readonly ConcurrentDictionary<Symbol, int> _lastFundingHour = new();
         private readonly ConcurrentDictionary<string, UpdateSubscription> _subscriptions = new();
 
+        public override decimal MinimumOrderNotionalValue => 10m;
+
         // 1. LEAN DataQueueHandler Konstruktor
         public HyperliquidFuturesBrokerage() : base("hyperliquid")
         {
