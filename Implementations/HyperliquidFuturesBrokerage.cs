@@ -429,13 +429,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                     var subscription = sub.Data;
                     subscription.ConnectionLost += () =>
                     {
-                        Log.Error($"{Name} Symbol updates: Connection lost!");
+                        Log.Error($"{Name} Symbol {hyperliquidCoin} updates: Connection lost!");
                         OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "Disconnect", "Symbol updates stream lost."));
                     };
 
                     subscription.ConnectionRestored += (duration) =>
                     {
-                        Log.Trace($"{Name} Symbol updates: Connection restored after {duration}.");
+                        Log.Trace($"{Name} Symbol {hyperliquidCoin} updates: Connection restored after {duration}.");
                         OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Information, "Reconnect", $"Symbol updates stream restored. Syncing..."));
                     };
 
