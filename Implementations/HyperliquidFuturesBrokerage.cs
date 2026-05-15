@@ -216,6 +216,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 if (tickType == TickType.Trade)
                 {
                     // Trades kommen oft als Array (SharedTrade[])
+                    _subRateGate.WaitToProceed();
                     var sub = RunSync(() => _socketClient.FuturesApi.SharedClient.SubscribeToTradeUpdatesAsync(
                         new SubscribeTradeRequest(shared),
                         update =>
@@ -237,7 +238,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 }
                 else if (tickType == TickType.Quote)
                 {
-                    // 🔥 FIX: BookTicker (Quotes) ist ein einzelnes Objekt, kein Array!
+                    _subRateGate.WaitToProceed();
                     var sub = RunSync(() => _socketClient.FuturesApi.SharedClient.SubscribeToBookTickerUpdatesAsync(
                         new SubscribeBookTickerRequest(shared),
                         update =>
@@ -281,13 +282,14 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             {
                 if (_fundingUpdateSubscription == null && _socketClient != null)
                 {
+                    _subRateGate.WaitToProceed();
                     var sub = RunSync(() =>
 
-                    _socketClient.FuturesApi.Account.SubscribeToUserFundingUpdatesAsync(null, 
-                        update =>
-                        {
-                            OnBalanceUpdated();
-                        }));
+                        _socketClient.FuturesApi.Account.SubscribeToUserFundingUpdatesAsync(null, 
+                            update =>
+                            {
+                                OnBalanceUpdated();
+                            }));
 
                     if (sub.Success)
                     {

@@ -81,6 +81,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         private async Task SubscribeToBalanceUpdatesAsync()
         {
+            _subRateGate.WaitToProceed();
             var sub = await _balanceSocket.SubscribeToBalanceUpdatesAsync(new SubscribeBalancesRequest(), update =>
             {
                 foreach (var balance in update.Data)

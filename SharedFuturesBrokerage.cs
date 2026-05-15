@@ -46,6 +46,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         protected Task? _reconcileTask = null;
         protected readonly TimeSpan _reconciliationInterval = TimeSpan.FromSeconds(30);
 
+        protected static readonly RateGate _subRateGate = new RateGate(3, TimeSpan.FromSeconds(1));
+
 
         protected SharedFuturesBrokerage(string exchangeName) : base(exchangeName)
         {
@@ -118,6 +120,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                 if (!_isConnectedUserTrade)
                 {
+                    _subRateGate.WaitToProceed();
                     var sub = RunSync(() => _tradeSocket.SubscribeToUserTradeUpdatesAsync(new SubscribeUserTradeRequest(), HandleUserTradeSocket));
                     SetupSubscriptionEvents(sub.Success, sub.Data, state => _isConnectedUserTrade = state, "User trade", "User trade socket failed");
                     _userTradeSocketSub = sub.Data;
@@ -125,6 +128,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                 if (!_isConnectedOrder) 
                 {
+                    _subRateGate.WaitToProceed();
                     var sub = RunSync(() => _orderSocket.SubscribeToFuturesOrderUpdatesAsync(new SubscribeFuturesOrderRequest(), HandleOrderSocket));
                     SetupSubscriptionEvents(sub.Success, sub.Data, state => _isConnectedOrder = state, "Order", "Order socket failed");
                     _orderSocketSub = sub.Data;
