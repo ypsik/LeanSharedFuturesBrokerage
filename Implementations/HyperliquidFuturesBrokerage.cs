@@ -223,22 +223,16 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                         _fundingUpdateSubscription = sub.Data;
                         _fundingUpdateConnected = true;
 
+                        SetupSubscriptionEvents(
+                                        sub.Success,
+                                        sub.Data,
+                                        (state) => _fundingUpdateConnected = state,
+                                        "Funding updates",
+                                        "Funding updates subscription failed"
+                                    );
+
+                        _fundingUpdateSubscription = sub.Data;
                         Log.Trace($"{Name} Funding updates: Subscribed.");
-
-                        var subscription = sub.Data;
-                        subscription.ConnectionLost += () =>
-                        {
-                            _fundingUpdateConnected = false;
-                            Log.Error($"{Name} Funding updates: Connection lost!");
-                            OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "Disconnect", "Funding updates stream lost."));
-                        };
-
-                        subscription.ConnectionRestored += (duration) =>
-                        {
-                            _fundingUpdateConnected = true;
-                            Log.Trace($"{Name} Funding updates: Connection restored after {duration}.");
-                            OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Information, "Reconnect", $"Funding updates stream restored. Syncing..."));
-                        };
                     }
                 }
 
