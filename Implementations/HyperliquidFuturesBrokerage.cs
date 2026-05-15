@@ -188,9 +188,18 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         protected override SharedSymbol GetSharedSymbol(Symbol s, string quoteAsset = "USDC")
         {
             var ticker = s.Value.ToUpperInvariant();
-            var baseAsset = ticker.EndsWith(quoteAsset) ? ticker[..^4] : ticker;
+            string baseAsset;
+            if (ticker.EndsWith(quoteAsset))
+                baseAsset = ticker[..^quoteAsset.Length];
+            else if (ticker.EndsWith("USDT"))
+                baseAsset = ticker[..^4];
+            else if (ticker.EndsWith("USD"))
+                baseAsset = ticker[..^3];
+            else
+                baseAsset = ticker;
             return new SharedSymbol(TradingMode.PerpetualLinear, baseAsset, quoteAsset);
         }
+
         protected override string NativeTicker(Symbol symbol)
         {
             CurrencyPairUtil.DecomposeCurrencyPair(symbol, out var baseAsset, out _);
@@ -243,9 +252,14 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                             }
                         }));
 
-                    SetupSubscriptionEvents(sub.Success, sub.Data, _ => { }, $"{symbol.Value} Trade", $"Trade subscription failed for {symbol.Value}");
+                    if (sub.Success)
+                    {
+                        SetupSubscriptionEvents(sub.Success, sub.Data, _ => { }, $"{symbol.Value} Trade", $"Trade subscription failed for {symbol.Value}");
+                        _subscriptions[subKey] = sub.Data;
+                    }
+                    else
+                        Log.Error($"{Name}: Trade subscription failed for {symbol.Value}: {sub.Error?.Message}");
 
-                    if (sub.Success) _subscriptions[subKey] = sub.Data;
                 }
                 else if (tickType == TickType.Quote)
                 {
@@ -266,7 +280,14 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                             });
                         }));
 
-                    SetupSubscriptionEvents(sub.Success, sub.Data, _ => { }, $"{symbol.Value} Quote", $"Quote subscription failed for {symbol.Value}");
+                    if (sub.Success)
+                    {
+                        SetupSubscriptionEvents(sub.Success, sub.Data, _ => { }, $"{symbol.Value} Quote", $"Quote subscription failed for {symbol.Value}");
+                        _subscriptions[subKey] = sub.Data;
+                    }
+                    else
+                        Log.Error($"{Name}: Trade subscription failed for {symbol.Value}: {sub.Error?.Message}");
+
 
                     if (sub.Success) _subscriptions[subKey] = sub.Data;
                 }
