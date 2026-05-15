@@ -181,7 +181,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             }
             else
             {
-                Log.Error($"{Name} errorMessage: {subscriptionData.Error?.Message}");
+                Log.Error($"{Name} {errorMessage}");
             }
         }
 
