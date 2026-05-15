@@ -21,6 +21,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 {
     public abstract partial class SharedFuturesBrokerage
     {
+        /// <summary>
+        /// Definiert den minimalen Mindestbestellwert (Notional Value) in der Kontowährung.
+        /// Standardmäßig auf 0m gesetzt (deaktiviert). Kann in abgeleiteten Brokerages überschrieben werden.
+        /// </summary>
+        public virtual decimal MinimumOrderNotionalValue => 0m;
+
+
         // --- CACHES ---
         protected readonly ConcurrentDictionary<string, Order> _orderCache = new();
         private readonly ConcurrentDictionary<string, decimal> _filledQtyCache = new();
@@ -53,11 +60,64 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         public override bool PlaceOrder(Order order)
         {
+            // Initialize a local variable for execution quantity since order.Quantity is read-only
+            decimal executionQuantity = order.Quantity;
+
+            // Fix 2: If a minimum order value is set, validate and adjust the quantity
+            if (MinimumOrderNotionalValue > 0m)
+            {
+                decimal price = 0m;
+                if (order is LimitOrder limitOrder)
+                {
+                    price = limitOrder.LimitPrice;
+                }
+                else if (order is StopMarketOrder stopMarketOrder)
+                {
+                    price = stopMarketOrder.StopPrice;
+                }
+                else
+                {
+                    // Fallback to the current market price of the security within LEAN
+                    price = _algorithm.Securities[order.Symbol].Price;
+                }
+
+                if (price > 0m)
+                {
+                    decimal currentNotional = Math.Abs(executionQuantity * price);
+
+                    // If the current value is too small, scale up the quantity
+                    if (currentNotional < MinimumOrderNotionalValue && executionQuantity != 0m)
+                    {
+                        // Retrieve the true, native step size (LotSize) from the Symbol Properties Database
+                        var props = _spdb.GetSymbolProperties(order.Symbol.ID.Market, order.Symbol, order.Symbol.SecurityType, "USDC");
+                        decimal baseLotSize = props?.LotSize ?? 0.01m;
+
+                        // Calculate the exact units required to meet the minimum value
+                        decimal minUnitsRequired = MinimumOrderNotionalValue / price;
+
+                        // Round UP to the next valid multiple of the true LotSize
+                        decimal adjustedQuantity = Math.Ceiling(minUnitsRequired / baseLotSize) * baseLotSize;
+
+                        // Maintain the mathematical sign (Short / Long)
+                        if (executionQuantity < 0)
+                        {
+                            adjustedQuantity = -adjustedQuantity;
+                        }
+
+                        Log.Trace($"{Name}.PlaceOrder: Adjusting execution quantity for {order.Symbol.Value} from {executionQuantity} to {adjustedQuantity} to meet the minimum of ${MinimumOrderNotionalValue}.");
+
+                        // Update the local execution quantity variable
+                        executionQuantity = adjustedQuantity;
+                    }
+                }
+            }
+
+            // Use the local executionQuantity for the exchange request instead of order.Quantity
             var request = new PlaceFuturesOrderRequest(
                 GetSharedSymbol(order.Symbol),
-                order.Quantity > 0 ? SharedOrderSide.Buy : SharedOrderSide.Sell,
+                executionQuantity > 0 ? SharedOrderSide.Buy : SharedOrderSide.Sell,
                 order.Type == OrderType.Limit ? SharedOrderType.Limit : SharedOrderType.Market,
-                new SharedQuantity { QuantityInBaseAsset = Math.Abs(order.Quantity) })
+                new SharedQuantity { QuantityInBaseAsset = Math.Abs(executionQuantity) })
             {
                 Price = (order as LimitOrder)?.LimitPrice
             };
