@@ -141,7 +141,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             }
         }
 
-        private void SetupSubscriptionEvents(bool isSuccess, dynamic subscriptionData, Action<bool> setConnectedState, string streamName, string errorMessage)
+        protected void SetupSubscriptionEvents(bool isSuccess, dynamic subscriptionData, Action<bool> setConnectedState, string streamName, string errorMessage)
         {
             if (isSuccess)
             {

@@ -226,7 +226,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
                 if (tickType == TickType.Trade)
                 {
-                    // Trades kommen oft als Array (SharedTrade[])
                     var sub = RunSync(() => _socketClient.FuturesApi.SharedClient.SubscribeToTradeUpdatesAsync(
                         new SubscribeTradeRequest(shared),
                         update =>
@@ -244,6 +243,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                             }
                         }));
 
+                    SetupSubscriptionEvents(sub.Success, sub.Data, _ => { }, $"{symbol.Value} Trade", $"Trade subscription failed for {symbol.Value}");
+
                     if (sub.Success) _subscriptions[subKey] = sub.Data;
                 }
                 else if (tickType == TickType.Quote)
@@ -252,7 +253,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                         new SubscribeBookTickerRequest(shared),
                         update =>
                         {
-                            var q = update.Data; // Hier kein foreach nötig
+                            var q = update.Data;
                             EmitTick(new Tick
                             {
                                 Symbol = symbol,
@@ -264,6 +265,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                                 AskSize = q.BestAskQuantity
                             });
                         }));
+
+                    SetupSubscriptionEvents(sub.Success, sub.Data, _ => { }, $"{symbol.Value} Quote", $"Quote subscription failed for {symbol.Value}");
 
                     if (sub.Success) _subscriptions[subKey] = sub.Data;
                 }
