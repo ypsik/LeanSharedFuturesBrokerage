@@ -43,7 +43,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         protected readonly object _balanceUpdatesConnectLock = new();
         private bool _isConnectedOrder, _isConnectedUserTrade, _isConnectedBalance;
         protected CancellationTokenSource _reconcileCts;
-        protected Task _reconcileTask;
+        protected Task? _reconcileTask = null;
         protected readonly TimeSpan _reconciliationInterval = TimeSpan.FromSeconds(30);
 
 
@@ -110,73 +110,60 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             {
                 if (_balanceClient == null || _orderSocket == null || _tradeSocket == null) throw new InvalidOperationException("Clients not configured");
 
-                if (!_isConnectedUserTrade)
+                if (_reconcileTask == null)
                 {
-                    var sub = RunSync(() => _tradeSocket.SubscribeToUserTradeUpdatesAsync(new SubscribeUserTradeRequest(), HandleUserTradeSocket));
-                    if (sub.Success)
-                    {
-                        var subscription = sub.Data;
-
-                        subscription.ConnectionLost += () =>
-                        {
-                            _isConnectedUserTrade = false;
-                            Log.Error($"{Name}: Connection lost!");
-                            OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "Disconnect", "User trade stream lost."));
-                        };
-
-                        subscription.ConnectionRestored += (duration) =>
-                        {
-                            _isConnectedUserTrade = true;
-                            Log.Trace($"{Name}: Connection restored after {duration}.");
-                            OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Information, "Reconnect", $"User trade stream restored. Syncing..."));
-                            //Task.Run(async () => await ForceReconcile());
-                        };
-                    }
-                    else
-                        throw new Exception("User trade socket failed");
-
-                    _userTradeSocketSub = sub.Data;
-                    _isConnectedUserTrade = true;
-
-                }
-                {
-                    var sub = RunSync(() => _orderSocket.SubscribeToFuturesOrderUpdatesAsync(new SubscribeFuturesOrderRequest(), HandleOrderSocket));
-                    if (sub.Success)
-                    {
-                        var subscription = sub.Data;
-
-                        subscription.ConnectionLost += () =>
-                        {
-                            _isConnectedOrder = false;
-                            Log.Error($"{Name}: Connection lost!");
-                            OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "Disconnect", "Order stream lost."));
-                        };
-
-                        subscription.ConnectionRestored += (duration) =>
-                        {
-                            _isConnectedOrder = true;
-                            Log.Trace($"{Name}: Connection restored after {duration}.");
-                            OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Information, "Reconnect", $"Order stream restored. Syncing..."));
-                            //Task.Run(async () => await ForceReconcile());
-                        };
-                    }
-                    else
-                        throw new Exception("Order socket failed");
-
-
-                    _orderSocketSub = sub.Data;
-                    _isConnectedOrder = true;
                     _reconcileCts = new CancellationTokenSource();
                     _reconcileTask = Task.Run(() => ReconcileLoop(_reconcileCts.Token));
                 }
-                if(!_isConnectedBalance)
+
+                if (!_isConnectedUserTrade)
+                {
+                    var sub = RunSync(() => _tradeSocket.SubscribeToUserTradeUpdatesAsync(new SubscribeUserTradeRequest(), HandleUserTradeSocket));
+                    SetupSubscriptionEvents(sub.Success, sub.Data, state => _isConnectedUserTrade = state, "User trade", "User trade socket failed");
+                    _userTradeSocketSub = sub.Data;
+                }
+
+                if (!_isConnectedOrder) 
+                {
+                    var sub = RunSync(() => _orderSocket.SubscribeToFuturesOrderUpdatesAsync(new SubscribeFuturesOrderRequest(), HandleOrderSocket));
+                    SetupSubscriptionEvents(sub.Success, sub.Data, state => _isConnectedOrder = state, "Order", "Order socket failed");
+                    _orderSocketSub = sub.Data;
+                }
+                if (!_isConnectedBalance)
                 {
                     lock (_balanceUpdatesConnectLock)
                         RunSync(() => SubscribeToBalanceUpdatesAsync());
                 }
             }
         }
-        
+
+        private void SetupSubscriptionEvents(bool isSuccess, dynamic subscriptionData, Action<bool> setConnectedState, string streamName, string errorMessage)
+        {
+            if (isSuccess)
+            {
+                subscriptionData.ConnectionLost += new Action(() =>
+                {
+                    setConnectedState(false);
+                    Log.Error($"{Name}: Connection lost!");
+                    OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "Disconnect", $"{streamName} stream lost."));
+                });
+
+                subscriptionData.ConnectionRestored += new Action<TimeSpan>((duration) =>
+                {
+                    setConnectedState(true);
+                    Log.Trace($"{Name}: Connection restored after {duration}.");
+                    OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Information, "Reconnect", $"{streamName} stream restored. Syncing..."));
+                    //Task.Run(async () => await ForceReconcile());
+                });
+
+                setConnectedState(true);
+            }
+            else
+            {
+                throw new Exception(errorMessage);
+            }
+        }
+
         public override void Disconnect()
         {
             _reconcileCts?.Cancel();
