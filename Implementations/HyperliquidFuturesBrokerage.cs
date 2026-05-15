@@ -218,21 +218,17 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                                 OnBalanceUpdated();
                             }));
 
+                    SetupSubscriptionEvents(
+                                    sub.Success,
+                                    sub.Data,
+                                    (state) => _fundingUpdateConnected = state,
+                                    "Funding updates",
+                                    "Funding updates subscription failed"
+                                );
+
                     if (sub.Success)
                     {
                         _fundingUpdateSubscription = sub.Data;
-                        _fundingUpdateConnected = true;
-
-                        SetupSubscriptionEvents(
-                                        sub.Success,
-                                        sub.Data,
-                                        (state) => _fundingUpdateConnected = state,
-                                        "Funding updates",
-                                        "Funding updates subscription failed"
-                                    );
-
-                        _fundingUpdateSubscription = sub.Data;
-                        Log.Trace($"{Name} Funding updates: Subscribed.");
                     }
                 }
 

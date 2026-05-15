@@ -102,8 +102,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 "Balance updates",
                 "Balance updates socket failed"
             );
-
-            _balanceUpdatesSocketSub = sub.Data;
+            if(sub.Success) 
+                _balanceUpdatesSocketSub = sub.Data;
         }
     }   
 }

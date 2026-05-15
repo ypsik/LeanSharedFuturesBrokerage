@@ -130,7 +130,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     _subRateGate.WaitToProceed();
                     var sub = RunSync(() => _userTradeSocket.SubscribeToUserTradeUpdatesAsync(new SubscribeUserTradeRequest(), HandleUserTradeSocket));
                     SetupSubscriptionEvents(sub.Success, sub.Data, state => _isConnectedUserTrade = state, "User trade", "User trade socket failed");
-                    _userTradeSocketSub = sub.Data;
+                    if (sub.Success)
+                    {
+                        _userTradeSocketSub = sub.Data;
+                    }
+
+                    
                 }
 
                 if (!_isConnectedOrder) 
@@ -138,7 +143,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     _subRateGate.WaitToProceed();
                     var sub = RunSync(() => _orderSocket.SubscribeToFuturesOrderUpdatesAsync(new SubscribeFuturesOrderRequest(), HandleOrderSocket));
                     SetupSubscriptionEvents(sub.Success, sub.Data, state => _isConnectedOrder = state, "Order", "Order socket failed");
-                    _orderSocketSub = sub.Data;
+                    if (sub.Success)
+                    {                     
+                        _orderSocketSub = sub.Data;
+                    }
                 }
                 if (!_isConnectedBalance)
                 {
@@ -152,6 +160,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         {
             if (isSuccess)
             {
+                Log.Trace($"{Name} {streamName}: Subscribed.");
+
                 subscriptionData.ConnectionLost += new Action(() =>
                 {
                     setConnectedState(false);
