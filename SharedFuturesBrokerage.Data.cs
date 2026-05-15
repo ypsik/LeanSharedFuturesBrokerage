@@ -119,14 +119,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                             }
                         }));
 
+                    SetupSubscriptionEvents(sub.Success, sub.Data, _ => { }, $"{symbol.Value} Trade", $"Trade subscription failed for {symbol.Value}");
                     if (sub.Success)
                     {
-                        SetupSubscriptionEvents(sub.Success, sub.Data, _ => { }, $"{symbol.Value} Trade", $"Trade subscription failed for {symbol.Value}");
                         _subscriptions[subKey] = sub.Data;
                     }
-                    else
-                        Log.Error($"{Name}: Trade subscription failed for {symbol.Value}: {sub.Error?.Message}");
-
                 }
                 else if (tickType == TickType.Quote)
                 {
@@ -147,13 +144,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                             });
                         }));
 
+                    SetupSubscriptionEvents(sub.Success, sub.Data, _ => { }, $"{symbol.Value} Quote", $"Quote subscription failed for {symbol.Value}");
                     if (sub.Success)
                     {
-                        SetupSubscriptionEvents(sub.Success, sub.Data, _ => { }, $"{symbol.Value} Quote", $"Quote subscription failed for {symbol.Value}");
                         _subscriptions[subKey] = sub.Data;
                     }
-                    else
-                        Log.Error($"{Name}: Trade subscription failed for {symbol.Value}: {sub.Error?.Message}");
 
 
                     if (sub.Success) _subscriptions[subKey] = sub.Data;

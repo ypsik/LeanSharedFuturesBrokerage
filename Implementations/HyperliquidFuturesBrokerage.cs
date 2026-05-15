@@ -367,16 +367,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                     })
                 );
 
+                SetupSubscriptionEvents(sub.Success, sub.Data, _ => { }, $"Symbol {hyperliquidCoin} updates", $"{Name} SubscribeFunding failed for {symbol}: {sub.Error?.Message}");
                 if (sub.Success)
                 {
-                    SetupSubscriptionEvents(true, sub.Data, _ => { }, $"Symbol {hyperliquidCoin} updates", string.Empty);
-
                     _subscriptions.TryAdd(subKey, sub.Data);
-                    Log.Trace($"{Name} Symbol updates: Subscribed for {symbol.Value}.");
                     return true;
                 }
-
-                Log.Error($"{Name} SubscribeFunding failed for {symbol}: {sub.Error?.Message}");
                 return false;
             }
         }

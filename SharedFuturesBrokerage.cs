@@ -14,6 +14,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using QuantConnect.Securities;
 
+
 namespace SilverQuant.Lean.Brokerages.Futures.Shared
 {
     // WICHTIG: abstract partial muss hier stehen!
@@ -170,7 +171,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             }
             else
             {
-                throw new Exception(errorMessage);
+                Log.Error($"{Name} errorMessage: {subscriptionData.Error?.Message}");
             }
         }
 
