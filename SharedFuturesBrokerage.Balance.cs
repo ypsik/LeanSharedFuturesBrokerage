@@ -93,32 +93,17 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         _balanceUpdated = false;
                     }
                 }
-
             });
 
-            if (sub.Success)
-            {
-                var subscription = sub.Data;
-
-                subscription.ConnectionLost += () =>
-                {
-                    _isConnectedOrder = false;
-                    Log.Error($"{Name}: Connection lost!");
-                    OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "Disconnect", "Balance updates stream lost."));
-                };
-
-                subscription.ConnectionRestored += (duration) =>
-                {
-                    _isConnectedOrder = true;
-                    Log.Trace($"{Name}: Connection restored after {duration}.");
-                    OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Information, "Reconnect", $"Balance updates stream restored. Syncing..."));
-                };
-            }
-            else
-                throw new Exception("Balance updates socket failed");
+            SetupSubscriptionEvents(
+                sub.Success,
+                sub.Data,
+                (state) => _isConnectedBalance = state,
+                "Balance updates",
+                "Balance updates socket failed"
+            );
 
             _balanceUpdatesSocketSub = sub.Data;
-            _isConnectedBalance = true;
         }
     }   
 }
