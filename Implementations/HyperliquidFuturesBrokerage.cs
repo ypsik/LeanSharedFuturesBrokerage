@@ -41,6 +41,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
     {
         private HyperLiquidRestClient _restClient;
         private HyperLiquidSocketClient _socketClient;
+        private HyperLiquidSocketClient _socketClientExData; // dedicated for ExchangeData (SubscribeFunding)
 
         private string _vaultAdress;
 
@@ -69,6 +70,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             _vaultAdress = vaultAddress;
             _restClient = restClient;
             _socketClient = socketClient;
+            _socketClientExData = new HyperLiquidSocketClient();
 
             PopulateSPDB();
 
@@ -107,6 +109,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 _socketClient = new HyperLiquidSocketClient();
             }
 
+            if (_socketClientExData == null)
+            {
+                _socketClientExData = new HyperLiquidSocketClient();
+            }
+
             // 2. User-Details schützen: Nur überschreiben, wenn der Job explizit etwas Neues liefert
             if (String.IsNullOrEmpty(_vaultAdress) && job.BrokerageData.TryGetValue("hyperliquid-vault-address", out var vault) && !string.IsNullOrEmpty(vault))
             {
@@ -127,7 +134,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 _getHoldingsFunc
             );
         }
- 
+
         private void PopulateSPDB()
         {
             // --- Populate SPDB with all live HL assets ---
@@ -197,9 +204,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             var accountInfo = RunSync(() => _restClient.FuturesApi.Account.GetAccountInfoAsync());
             if (accountInfo.Success)
             {
-                result.Add(new CashAmount(accountInfo.Data.MarginSummary?.AccountValue??accountInfo.Data.CrossMarginSummary?.AccountValue??0m, "USDC"));
+                result.Add(new CashAmount(accountInfo.Data.MarginSummary?.AccountValue ?? accountInfo.Data.CrossMarginSummary?.AccountValue ?? 0m, "USDC"));
             }
-            return result;                            
+            return result;
         }
         #endregion
 
@@ -212,7 +219,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 var shared = GetSharedSymbol(symbol);
                 var subKey = $"{symbol.Value}_{tickType}";
                 if (_subscriptions.ContainsKey(subKey)) continue;
-                
+
                 _subRateGate.WaitToProceed();
 
                 if (tickType == TickType.Trade)
@@ -274,7 +281,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             return true;
         }
         #endregion
-        
+
         #region Connect
         public override void Connect()
         {
@@ -285,7 +292,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                     _subRateGate.WaitToProceed();
                     var sub = RunSync(() =>
 
-                        _socketClient.FuturesApi.Account.SubscribeToUserFundingUpdatesAsync(null, 
+                        _socketClient.FuturesApi.Account.SubscribeToUserFundingUpdatesAsync(null,
                             update =>
                             {
                                 OnBalanceUpdated();
@@ -312,7 +319,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                             Log.Trace($"{Name} Funding updates: Connection restored after {duration}.");
                             OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Information, "Reconnect", $"Funding updates stream restored. Syncing..."));
                         };
-                    }                    
+                    }
                 }
 
                 base.Connect();
@@ -320,11 +327,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         }
         public override void Disconnect()
         {
-            RunSync(() => _fundingUpdateSubscription?.CloseAsync()?? Task.CompletedTask);
+            RunSync(() => _fundingUpdateSubscription?.CloseAsync() ?? Task.CompletedTask);
+            _socketClientExData?.Dispose();
             base.Disconnect();
         }
         #endregion
-        
+
         protected override bool SubscribeFunding(Symbol symbol)
         {
             var hyperliquidCoin = NativeTicker(symbol);
@@ -340,7 +348,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 _subRateGate.WaitToProceed();
 
                 var sub = RunSync(() =>
-                    _socketClient.FuturesApi.ExchangeData.SubscribeToSymbolUpdatesAsync(hyperliquidCoin, data =>
+                    _socketClientExData.FuturesApi.ExchangeData.SubscribeToSymbolUpdatesAsync(hyperliquidCoin, data =>
                     {
                         var tickerData = data.Data;
                         var now = DateTime.UtcNow;
