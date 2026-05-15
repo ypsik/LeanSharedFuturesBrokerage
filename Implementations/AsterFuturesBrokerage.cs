@@ -79,11 +79,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             return upper.EndsWith("USDT") ? upper : upper + "USDT";
         }
 
-        protected override SharedSymbol GetSharedSymbol(Symbol s, string quoteAsset = "USDT")
-        {
-            return new SharedSymbol(TradingMode.PerpetualLinear, s.Value.ToUpperInvariant(), quoteAsset);
-        }
-
         // ── Real-Time Data Implementation ────────────────────────────────
 
         protected override bool SubscribeSymbols(IEnumerable<Symbol> symbols, TickType tickType)

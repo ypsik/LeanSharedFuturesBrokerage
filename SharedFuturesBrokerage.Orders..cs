@@ -8,6 +8,7 @@ using QuantConnect.Orders;
 using QuantConnect.Orders.Fees;
 using QuantConnect.Securities;
 using QuantConnect.Statistics;
+using QuantConnect.Util;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -279,13 +280,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         var symbolProperties = _spdb.GetSymbolProperties(symbol.ID.Market, symbol, symbol.SecurityType, "USD");
 
                         string baseAsset = symbol.ID.Symbol;
-                        string quoteAsset = symbolProperties.QuoteCurrency;
 
                         var tradingMode = symbol.SecurityType == SecurityType.CryptoFuture || symbol.SecurityType == SecurityType.Future
                             ? TradingMode.PerpetualLinear
                             : TradingMode.Spot;
 
-                        var sharedSymbol = GetSharedSymbol(symbol, quoteAsset);
+                        var sharedSymbol = GetSharedSymbol(symbol);
 
                         var statusCheck = await _orderClient.GetFuturesOrderAsync(new GetOrderRequest(sharedSymbol, kv.Key)).ConfigureAwait(false);
 
@@ -344,7 +344,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         protected virtual string NormalizeSymbol(string rawSymbol) => rawSymbol;
 
-        protected virtual SharedSymbol GetSharedSymbol(Symbol s, string quoteAsset = "USDC") => new SharedSymbol(TradingMode.PerpetualLinear, s.Value, quoteAsset);
+        protected virtual SharedSymbol GetSharedSymbol(Symbol s)
+        {
+            CurrencyPairUtil.DecomposeCurrencyPair(s, out var _, out var quoteAsset);
+            return new SharedSymbol(TradingMode.PerpetualLinear, s.Value, quoteAsset); ;
+        }
+        
 
         private OrderStatus MapStatus(SharedOrderStatus status, decimal filled)
         {
