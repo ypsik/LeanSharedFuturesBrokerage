@@ -202,20 +202,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         #endregion
 
-        #region Balance
-        public override List<CashAmount> GetCashBalance()
-        {
-            var result = new List<CashAmount>();
-            var accountInfo = RunSync(() => _restClient.FuturesApi.Account.GetAccountInfoAsync());
-            if (accountInfo.Success)
-            {
-                result.Add(new CashAmount(accountInfo.Data.MarginSummary?.AccountValue ?? accountInfo.Data.CrossMarginSummary?.AccountValue ?? 0m, "USDC"));
-            }
-            return result;
-        }
-        #endregion
-
-
         #region Connect
         public override void Connect()
         {
