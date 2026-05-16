@@ -1,5 +1,6 @@
 ﻿using Aster.Net.Clients;
 using CryptoExchange.Net.Interfaces.Clients;
+using CryptoExchange.Net.Objects;
 using CryptoExchange.Net.Objects.Sockets;
 using CryptoExchange.Net.SharedApis;
 using QuantConnect;
@@ -74,6 +75,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 _restClient.FuturesApi.SharedClient,
                 aggregator
             );
+        }
+
+
+        protected override async Task<CallResult<UpdateSubscription>> CreateFundingSubscriptionAsync(
+               string nativeTicker, Symbol symbol, Func<DateTime, decimal, bool> onFundingRate)
+        {
+            return null;
         }
 
         // ── Symbol-Mapping ───────────────────────────────────────────────

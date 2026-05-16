@@ -1,4 +1,5 @@
 ﻿using CryptoExchange.Net.Interfaces.Clients;
+using CryptoExchange.Net.Objects;
 using CryptoExchange.Net.Objects.Sockets;
 using CryptoExchange.Net.SharedApis;
 using QuantConnect;
@@ -9,13 +10,15 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 
 namespace SilverQuant.Lean.Brokerages.Futures.Shared
 {
     public abstract partial class SharedFuturesBrokerage
     {
-
-        protected readonly ConcurrentDictionary<string, UpdateSubscription> _subscriptions = new();
+        private readonly ConcurrentDictionary<string, UpdateSubscription> _subscriptions = new();
+        private readonly object _fundingLock = new();
+        private readonly ConcurrentDictionary<Symbol, int> _lastFundingHour = new();
 
         #region IDataQueueHandler
         public virtual IEnumerator<BaseData> Subscribe(SubscriptionDataConfig config, EventHandler handler)
@@ -27,7 +30,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             var enumerator = _aggregator.Add(config, handler);
             if (config.Type == typeof(MarginInterestRate))
                 SubscribeFunding(config.Symbol);
-            else 
+            else
                 _subscriptionManager.Subscribe(config);
             return enumerator;
         }
@@ -150,7 +153,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         _subscriptions[subKey] = sub.Data;
                     }
 
-
                     if (sub.Success) _subscriptions[subKey] = sub.Data;
                 }
             }
@@ -172,8 +174,73 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         #endregion
 
 
-        protected abstract bool SubscribeFunding(Symbol symbol);
-        protected abstract bool UnsubscribeFunding(Symbol symbol);
+        protected virtual bool SubscribeFunding(Symbol symbol)
+        {
+            var nativeTicker = NativeTicker(symbol);
+            var subKey = $"{nativeTicker}_FUNDING";
+
+            lock (_fundingLock)
+            {
+                if (_subscriptions.ContainsKey(subKey)) return true;
+
+                _subRateGate.WaitToProceed();
+
+                // Base builds the funding handler. HL captures now in the socket callback and passes it in.
+                // Returns true on first tick or rollover — HL uses this to gate exchange-specific logic.
+                Func<DateTime, decimal, bool> onFundingRate = (now, fundingRate) =>
+                {
+                    bool isFirstTick = false;
+                    bool isHourRollover = false;
+                    var currentHour = now.Hour;
+
+                    _lastFundingHour.AddOrUpdate(
+                        symbol,
+                        addValueFactory: _ => { isFirstTick = true; return currentHour; },
+                        updateValueFactory: (_, oldHour) =>
+                        {
+                            if (oldHour != currentHour) { isHourRollover = true; return currentHour; }
+                            return oldHour;
+                        });
+
+                    if (!isFirstTick && !isHourRollover) return false;
+
+                    if (isHourRollover)
+                    {
+                        var roundedTime = new DateTime(now.Year, now.Month, now.Day, now.Hour, 0, 0, DateTimeKind.Utc);
+                        _aggregator.Update(new MarginInterestRate { Symbol = symbol, Time = roundedTime, InterestRate = fundingRate });
+                        Log.Trace($"{Name} Funding Update: {symbol.Value} -> Rate: {fundingRate}");
+                    }
+
+                    return true;
+                };
+
+                var sub = RunSync(() => CreateFundingSubscriptionAsync(nativeTicker, symbol, onFundingRate));
+
+                SetupSubscriptionEvents(sub.Success, sub.Data, _ => { },
+                    $"Funding {nativeTicker}",
+                    $"SubscribeFunding failed for {symbol}: {sub.Error?.Message}");
+
+                if (sub.Success)
+                {
+                    _subscriptions.TryAdd(subKey, sub.Data);
+                    return true;
+                }
+                return false;
+            }
+        }
+
+        protected virtual bool UnsubscribeFunding(Symbol symbol)
+        {
+            var nativeTicker = NativeTicker(symbol);
+            var subKey = $"{nativeTicker}_FUNDING";
+            if (_subscriptions.TryRemove(subKey, out var sub))
+                RunSync(() => sub.CloseAsync());
+            return true;
+        }
+
+        protected abstract Task<CallResult<UpdateSubscription>> CreateFundingSubscriptionAsync(
+            string nativeTicker, Symbol symbol, Func<DateTime, decimal, bool> onFundingRate);
+
         protected void EmitTick(Tick tick) => _aggregator?.Update(tick);
     }
 }

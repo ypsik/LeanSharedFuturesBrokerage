@@ -1,6 +1,7 @@
 ﻿using Accord.IO;
 using CryptoExchange.Net.Authentication;
 using CryptoExchange.Net.Interfaces.Clients;
+using CryptoExchange.Net.Objects;
 using CryptoExchange.Net.Objects.Sockets;
 using CryptoExchange.Net.Requests;
 using CryptoExchange.Net.SharedApis;
@@ -48,8 +49,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         private readonly object _fundingUpdateLock = new();
         private bool _fundingUpdateConnected = false;
         private UpdateSubscription _fundingUpdateSubscription;
-        private readonly object _fundingLock = new();
-        private readonly ConcurrentDictionary<Symbol, int> _lastFundingHour = new();
 
         public override decimal MinimumOrderNotionalValue => 10m;
 
@@ -243,125 +242,55 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         }
         #endregion
 
-        protected override bool SubscribeFunding(Symbol symbol)
+        protected override async Task<CallResult<UpdateSubscription>> CreateFundingSubscriptionAsync(
+            string nativeTicker, Symbol symbol, Func<DateTime, decimal, bool> onFundingRate)
         {
-            var nativeTicker = NativeTicker(symbol);
-            var subKey = $"{nativeTicker}_FUNDING";
-
-            lock (_fundingLock)
-            {
-                if (_subscriptions.ContainsKey(subKey))
+            return await _socketClientExData.FuturesApi.ExchangeData.SubscribeToSymbolUpdatesAsync(
+                nativeTicker, data =>
                 {
-                    return true;
-                }
+                    var now = DateTime.UtcNow;
+                    var tickerData = data.Data;
 
-                _subRateGate.WaitToProceed();
+                    if (!onFundingRate(now, tickerData.FundingRate ?? 0)) return;
 
-                var sub = RunSync(() =>
-                    _socketClientExData.FuturesApi.ExchangeData.SubscribeToSymbolUpdatesAsync(nativeTicker, data =>
-                    {
-                        var tickerData = data.Data;
-                        var now = DateTime.UtcNow;
-                        var currentHour = now.Hour;
-
-                        bool isFirstTick = false;
-                        bool isHourRollover = false;
-
-                        _lastFundingHour.AddOrUpdate(
-                            symbol,
-                            addValueFactory: (key) =>
-                            {
-                                isFirstTick = true;
-                                return currentHour;
-                            },
-                            updateValueFactory: (key, oldHour) =>
-                            {
-                                if (oldHour != currentHour)
-                                {
-                                    isHourRollover = true;
-                                    return currentHour;
-                                }
-                                return oldHour;
-                            });
-
-                        if (!isFirstTick && !isHourRollover)
-                        {
-                            return;
-                        }
-
-                        // --- 1. FUNDING UPDATE (Priorität: Direkt an LEAN senden) ---
-                        if (isHourRollover)
-                        {
-                            var currentFunding = tickerData.FundingRate ?? 0;
-                            var roundedTime = new DateTime(now.Year, now.Month, now.Day, currentHour, 0, 0, DateTimeKind.Utc);
-
-                            _aggregator.Update(new MarginInterestRate
-                            {
-                                Symbol = symbol,
-                                Time = roundedTime,
-                                InterestRate = currentFunding
-                            });
-
-                            Log.Trace($"Hyperliquid Funding Update: {tickerData.Symbol} -> Rate: {currentFunding}");
-                        }
-
-                        // --- 2. SPDB FIX (Läuft direkt im Anschluss) ---
-                        var oraclePrice = tickerData.OraclePrice ?? tickerData.MarkPrice;
-                        if (oraclePrice > 0)
-                        {
-                            var exponent = (int)Math.Floor(Math.Log10((double)oraclePrice));
-                            var decimalPlaces = Math.Max(0, Math.Min(6, 5 - (exponent + 1)));
-                            decimal tickSize = (decimal)Math.Pow(10, -decimalPlaces);
-
-                            var props = _spdb.GetSymbolProperties(symbol.ID.Market, symbol, symbol.SecurityType, "USDC");
-
-                            if (props == null || props.MinimumPriceVariation != tickSize)
-                            {
-                                var newProps = new SymbolProperties(
-                                    props?.Description ?? $"Hyperliquid {symbol.Value} Perpetual",
-                                    props?.QuoteCurrency ?? "USDC",
-                                    props?.ContractMultiplier ?? 1m,
-                                    tickSize,
-                                    props?.LotSize ?? (decimal)Math.Pow(10, -6),
-                                    props?.MarketTicker ?? symbol.Value
-                                );
-                                _spdb.SetEntry(symbol.ID.Market, symbol.Value, symbol.SecurityType, newProps);
-                                if (_algorithm.Securities.ContainsKey(symbol))
-                                {
-                                    var method = typeof(Security).GetMethod("UpdateSymbolProperties",
-                                        BindingFlags.NonPublic | BindingFlags.Instance);
-
-                                    if (method != null)
-                                        method.Invoke(_algorithm.Securities[symbol], new object[] { newProps });
-                                    else
-                                        Log.Error($"{Name}: UpdateSymbolProperties method not found on Security — LEAN API may have changed");
-                                }
-
-                                Log.Trace($"{Name}: SPDB Fix for {symbol.Value} - TickSize: {tickSize} (Price: {oraclePrice})");
-                            }
-                        }
-                    })
-                );
-
-                SetupSubscriptionEvents(sub.Success, sub.Data, _ => { }, $"Symbol {nativeTicker} updates", $"{Name} SubscribeFunding failed for {symbol}: {sub.Error?.Message}");
-                if (sub.Success)
-                {
-                    _subscriptions.TryAdd(subKey, sub.Data);
-                    return true;
-                }
-                return false;
-            }
+                    var oraclePrice = tickerData.OraclePrice ?? tickerData.MarkPrice;
+                    if (oraclePrice > 0)
+                        UpdateSpdb(symbol, oraclePrice);
+                });
         }
-        protected override bool UnsubscribeFunding(Symbol symbol)
+
+        private void UpdateSpdb(Symbol symbol, decimal oraclePrice)
         {
-            var nativeTicker = NativeTicker(symbol);
-            var subKey = $"{nativeTicker}_FUNDING";
-            if (_subscriptions.TryRemove(subKey, out var sub))
+            var exponent = (int)Math.Floor(Math.Log10((double)oraclePrice));
+            var decimalPlaces = Math.Max(0, Math.Min(6, 5 - (exponent + 1)));
+            decimal tickSize = (decimal)Math.Pow(10, -decimalPlaces);
+
+            var props = _spdb.GetSymbolProperties(symbol.ID.Market, symbol, symbol.SecurityType, "USDC");
+
+            if (props != null && props.MinimumPriceVariation == tickSize) return;
+
+            var newProps = new SymbolProperties(
+                props?.Description ?? $"Hyperliquid {symbol.Value} Perpetual",
+                props?.QuoteCurrency ?? "USDC",
+                props?.ContractMultiplier ?? 1m,
+                tickSize,
+                props?.LotSize ?? (decimal)Math.Pow(10, -6),
+                props?.MarketTicker ?? symbol.Value
+            );
+            _spdb.SetEntry(symbol.ID.Market, symbol.Value, symbol.SecurityType, newProps);
+
+            if (_algorithm.Securities.ContainsKey(symbol))
             {
-                Log.Trace($"{Name}.UnsubscribeFunding: Found and closing subscription for {subKey}");
-                RunSync(() => sub.CloseAsync());
+                var method = typeof(Security).GetMethod("UpdateSymbolProperties",
+                    BindingFlags.NonPublic | BindingFlags.Instance);
+
+                if (method != null)
+                    method.Invoke(_algorithm.Securities[symbol], new object[] { newProps });
+                else
+                    Log.Error($"{Name}: UpdateSymbolProperties method not found on Security — LEAN API may have changed");
             }
-            return true;
+
+            Log.Trace($"{Name}: SPDB Fix for {symbol.Value} - TickSize: {tickSize} (Price: {oraclePrice})");
         }
 
         protected override async Task<ExchangeWebResult<SharedId>> ExecutePlaceOrderAsync(PlaceFuturesOrderRequest request)
