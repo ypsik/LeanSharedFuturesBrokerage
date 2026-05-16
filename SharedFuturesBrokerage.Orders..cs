@@ -165,10 +165,25 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             decimal price = lastUpdate.LimitPrice ?? order.Price;
 
             decimal quantity = lastUpdate.Quantity.HasValue
-                ? lastUpdate.Quantity.Value                                                          
+                ? lastUpdate.Quantity.Value
                 : _orderCache.TryGetValue(order.BrokerId.Last(), out var cached)
-                    ? cached.Quantity                                                                
-                    : order.Quantity;                                                               
+                    ? cached.Quantity
+                    : order.Quantity;
+
+            // Minimum notional check – gleiche Logik wie PlaceOrder
+            if (MinimumOrderNotionalValue > 0m && price > 0m)
+            {
+                decimal notional = Math.Abs(quantity) * price;
+                if (notional < MinimumOrderNotionalValue)
+                {
+                    var props = _spdb.GetSymbolProperties(order.Symbol.ID.Market, order.Symbol, order.Symbol.SecurityType, "USDC");
+                    decimal lotSize = props?.LotSize ?? 0.01m;
+                    decimal adjusted = Math.Ceiling((MinimumOrderNotionalValue / price) / lotSize) * lotSize;
+                    quantity = quantity < 0 ? -adjusted : adjusted;
+
+                    Log.Trace($"{Name}.UpdateOrder: Adjusting quantity for {order.Symbol.Value} from {Math.Abs(quantity)} to {adjusted} to meet minimum ${MinimumOrderNotionalValue}.");
+                }
+            }
 
             var res = RunSync(() => ExecuteUpdateOrderAsync(order, price, quantity));
             if (!res.Success)
