@@ -287,6 +287,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                         var sharedSymbol = GetSharedSymbol(symbol);
 
+                        if (!_orderCache.TryRemove(kv.Key, out _)) continue;
+                        _filledQtyCache.TryRemove(kv.Key, out _);
+
                         var statusCheck = await _orderClient.GetFuturesOrderAsync(new GetOrderRequest(sharedSymbol, kv.Key)).ConfigureAwait(false);
 
                         if (statusCheck.Success && statusCheck.Data != null)
@@ -321,9 +324,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                                 Message = "Reconcile: Order not found on exchange"
                             });
                         }
-
-                        _orderCache.TryRemove(kv.Key, out _);
-                        _filledQtyCache.TryRemove(kv.Key, out _);
                     }
                 }
                 catch (OperationCanceledException) { break; }
