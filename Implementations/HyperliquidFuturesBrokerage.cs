@@ -245,8 +245,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         protected override bool SubscribeFunding(Symbol symbol)
         {
-            var hyperliquidCoin = NativeTicker(symbol);
-            var subKey = $"{symbol.Value}_FUNDING";
+            var nativeTicker = NativeTicker(symbol);
+            var subKey = $"{nativeTicker}_FUNDING";
 
             lock (_fundingLock)
             {
@@ -258,7 +258,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 _subRateGate.WaitToProceed();
 
                 var sub = RunSync(() =>
-                    _socketClientExData.FuturesApi.ExchangeData.SubscribeToSymbolUpdatesAsync(hyperliquidCoin, data =>
+                    _socketClientExData.FuturesApi.ExchangeData.SubscribeToSymbolUpdatesAsync(nativeTicker, data =>
                     {
                         var tickerData = data.Data;
                         var now = DateTime.UtcNow;
@@ -343,7 +343,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                     })
                 );
 
-                SetupSubscriptionEvents(sub.Success, sub.Data, _ => { }, $"Symbol {hyperliquidCoin} updates", $"{Name} SubscribeFunding failed for {symbol}: {sub.Error?.Message}");
+                SetupSubscriptionEvents(sub.Success, sub.Data, _ => { }, $"Symbol {nativeTicker} updates", $"{Name} SubscribeFunding failed for {symbol}: {sub.Error?.Message}");
                 if (sub.Success)
                 {
                     _subscriptions.TryAdd(subKey, sub.Data);
@@ -354,7 +354,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         }
         protected override bool UnsubscribeFunding(Symbol symbol)
         {
-            var subKey = $"{symbol.Value}_FUNDING";
+            var nativeTicker = NativeTicker(symbol);
+            var subKey = $"{nativeTicker}_FUNDING";
             if (_subscriptions.TryRemove(subKey, out var sub))
             {
                 Log.Trace($"{Name}.UnsubscribeFunding: Found and closing subscription for {subKey}");
