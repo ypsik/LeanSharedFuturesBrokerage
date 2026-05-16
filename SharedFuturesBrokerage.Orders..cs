@@ -213,6 +213,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 var status = totalFilled >= Math.Abs(order.Quantity) ? OrderStatus.Filled : OrderStatus.PartiallyFilled;
                 var sign = trade.Side == SharedOrderSide.Buy ? 1 : -1;
 
+                if (status == OrderStatus.Filled)
+                {
+                    if (!_orderCache.TryRemove(trade.OrderId, out _)) continue;
+                    _filledQtyCache.TryRemove(trade.OrderId, out _);
+                }
+
                 OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, new OrderFee(new CashAmount(trade.Fee ?? 0m, trade.FeeAsset ?? "USDC")))
                 {
                     Status = status,
@@ -221,12 +227,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     OrderFee = new OrderFee(new CashAmount(trade.Fee ?? 0m, trade.FeeAsset ?? "USDC")),
                     Message = "User trade socket"
                 });
-
-                if (status == OrderStatus.Filled)
-                {
-                    _orderCache.TryRemove(trade.OrderId, out _);
-                    _filledQtyCache.TryRemove(trade.OrderId, out _);
-                }
             }
         }
 
@@ -242,17 +242,14 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                 if (status is OrderStatus.Canceled or OrderStatus.Invalid)
                 {
+                    if (!_orderCache.TryRemove(o.OrderId, out _)) continue;
+                    _filledQtyCache.TryRemove(o.OrderId, out _);
+
                     OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero)
                     {
                         Status = status,
                         Message = "order socket"
                     });
-
-                    if (status is OrderStatus.Canceled or OrderStatus.Invalid)
-                    {
-                        _orderCache.TryRemove(o.OrderId, out _);
-                        _filledQtyCache.TryRemove(o.OrderId, out _);
-                    }
                 }
             }
         }
