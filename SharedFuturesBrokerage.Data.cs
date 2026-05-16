@@ -20,6 +20,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         private readonly object _fundingLock = new();
         private readonly ConcurrentDictionary<Symbol, int> _lastFundingHour = new();
 
+        protected int _maxHistoryLookbackDays = 5;
+
         #region IDataQueueHandler
         public virtual IEnumerator<BaseData> Subscribe(SubscriptionDataConfig config, EventHandler handler)
         {
@@ -51,13 +53,16 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         #region History Implementation
         public override IEnumerable<BaseData> GetHistory(QuantConnect.Data.HistoryRequest request)
         {
+            var minStartTimeUtc = request.EndTimeUtc.AddDays(-_maxHistoryLookbackDays);
+            var startTimeUtc = request.StartTimeUtc < minStartTimeUtc ? minStartTimeUtc : request.StartTimeUtc;
+
             if (request.DataType == typeof(MarginInterestRate))
             {
                 if (_fundingRateClient == null) yield break;
                 var res = RunSync(() => _fundingRateClient.GetFundingRateHistoryAsync(
                     new GetFundingRateHistoryRequest(GetSharedSymbol(request.Symbol))
                     {
-                        StartTime = request.StartTimeUtc,
+                        StartTime = startTimeUtc,
                         EndTime = request.EndTimeUtc
                     }));
 
@@ -78,7 +83,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 };
                 if (interval == null) yield break;
 
-                var klineReq = new GetKlinesRequest(shared, interval.Value) { StartTime = request.StartTimeUtc, EndTime = request.EndTimeUtc };
+                var klineReq = new GetKlinesRequest(shared, interval.Value) { StartTime = startTimeUtc, EndTime = request.EndTimeUtc };
                 PageRequest? nextPage = null;
                 do
                 {
