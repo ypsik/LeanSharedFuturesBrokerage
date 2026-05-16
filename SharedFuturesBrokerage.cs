@@ -102,7 +102,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
             _spdb = SymbolPropertiesDatabase.FromDataFolder();
 
-            _subscriptionManager = new EventBasedDataQueueHandlerSubscriptionManager();
+            _subscriptionManager = new EventBasedDataQueueHandlerSubscriptionManager(
+                tickType => tickType.ToString() // "Trade" ≠ "Quote" → separate Channels
+            );
+            
             _subscriptionManager.SubscribeImpl += (symbols, tickType) => SubscribeSymbols(symbols, tickType);
             _subscriptionManager.UnsubscribeImpl += (symbols, tickType) => UnsubscribeSymbols(symbols, tickType);
 

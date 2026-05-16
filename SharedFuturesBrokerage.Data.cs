@@ -95,7 +95,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             foreach (var symbol in symbols)
             {
                 var shared = GetSharedSymbol(symbol);
-                var subKey = $"{NativeTicker(symbol)}_{tickType}";
+                var subKey = $"{NativeTicker(symbol)}_{tickType.ToString()}";
                 if (_subscriptions.ContainsKey(subKey)) continue;
 
                 _subRateGate.WaitToProceed();
@@ -161,7 +161,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         {
             foreach (var symbol in symbols)
             {
-                var subKey = $"{NativeTicker(symbol)}_{tickType}";
+                var subKey = $"{NativeTicker(symbol)}_{tickType.ToString()}";
                 if (_subscriptions.TryRemove(subKey, out var sub))
                 {
                     RunSync(() => sub.CloseAsync());
