@@ -62,8 +62,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             if (_restClient == null)
             {
                 // Falls wir im Live-Modus sind, brauchen wir die Keys aus dem Job
-                job.BrokerageData.TryGetValue("bybit-key", out var key);
-                job.BrokerageData.TryGetValue("bybit-secret", out var secret);
+                job.BrokerageData.TryGetValue("bybit-api-key", out var key);
+                job.BrokerageData.TryGetValue("bybit-api-secret", out var secret);
 
                 _restClient = new BybitRestClient(options => {
                     if (!string.IsNullOrEmpty(key) && !string.IsNullOrEmpty(secret))

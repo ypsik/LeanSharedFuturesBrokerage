@@ -26,8 +26,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
 
         public override Dictionary<string, string> BrokerageData => new Dictionary<string, string>
         {
-            { "bybit-key", Config.Get("bybit-key") },
-            { "bybit-secret",  Config.Get("bybit-secret")  },
+            { "bybit-api-key", Config.Get("bybit-api-key") },
+            { "bybit-api-secret",  Config.Get("bybit-api-secret")  },
         };
 
         public override IBrokerageModel GetBrokerageModel(IOrderProvider orderProvider)
@@ -39,8 +39,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
         {
             var errors = new List<string>();
 
-            var address = Read<string>(job.BrokerageData, "bybit-key", errors);
-            var secret = Read<string>(job.BrokerageData, "bybit-secret", errors);
+            var address = Read<string>(job.BrokerageData, "bybit-api-key", errors);
+            var secret = Read<string>(job.BrokerageData, "bybit-api-secret", errors);
 
             if (errors.Any())
                 throw new ArgumentException(string.Join(Environment.NewLine, errors));
