@@ -147,7 +147,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 });
         }
 
-        protected override async Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(Order order, decimal price, decimal quantity)
+        protected override async Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(Order order, string clientOrderId, decimal price, decimal quantity)
         {
             var ticker = NativeTicker(order.Symbol);
 
@@ -155,6 +155,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                           category: Bybit.Net.Enums.Category.Linear,
                           symbol: ticker,
                           orderId: order.BrokerId.Last(),
+                          clientOrderId: clientOrderId,
                           price: price,
                           quantity: Math.Abs(quantity));
 

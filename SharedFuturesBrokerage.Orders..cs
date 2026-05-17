@@ -203,7 +203,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 _pendingModifies[oldBrokerId] = 0;
             }
 
-            var res = RunSync(() => ExecuteUpdateOrderAsync(order, price, quantity));
+            var res = RunSync(() => ExecuteUpdateOrderAsync(order, order.Id.ToString("x32"), price, quantity));
 
             if (res?.Success != true)
             {
@@ -225,11 +225,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             return true;
         }
 
-        protected virtual Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(Order order, decimal price, decimal quantity)
-            => Task.FromResult<ExchangeWebResult<SharedId>>(null);
-
         protected virtual Task<ExchangeWebResult<SharedId>> ExecutePlaceOrderAsync(PlaceFuturesOrderRequest request)
             => _orderClient.PlaceFuturesOrderAsync(request);
+
+        protected virtual Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(Order order, string clientOrderId, decimal price, decimal quantity)
+    => Task.FromResult<ExchangeWebResult<SharedId>>(null);
 
         protected virtual Task<ExchangeWebResult<SharedId>> ExecuteCancelOrderAsync(CxCancelOrderRequest request)
             => _orderClient.CancelFuturesOrderAsync(request);
