@@ -425,7 +425,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         protected virtual string GenerateClientId(int orderId)
         {
-            return $"0x{orderId.ToString("x32").ToLowerInvariant()}";
+            return $"0x{((ulong)orderId).ToString("x16").PadLeft(32, '0')}";
         }
 
         protected virtual string NativeTicker(Symbol symbol) => symbol.Value;
