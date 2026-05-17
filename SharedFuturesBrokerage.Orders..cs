@@ -137,7 +137,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         public override bool CancelOrder(Order order)
         {
             if (!order.BrokerId.Any()) return false;
-            var id = order.BrokerId.First();
+            var id = order.BrokerId.Last();
 
             var res = RunSync(() => ExecuteCancelOrderAsync(new CxCancelOrderRequest(GetSharedSymbol(order.Symbol), id)));
             if (!res.Success)
