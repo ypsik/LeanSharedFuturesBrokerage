@@ -13,6 +13,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using QuantConnect.Securities;
+using QLNet;
 
 
 namespace SilverQuant.Lean.Brokerages.Futures.Shared
@@ -51,6 +52,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         protected static readonly RateGate _subRateGate = new RateGate(3, TimeSpan.FromSeconds(1));
 
+        protected static readonly DateTime _startTime = DateTime.UtcNow;
 
         protected SharedFuturesBrokerage(string exchangeName) : base(exchangeName)
         {
