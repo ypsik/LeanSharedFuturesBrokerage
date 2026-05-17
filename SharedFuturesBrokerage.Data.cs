@@ -92,7 +92,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         if (res.Error?.Message != null && (res.Error.Message.Contains("Too many visits") || res.Error.Message.Contains("Rate Limit")))
                         {
                             retryCount++;
-                            Log.Error($"Bybit Rate Limit hit for {request.Symbol} (MarginInterestRate). Retry {retryCount}/{maxRetries} after delay...");
+                            Log.Error($"Rate Limit hit for {request.Symbol} (MarginInterestRate). Retry {retryCount}/{maxRetries} after delay...");
                             System.Threading.Thread.Sleep(1500 * retryCount);
                             continue;
                         }
@@ -137,7 +137,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         res = RunSync(
                             async () => 
                             {
-                                await Task.Delay(150).ConfigureAwait(false); // Small delay to help mitigate hitting rate limits when looping through pages. Adjust as needed based on observed behavior.  
+                                await Task.Delay(250).ConfigureAwait(false); // Small delay to help mitigate hitting rate limits when looping through pages. Adjust as needed based on observed behavior.  
                                 return await _klineClient.GetKlinesAsync(klineReq, nextPage).ConfigureAwait(false);
                             }
                         );
@@ -149,6 +149,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         {
                             retryCount++;
                             Log.Error($"Rate Limit hit for {request.Symbol} (Klines). Retry {retryCount}/{maxRetries} after delay...");
+                            RunSync (() => Task.Delay(1000 * retryCount));
                             continue;
                         }
                         break;
