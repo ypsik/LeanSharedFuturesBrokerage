@@ -51,6 +51,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         private UpdateSubscription _fundingUpdateSubscription;
 
         public override decimal MinimumOrderNotionalValue => 10m;
+        protected override int MaxHistoryLookbackMinutes => 5000;
+
 
         // 1. LEAN DataQueueHandler Konstruktor
         public HyperliquidFuturesBrokerage() : base("hyperliquid")

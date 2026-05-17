@@ -23,7 +23,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         protected virtual int FundingRolloverHours => 8;
 
-        protected int _maxHistoryLookbackDays = 5;
+        protected virtual int MaxHistoryLookbackMinutes => 7200;
 
         #region IDataQueueHandler
         public virtual IEnumerator<BaseData> Subscribe(SubscriptionDataConfig config, EventHandler handler)
@@ -61,7 +61,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         {
             Log.Trace($"GetHistory called: Symbol={request.Symbol}, DataType={request.DataType.Name}, Resolution={request.Resolution}, StartUtc={request.StartTimeUtc}, EndUtc={request.EndTimeUtc}");
 
-            var minStartTimeUtc = request.EndTimeUtc.AddDays(-_maxHistoryLookbackDays);
+            var minStartTimeUtc = request.EndTimeUtc.AddMinutes(-MaxHistoryLookbackMinutes);
             var startTimeUtc = request.StartTimeUtc < minStartTimeUtc ? minStartTimeUtc : request.StartTimeUtc;
 
             if (request.DataType == typeof(MarginInterestRate))
