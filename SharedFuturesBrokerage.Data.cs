@@ -115,7 +115,34 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         yield break;
                     }
                     foreach (var bar in res.Data.OrderBy(b => b.OpenTime))
-                        yield return new TradeBar { Symbol = request.Symbol, Time = bar.OpenTime, Open = bar.OpenPrice, High = bar.HighPrice, Low = bar.LowPrice, Close = bar.ClosePrice, Volume = bar.Volume, Period = request.Resolution.ToTimeSpan() };
+                    {
+                        if (request.DataType == typeof(QuoteBar))
+                        {
+                            yield return new QuoteBar
+                            {
+                                Symbol = request.Symbol,
+                                Time = bar.OpenTime,
+                                Bid = new Bar(bar.OpenPrice, bar.HighPrice, bar.LowPrice, bar.ClosePrice),
+                                Ask = new Bar(bar.OpenPrice, bar.HighPrice, bar.LowPrice, bar.ClosePrice),
+                                Value = bar.ClosePrice,
+                                Period = request.Resolution.ToTimeSpan()
+                            };
+                        }
+                        else
+                        {
+                            yield return new TradeBar
+                            {
+                                Symbol = request.Symbol,
+                                Time = bar.OpenTime,
+                                Open = bar.OpenPrice,
+                                High = bar.HighPrice,
+                                Low = bar.LowPrice,
+                                Close = bar.ClosePrice,
+                                Volume = bar.Volume,
+                                Period = request.Resolution.ToTimeSpan()
+                            };
+                        }
+                    }
                     nextPage = res.NextPageRequest;
                 } while (nextPage != null);
             }
