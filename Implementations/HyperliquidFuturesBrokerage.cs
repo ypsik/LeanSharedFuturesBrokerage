@@ -328,7 +328,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             var res = await _restClient.FuturesApi.Trading.EditOrderAsync(
                           symbol: ticker,
                           orderId: long.Parse(order.BrokerId.Last()),
-                          clientOrderId: order.Id.ToString(), // NEU: Muss exakt die LEAN Order.Id sein für das Modify-Tracking
+                          clientOrderId: order.Id.ToString("x32"),
                           side: side,
                           orderType: order.Type == QuantConnect.Orders.OrderType.Limit
                               ? HyperLiquid.Net.Enums.OrderType.Limit

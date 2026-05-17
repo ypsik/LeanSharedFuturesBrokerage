@@ -111,7 +111,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 new SharedQuantity { QuantityInBaseAsset = Math.Abs(executionQuantity) })
             {
                 Price = (order as LimitOrder)?.LimitPrice,
-                ClientOrderId = order.Id.ToString() // NEU: LEAN order.Id als clientOrderId für Modify-Tracking
+                ClientOrderId = order.Id.ToString("x32")
             };
 
             var res = RunSync(() => ExecutePlaceOrderAsync(request));
@@ -128,7 +128,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             _filledQtyCache[res.Data.Id] = 0m;
 
             // NEU: Reverse-Index clientOrderId → aktuelle brokerId
-            _clientOrderIdToBrokerId[order.Id.ToString()] = res.Data.Id;
+            _clientOrderIdToBrokerId[order.Id.ToString("x32")] = res.Data.Id;
 
             OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero) { Status = OrderStatus.Submitted });
             return true;
@@ -166,7 +166,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             {
                 quantity = lastUpdate.Quantity.Value;
             }
-            else if (_clientOrderIdToBrokerId.TryGetValue(order.Id.ToString(), out var brokerId) &&
+            else if (_clientOrderIdToBrokerId.TryGetValue(order.Id.ToString("x32"), out var brokerId) &&
                      _orderCache.TryGetValue(brokerId, out var cached))
             {
                 var filled = _filledQtyCache.TryGetValue(brokerId, out var f) ? f : 0m;
@@ -259,7 +259,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     if (!_orderCache.TryRemove(trade.OrderId, out _)) continue;
                     _filledQtyCache.TryRemove(trade.OrderId, out _);
                     // NEU: clientOrderId Index aufräumen bei Fill
-                    _clientOrderIdToBrokerId.TryRemove(order.Id.ToString(), out _);
+                    _clientOrderIdToBrokerId.TryRemove(order.Id.ToString("x32"), out _);
                 }
 
                 OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, new OrderFee(new CashAmount(trade.Fee ?? 0m, trade.FeeAsset ?? "USDC")))
@@ -373,7 +373,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         if (!_orderCache.TryRemove(kv.Key, out _)) continue;
                         _filledQtyCache.TryRemove(kv.Key, out _);
                         // NEU: clientOrderId Index aufräumen bei Reconcile
-                        _clientOrderIdToBrokerId.TryRemove(kv.Value.Id.ToString(), out _);
+                        _clientOrderIdToBrokerId.TryRemove(kv.Value.Id.ToString("x32"), out _);
 
                         var statusCheck = await _orderClient.GetFuturesOrderAsync(new GetOrderRequest(sharedSymbol, kv.Key)).ConfigureAwait(false);
 
