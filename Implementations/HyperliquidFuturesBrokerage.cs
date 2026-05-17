@@ -223,7 +223,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                                     sub.Data,
                                     (state) => _fundingUpdateConnected = state,
                                     "Funding updates",
-                                    "Funding updates subscription failed"
+                                    "Funding updates subscription failed",
+                                    sub.Error?.ToString()
                                 );
 
                     if (sub.Success)

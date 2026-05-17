@@ -129,7 +129,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                             }
                         }));
 
-                    SetupSubscriptionEvents(sub.Success, sub.Data, _ => { }, $"{symbol.Value} Trade", $"Trade subscription failed for {symbol.Value}");
+                    SetupSubscriptionEvents(sub.Success, sub.Data, _ => { }, $"{symbol.Value} Trade", $"Trade subscription failed for {symbol.Value}", sub.Error?.ToString());
                     if (sub.Success)
                     {
                         _subscriptions[subKey] = sub.Data;
@@ -154,7 +154,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                             });
                         }));
 
-                    SetupSubscriptionEvents(sub.Success, sub.Data, _ => { }, $"{symbol.Value} Quote", $"Quote subscription failed for {symbol.Value}");
+                    SetupSubscriptionEvents(sub.Success, sub.Data, _ => { }, $"{symbol.Value} Quote", $"Quote subscription failed for {symbol.Value}", sub.Error?.ToString());
                     if (sub.Success)
                     {
                         _subscriptions[subKey] = sub.Data;
@@ -226,7 +226,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                 SetupSubscriptionEvents(sub.Success, sub.Data, _ => { },
                   $"Funding {nativeTicker}",
-                  $"SubscribeFunding failed for {symbol}: {sub.Error?.Message}");
+                  $"SubscribeFunding failed for {symbol}: {sub.Error?.Message}",
+                  sub.Error?.ToString());
 
                 if (sub.Success)
                 {

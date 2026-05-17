@@ -132,7 +132,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 {
                     _subRateGate.WaitToProceed();
                     var sub = RunSync(() => _userTradeSocket.SubscribeToUserTradeUpdatesAsync(new SubscribeUserTradeRequest(), HandleUserTradeSocket));
-                    SetupSubscriptionEvents(sub.Success, sub.Data, state => _isConnectedUserTrade = state, "User trade", "User trade socket failed");
+                    SetupSubscriptionEvents(sub.Success, sub.Data, state => _isConnectedUserTrade = state, "User trade", "User trade socket failed", sub.Error?.ToString());
                     if (sub.Success)
                     {
                         _userTradeSocketSub = sub.Data;
@@ -145,7 +145,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 {
                     _subRateGate.WaitToProceed();
                     var sub = RunSync(() => _orderSocket.SubscribeToFuturesOrderUpdatesAsync(new SubscribeFuturesOrderRequest(), HandleOrderSocket));
-                    SetupSubscriptionEvents(sub.Success, sub.Data, state => _isConnectedOrder = state, "Order", "Order socket failed");
+                    SetupSubscriptionEvents(sub.Success, sub.Data, state => _isConnectedOrder = state, "Order", "Order socket failed", sub.Error?.ToString());
                     if (sub.Success)
                     {                     
                         _orderSocketSub = sub.Data;
@@ -159,7 +159,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             }
         }
 
-        protected void SetupSubscriptionEvents(bool isSuccess, dynamic subscriptionData, Action<bool> setConnectedState, string streamName, string errorMessage)
+        protected void SetupSubscriptionEvents(bool isSuccess, dynamic subscriptionData, Action<bool> setConnectedState, string streamName, string errorMessage, string? errorDetails = null)
         {
             if (isSuccess)
             {
@@ -184,7 +184,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             }
             else
             {
-                Log.Error($"{Name} {errorMessage}");
+                Log.Error($"{Name} {errorMessage} | Details: {errorDetails ?? "No additional error info available."}");
             }
         }
 

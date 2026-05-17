@@ -113,7 +113,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                                     sub.Data,
                                     (state) => _fundingUpdateConnected = state,
                                     "Wallet updates",
-                                    "Wallet updates subscription failed"
+                                    "Wallet updates subscription failed",
+                                    sub.Error?.ToString()                                
                                 );
 
                     if (sub.Success)

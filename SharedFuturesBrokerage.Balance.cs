@@ -100,7 +100,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 sub.Data,
                 (state) => _isConnectedBalance = state,
                 "Balance updates",
-                "Balance updates socket failed"
+                "Balance updates socket failed",
+                sub.Error?.ToString()
             );
             if(sub.Success) 
                 _balanceUpdatesSocketSub = sub.Data;
