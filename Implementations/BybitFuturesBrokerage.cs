@@ -118,6 +118,16 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             }
         }
 
+        protected override ExchangeParameters GetFundingRateHistoryParameters
+        {
+            get
+            {
+                var parameters = new ExchangeParameters();
+                parameters.AddValue(new ExchangeParameter("Bybit", "category", "linear"));
+                return parameters;
+            }
+        }
+
         public override void Connect()
         {
             lock (_fundingUpdateLock)

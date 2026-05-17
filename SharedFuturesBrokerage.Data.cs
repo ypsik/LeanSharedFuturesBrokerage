@@ -12,6 +12,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 
+
 namespace SilverQuant.Lean.Brokerages.Futures.Shared
 {
     public abstract partial class SharedFuturesBrokerage
@@ -53,6 +54,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         #endregion
 
         #region History Implementation
+
+        protected virtual ExchangeParameters GetFundingRateHistoryParameters => new ExchangeParameters();
+
         public override IEnumerable<BaseData> GetHistory(QuantConnect.Data.HistoryRequest request)
         {
             var minStartTimeUtc = request.EndTimeUtc.AddDays(-_maxHistoryLookbackDays);
@@ -61,10 +65,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             if (request.DataType == typeof(MarginInterestRate))
             {
                 if (_fundingRateClient == null) yield break;
+
                 var fundingReq = new GetFundingRateHistoryRequest(GetSharedSymbol(request.Symbol))
                 {
                     StartTime = startTimeUtc,
-                    EndTime = request.EndTimeUtc
+                    EndTime = request.EndTimeUtc,
+                    ExchangeParameters = GetFundingRateHistoryParameters
                 };
 
                 PageRequest? nextPage = null;
