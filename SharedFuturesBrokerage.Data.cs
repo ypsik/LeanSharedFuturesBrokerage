@@ -20,6 +20,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         private readonly object _fundingLock = new();
         private readonly ConcurrentDictionary<Symbol, int> _lastFundingHour = new();
 
+        protected virtual int FundingRolloverHours => 8;
+
         protected int _maxHistoryLookbackDays = 5;
 
         #region IDataQueueHandler
@@ -190,28 +192,29 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                 _subRateGate.WaitToProceed();
 
-                // Base builds the funding handler. HL captures now in the socket callback and passes it in.
-                // Returns true on first tick or rollover — HL uses this to gate exchange-specific logic.
-                Func<DateTime, decimal, bool> onFundingRate = (now, fundingRate) =>
+                // Base builds the funding handler. HL captures now in the socket callback and passes it in.
+                // Returns true on first tick or rollover — HL uses this to gate exchange-specific logic.
+                Func<DateTime, decimal, bool> onFundingRate = (now, fundingRate) =>
                 {
                     bool isFirstTick = false;
                     bool isHourRollover = false;
-                    var currentHour = now.Hour;
+
+                    var currentHour = (now.Hour / FundingRolloverHours) * FundingRolloverHours;
 
                     _lastFundingHour.AddOrUpdate(
-                        symbol,
-                        addValueFactory: _ => { isFirstTick = true; return currentHour; },
-                        updateValueFactory: (_, oldHour) =>
-                        {
-                            if (oldHour != currentHour) { isHourRollover = true; return currentHour; }
-                            return oldHour;
-                        });
+                      symbol,
+                      addValueFactory: _ => { isFirstTick = true; return currentHour; },
+                      updateValueFactory: (_, oldHour) =>
+                      {
+                          if (oldHour != currentHour) { isHourRollover = true; return currentHour; }
+                          return oldHour;
+                      });
 
                     if (!isFirstTick && !isHourRollover) return false;
 
                     if (isHourRollover)
                     {
-                        var roundedTime = new DateTime(now.Year, now.Month, now.Day, now.Hour, 0, 0, DateTimeKind.Utc);
+                        var roundedTime = new DateTime(now.Year, now.Month, now.Day, currentHour, 0, 0, DateTimeKind.Utc);
                         _aggregator.Update(new MarginInterestRate { Symbol = symbol, Time = roundedTime, InterestRate = fundingRate });
                         Log.Trace($"{Name} Funding Update: {symbol.Value} -> Rate: {fundingRate}");
                     }
@@ -222,8 +225,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 var sub = RunSync(() => CreateFundingSubscriptionAsync(nativeTicker, symbol, onFundingRate));
 
                 SetupSubscriptionEvents(sub.Success, sub.Data, _ => { },
-                    $"Funding {nativeTicker}",
-                    $"SubscribeFunding failed for {symbol}: {sub.Error?.Message}");
+                  $"Funding {nativeTicker}",
+                  $"SubscribeFunding failed for {symbol}: {sub.Error?.Message}");
 
                 if (sub.Success)
                 {
@@ -232,7 +235,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 }
                 return false;
             }
-        }
+        }        
 
         protected virtual bool UnsubscribeFunding(Symbol symbol)
         {

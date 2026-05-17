@@ -90,6 +90,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         }
 
         public override bool IsConnected => base.IsConnected && _fundingUpdateConnected;
+        protected override int FundingRolloverHours => 1;
 
         protected override void InitializeFromJob(QuantConnect.Packets.LiveNodePacket job, IDataAggregator aggregator)
         {
