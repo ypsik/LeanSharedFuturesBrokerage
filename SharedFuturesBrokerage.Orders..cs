@@ -42,9 +42,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         #region Order Management
 
+        protected virtual ExchangeParameters OpenOrdersExchangeParameters => new ExchangeParameters();
+
         public override List<Order> GetOpenOrders()
         {
-            var res = RunSync(() => _orderClient.GetOpenFuturesOrdersAsync(new GetOpenOrdersRequest()));
+
+            var res = RunSync(() => _orderClient.GetOpenFuturesOrdersAsync(
+                new GetOpenOrdersRequest(exchangeParameters: OpenOrdersExchangeParameters)));
             if (!res.Success || res.Data == null) return new List<Order>();
 
             return res.Data.Select(o =>
@@ -350,7 +354,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 {
                     await Task.Delay(_reconciliationInterval, ct).ConfigureAwait(false);
 
-                    var open = await _orderClient.GetOpenFuturesOrdersAsync(new GetOpenOrdersRequest()).ConfigureAwait(false);
+                    var open = await _orderClient.GetOpenFuturesOrdersAsync(
+                        new GetOpenOrdersRequest(exchangeParameters: OpenOrdersExchangeParameters)
+                    ).ConfigureAwait(false);
+                    
                     if (!open.Success || open.Data == null)
                     {
                         Log.Error($"{Name}.ReconcileLoop: Failed to fetch open orders: {open.Error}");
