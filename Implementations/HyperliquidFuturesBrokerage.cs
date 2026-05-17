@@ -188,12 +188,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             return upper.EndsWith("USDC") ? upper : upper + "USDC";
         }
 
-        protected override SharedSymbol GetSharedSymbol(Symbol s)
-        {
-            CurrencyPairUtil.DecomposeCurrencyPair(s, out var baseAsset, out var quoteAsset);
-            return new SharedSymbol(TradingMode.PerpetualLinear, baseAsset, quoteAsset);
-        }
-
         protected override string NativeTicker(Symbol symbol)
         {
             CurrencyPairUtil.DecomposeCurrencyPair(symbol, out var baseAsset, out _);

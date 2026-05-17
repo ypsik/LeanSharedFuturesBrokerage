@@ -434,8 +434,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         protected virtual SharedSymbol GetSharedSymbol(Symbol s)
         {
-            CurrencyPairUtil.DecomposeCurrencyPair(s, out var _, out var quoteAsset);
-            return new SharedSymbol(TradingMode.PerpetualLinear, s.Value, quoteAsset);
+            CurrencyPairUtil.DecomposeCurrencyPair(s, out var baseAsset, out var quoteAsset);
+            return new SharedSymbol(TradingMode.PerpetualLinear, baseAsset, quoteAsset);
         }
 
         private OrderStatus MapStatus(SharedOrderStatus status, decimal filled)
