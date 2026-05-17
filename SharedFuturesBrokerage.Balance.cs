@@ -13,7 +13,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 {
     public abstract partial class SharedFuturesBrokerage
     {
-        private decimal? _balance;
+        protected decimal? _balance;
         private UpdateSubscription _balanceUpdatesSocketSub;
         bool _balanceUpdated;
 
@@ -86,10 +86,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             {
                 foreach (var balance in update.Data)
                 {
-                    _balance = balance.Total;
+                    _balance = balance.Total;                    
                     if (_balanceUpdated)
                     {
-                        OnAccountChanged(new AccountEvent("USDC", _balance.Value));
+                        OnAccountChanged(new AccountEvent(balance.Asset, balance.Total));
                         _balanceUpdated = false;
                     }
                 }

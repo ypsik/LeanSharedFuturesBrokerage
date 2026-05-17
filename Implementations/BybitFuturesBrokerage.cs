@@ -3,11 +3,13 @@ using CryptoExchange.Net.Interfaces.Clients;
 using CryptoExchange.Net.Objects;
 using CryptoExchange.Net.Objects.Sockets;
 using CryptoExchange.Net.SharedApis;
+using CryptoExchange.Net.Trackers.UserData;
 using QuantConnect;
 using QuantConnect.Data;
 using QuantConnect.Interfaces;
 using QuantConnect.Logging;
 using QuantConnect.Orders;
+using QuantConnect.Securities;
 using SilverQuant.Lean.Brokerages.Futures.Shared;
 using System;
 using System.Collections.Generic;
@@ -156,6 +158,19 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
                     onFundingRate(now, tickerData.FundingRate ?? 0);
                 });
+        }
+
+        public override List<CashAmount> GetCashBalance()
+        {
+            if (_balance.HasValue)
+                return new List<CashAmount> { new CashAmount(_balance.Value, "USDC") };
+
+            var res = RunSync(() => _restClient.V5Api.Account.GetBalancesAsync(Bybit.Net.Enums.AccountType.Unified));
+            var result = new List<CashAmount>
+            {
+                new CashAmount(res?.Data?.List?.FirstOrDefault()?.TotalMarginBalance ?? 0, "USDT")
+            };
+            return result;
         }
 
         protected override async Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(Order order, string clientOrderId, decimal price, decimal quantity)
