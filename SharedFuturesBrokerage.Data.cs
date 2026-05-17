@@ -61,16 +61,23 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             if (request.DataType == typeof(MarginInterestRate))
             {
                 if (_fundingRateClient == null) yield break;
-                var res = RunSync(() => _fundingRateClient.GetFundingRateHistoryAsync(
-                    new GetFundingRateHistoryRequest(GetSharedSymbol(request.Symbol))
-                    {
-                        StartTime = startTimeUtc,
-                        EndTime = request.EndTimeUtc
-                    }));
+                var fundingReq = new GetFundingRateHistoryRequest(GetSharedSymbol(request.Symbol))
+                {
+                    StartTime = startTimeUtc,
+                    EndTime = request.EndTimeUtc
+                };
 
-                if (res.Success && res.Data != null)
+                PageRequest? nextPage = null;
+                do
+                {
+                    var res = RunSync(() => _fundingRateClient.GetFundingRateHistoryAsync(fundingReq, nextPage));
+                    if (!res.Success || res.Data == null) yield break;
+
                     foreach (var rate in res.Data.OrderBy(r => r.Timestamp))
                         yield return new MarginInterestRate { Symbol = request.Symbol, Time = rate.Timestamp, InterestRate = rate.FundingRate };
+
+                    nextPage = res.NextPageRequest;
+                } while (nextPage != null);
             }
             else
             {
