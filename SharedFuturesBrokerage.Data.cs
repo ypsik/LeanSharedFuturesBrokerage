@@ -59,6 +59,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         public override IEnumerable<BaseData> GetHistory(QuantConnect.Data.HistoryRequest request)
         {
+            Log.Trace($"GetHistory called: Symbol={request.Symbol}, DataType={request.DataType.Name}, Resolution={request.Resolution}, StartUtc={request.StartTimeUtc}, EndUtc={request.EndTimeUtc}");
+
             var minStartTimeUtc = request.EndTimeUtc.AddDays(-_maxHistoryLookbackDays);
             var startTimeUtc = request.StartTimeUtc < minStartTimeUtc ? minStartTimeUtc : request.StartTimeUtc;
 
@@ -77,7 +79,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 do
                 {
                     var res = RunSync(() => _fundingRateClient.GetFundingRateHistoryAsync(fundingReq, nextPage));
-                    if (!res.Success || res.Data == null) yield break;
+                    if (!res.Success || res.Data == null)
+                    {
+                        Log.Error($"GetHistory Error (MarginInterestRate) for {request.Symbol}: {res.Error?.Message} (Code: {res.Error?.Code})");
+                        yield break;
+                    }
 
                     foreach (var rate in res.Data.OrderBy(r => r.Timestamp))
                         yield return new MarginInterestRate { Symbol = request.Symbol, Time = rate.Timestamp, InterestRate = rate.FundingRate };
@@ -103,7 +109,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 do
                 {
                     var res = RunSync(() => _klineClient.GetKlinesAsync(klineReq, nextPage));
-                    if (!res.Success || res.Data == null) yield break;
+                    if (!res.Success || res.Data == null)
+                    {
+                        Log.Error($"GetHistory Error (Klines) for {request.Symbol}: {res.Error?.Message} (Code: {res.Error?.Code})");
+                        yield break;
+                    }
                     foreach (var bar in res.Data.OrderBy(b => b.OpenTime))
                         yield return new TradeBar { Symbol = request.Symbol, Time = bar.OpenTime, Open = bar.OpenPrice, High = bar.HighPrice, Low = bar.LowPrice, Close = bar.ClosePrice, Volume = bar.Volume, Period = request.Resolution.ToTimeSpan() };
                     nextPage = res.NextPageRequest;
