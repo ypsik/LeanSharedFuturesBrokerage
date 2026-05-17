@@ -24,6 +24,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
     {
         public virtual decimal MinimumOrderNotionalValue => 0m;
 
+        /// <summary>
+        /// Gibt an, ob die Börse Orders in-place ändert (z.B. Bybit) oder Cancel+Replace nutzt (z.B. Hyperliquid).
+        /// </summary>
+        public virtual bool ExchangeModifiesOrdersInPlace => false;
+
         // --- CACHES ---
         protected readonly ConcurrentDictionary<string, Order> _orderCache = new();
         private readonly ConcurrentDictionary<string, decimal> _filledQtyCache = new();
@@ -150,15 +155,28 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         {
             if (!order.BrokerId.Any() || ExecuteUpdateOrderAsync == null) return false;
 
-            var lastUpdate = _orderManager.GetOrderTicket(order.Id).UpdateRequests.Last();
+            var ticket = _orderManager.GetOrderTicket(order.Id);
+            var lastUpdate = ticket?.UpdateRequests.LastOrDefault();
 
-            decimal price = lastUpdate.LimitPrice ?? order.Price;
+            decimal price = lastUpdate?.LimitPrice ?? order.Price;
 
-            decimal quantity = lastUpdate.Quantity.HasValue
-                ? lastUpdate.Quantity.Value
-                : _orderCache.TryGetValue(order.BrokerId.Last(), out var cached)
-                    ? cached.Quantity
-                    : order.Quantity;
+            decimal quantity;
+
+            if (lastUpdate?.Quantity.HasValue == true)
+            {
+                quantity = lastUpdate.Quantity.Value;
+            }
+            else if (_clientOrderIdToBrokerId.TryGetValue(order.Id.ToString(), out var brokerId) &&
+                     _orderCache.TryGetValue(brokerId, out var cached))
+            {
+                var filled = _filledQtyCache.TryGetValue(brokerId, out var f) ? f : 0m;
+                quantity = Math.Abs(cached.Quantity) - filled;
+                if (cached.Quantity < 0) quantity = -quantity;
+            }
+            else
+            {
+                quantity = order.Quantity;
+            }
 
             // Minimum notional check
             if (MinimumOrderNotionalValue > 0m && price > 0m)
@@ -175,16 +193,25 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             }
 
             // NEU: Aktuelle brokerId als "pending modify" markieren
-            // → HandleOrderSocket unterdrückt Cancel-Event für diese OID
-            var oldBrokerId = order.BrokerId.Last();
-            _pendingModifies[oldBrokerId] = 0;
+            // → HandleOrderSocket unterdrückt Cancel-Event für diese OID (nur bei Cancel+Replace Börsen)
+            var oldBrokerId = order.BrokerId.LastOrDefault();
+            if (oldBrokerId == null)
+                return false;
+
+            if (!ExchangeModifiesOrdersInPlace)
+            {
+                _pendingModifies[oldBrokerId] = 0;
+            }
 
             var res = RunSync(() => ExecuteUpdateOrderAsync(order, price, quantity));
 
             if (res?.Success != true)
             {
                 // NEU: Bei Fehler pending entfernen da kein Modify stattfindet
-                _pendingModifies.TryRemove(oldBrokerId, out _);
+                if (!ExchangeModifiesOrdersInPlace)
+                {
+                    _pendingModifies.TryRemove(oldBrokerId, out _);
+                }
                 var errorMsg = res?.Error?.ToString() ?? "Unknown exchange error";
                 Log.Error($"{Name}.UpdateOrder({order.Symbol.Value}): {errorMsg}");
                 OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "UpdateOrder", errorMsg));
@@ -240,7 +267,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     Status = status,
                     FillPrice = trade.Price,
                     FillQuantity = tradeQty * sign,
-                    OrderFee = new OrderFee(new CashAmount(trade.Fee ?? 0m, trade.FeeAsset ?? "USDC")),
                     Message = "User trade socket"
                 });
             }
@@ -294,6 +320,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     _orderCache.TryRemove(oldBrokerId, out _);
                     _filledQtyCache.TryGetValue(oldBrokerId, out var filledSoFar);
                     _filledQtyCache.TryRemove(oldBrokerId, out _);
+                    _pendingModifies.TryRemove(oldBrokerId, out _);
 
                     _orderCache[o.OrderId] = existingOrder;
                     _filledQtyCache[o.OrderId] = filledSoFar;
