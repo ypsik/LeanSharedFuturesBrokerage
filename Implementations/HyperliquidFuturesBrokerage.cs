@@ -323,7 +323,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
             var res = await _restClient.FuturesApi.Trading.EditOrderAsync(
                           symbol: ticker,
-                          orderId: long.Parse(order.BrokerId.Last()),
+                          orderId: String.IsNullOrEmpty(clientOrderId) ?  long.Parse(order.BrokerId.Last()) : null,
                           clientOrderId: clientOrderId,
                           side: side,
                           orderType: order.Type == QuantConnect.Orders.OrderType.Limit
