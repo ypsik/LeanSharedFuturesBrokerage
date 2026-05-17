@@ -301,6 +301,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 orderType: request.OrderType == SharedOrderType.Limit ? HyperLiquid.Net.Enums.OrderType.Limit : HyperLiquid.Net.Enums.OrderType.Market,
                 quantity: request.Quantity?.QuantityInBaseAsset ?? 0m,
                 price: request.Price ?? 0m,
+                clientOrderId: request.ClientOrderId, // NEU: Zwingend erforderlich für das spätere Socket-Tracking
                 vaultAddress: _vaultAdress);
 
             if (!res.Success)
@@ -318,6 +319,39 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                     res.As(new SharedId(res.Data.OrderId.ToString()))
                 );
         }
+
+        protected override async Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(Order order, decimal price, decimal quantity)
+        {
+            var ticker = NativeTicker(order.Symbol);
+            OrderSide side = quantity > 0 ? OrderSide.Buy : OrderSide.Sell;
+
+            var res = await _restClient.FuturesApi.Trading.EditOrderAsync(
+                          symbol: ticker,
+                          orderId: long.Parse(order.BrokerId.Last()),
+                          clientOrderId: order.Id.ToString(), // NEU: Muss exakt die LEAN Order.Id sein für das Modify-Tracking
+                          side: side,
+                          orderType: order.Type == QuantConnect.Orders.OrderType.Limit
+                              ? HyperLiquid.Net.Enums.OrderType.Limit
+                              : HyperLiquid.Net.Enums.OrderType.Market,
+                          quantity: Math.Abs(quantity),
+                          price: price,
+                          vaultAddress: _vaultAdress);
+
+            if (!res.Success)
+            {
+                Log.Error($"Hyperliquid update error: {res.Error} | Ticker: {ticker} | Price: {price} | OriginalData: {res.OriginalData}");
+                return new ExchangeWebResult<SharedId>(Name, res.Error);
+            }
+
+            // Nutzt die LEAN OrderId als temporären Platzhalter.
+            // Die Basisklasse ordnet sie temporär zu, bis der Socket über die ClientOrderId die neue BrokerId meldet.
+            return new ExchangeWebResult<SharedId>(
+                    Name,
+                    TradingMode.PerpetualLinear,
+                    res.As(new SharedId(order.Id.ToString()))
+                );
+        }
+
 
         protected override async Task<ExchangeWebResult<SharedId>> ExecuteCancelOrderAsync(CxCancelOrderRequest request)
         {
@@ -341,34 +375,5 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 );
         }
 
-        protected override async Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(Order order, decimal price, decimal quantity)
-        {
-            var ticker = NativeTicker(order.Symbol);
-            OrderSide side = quantity > 0 ? OrderSide.Buy : OrderSide.Sell;
-
-            var res = await _restClient.FuturesApi.Trading.EditOrderAsync(
-                          symbol: ticker,
-                          orderId: long.Parse(order.BrokerId.Last()),
-                          clientOrderId: null,
-                          side: side,
-                          orderType: order.Type == QuantConnect.Orders.OrderType.Limit
-                              ? HyperLiquid.Net.Enums.OrderType.Limit
-                              : HyperLiquid.Net.Enums.OrderType.Market,
-                          quantity: Math.Abs(quantity),
-                          price: price,
-                          vaultAddress: _vaultAdress);
-
-            if (!res.Success)
-            {
-                Log.Error($"Hyperliquid update error: {res.Error} | Ticker: {ticker} | Price: {price} | OriginalData: {res.OriginalData}");
-                return new ExchangeWebResult<SharedId>(Name, res.Error);
-            }
-
-            return new ExchangeWebResult<SharedId>(
-                    Name,
-                    TradingMode.PerpetualLinear,
-                    res.As(new SharedId(order.Id.ToString()))
-                );
-        }
     }
 }

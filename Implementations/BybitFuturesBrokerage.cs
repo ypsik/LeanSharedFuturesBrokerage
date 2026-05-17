@@ -3,8 +3,6 @@ using CryptoExchange.Net.Interfaces.Clients;
 using CryptoExchange.Net.Objects;
 using CryptoExchange.Net.Objects.Sockets;
 using CryptoExchange.Net.SharedApis;
-using HyperLiquid.Net;
-using HyperLiquid.Net.Clients;
 using QuantConnect;
 using QuantConnect.Data;
 using QuantConnect.Interfaces;
@@ -13,28 +11,27 @@ using QuantConnect.Orders;
 using SilverQuant.Lean.Brokerages.Futures.Shared;
 using System;
 using System.Collections.Generic;
-using System.Text;
+using System.Linq;
+using System.Threading.Tasks;
 
 namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 {
     public class BybitFuturesBrokerage : SharedFuturesBrokerage
     {
-        BybitRestClient _restClient;
-        BybitSocketClient _socketClient;
-        BybitSocketClient _socketClientExData;
+        private BybitRestClient _restClient;
+        private BybitSocketClient _socketClient;
+        private BybitSocketClient _socketClientExData;
 
         private readonly object _fundingUpdateLock = new();
         private bool _fundingUpdateConnected = false;
         private UpdateSubscription _fundingUpdateSubscription;
-
-
 
         internal BybitFuturesBrokerage(
             IAlgorithm algorithm,
             BybitRestClient restClient,
             BybitSocketClient socketClient,
             IDataAggregator aggregator,
-            Func<List<Holding>> getHoldingsFunc = null) // 🔥 Fix: Optional gemacht
+            Func<List<Holding>> getHoldingsFunc = null)
             : base(algorithm, "bybit")
         {
             _restClient = restClient;
@@ -45,7 +42,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 restClient.V5Api.SharedClient,
                 restClient.V5Api.SharedClient,
                 socketClient.V5LinearApi.SharedClient,
-                socketClient.V5PrivateApi.SharedClient, 
+                socketClient.V5PrivateApi.SharedClient,
                 socketClient.V5LinearApi.SharedClient,
                 socketClient.V5PrivateApi.SharedClient,
                 socketClient.V5PrivateApi.SharedClient,
@@ -53,15 +50,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 restClient.V5Api.SharedClient,
                 aggregator,
                 getHoldingsFunc);
-
         }
 
         protected override void InitializeFromJob(QuantConnect.Packets.LiveNodePacket job, IDataAggregator aggregator)
         {
-            // 1. Instanzen schützen: Nur erstellen, wenn sie null sind
             if (_restClient == null)
             {
-                // Falls wir im Live-Modus sind, brauchen wir die Keys aus dem Job
                 job.BrokerageData.TryGetValue("bybit-api-key", out var key);
                 job.BrokerageData.TryGetValue("bybit-api-secret", out var secret);
 
@@ -81,8 +75,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 _socketClientExData = new BybitSocketClient();
             }
 
-            // 13. Basisklasse synchronisieren
-            // Wir nutzen die bestehenden (oder gerade erstellten) Instanzen
             InitializeBase(
                 _restClient.V5Api.SharedClient,
                 _restClient.V5Api.SharedClient,
@@ -97,6 +89,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 _getHoldingsFunc
             );
         }
+
         #region Connect
 
         public override bool IsConnected => base.IsConnected && _fundingUpdateConnected;
@@ -109,8 +102,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 {
                     _subRateGate.WaitToProceed();
                     var sub = RunSync(() =>
-                        // Bei Bybit V5 werden Funding-Gebühren direkt im Wallet verbucht.
-                        // Das Abonnement des Wallet-Streams informiert dich über jede Balance-Änderung (inkl. Funding).
                         _socketClient.V5PrivateApi.SubscribeToWalletUpdatesAsync(update =>
                         {
                             OnBalanceUpdated();
@@ -136,7 +127,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         public override void Disconnect()
         {
-            // Nutzt die Bybit.Net CloseAsync Methode für das Subscription-Objekt
             RunSync(() => _fundingUpdateSubscription?.CloseAsync() ?? Task.CompletedTask);
             _socketClientExData?.Dispose();
             base.Disconnect();
@@ -153,17 +143,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                     var tickerData = data.Data;
 
                     onFundingRate(now, tickerData.FundingRate ?? 0);
-
                 });
         }
-
 
         protected override async Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(Order order, decimal price, decimal quantity)
         {
             var ticker = NativeTicker(order.Symbol);
 
-            // Bybit V5 benötigt für EditOrder primär die OrderId oder ClientOrderId. 
-            // Side und OrderType sind bei der Änderung einer bestehenden Order nicht erforderlich.
             var res = await _restClient.V5Api.Trading.EditOrderAsync(
                           category: Bybit.Net.Enums.Category.Linear,
                           symbol: ticker,
@@ -177,10 +163,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 return new ExchangeWebResult<SharedId>(Name, res.Error);
             }
 
+            // KORREKTUR: Bybit verändert die OrderId bei einem Modify NICHT. 
+            // Daher wird hier die echte, bestätigte OrderId durchgereicht.
             return new ExchangeWebResult<SharedId>(
                     Name,
                     TradingMode.PerpetualLinear,
-                    res.As(new SharedId(order.Id.ToString()))
+                    res.As(new SharedId(res.Data.OrderId.ToString()))
                 );
         }
     }
