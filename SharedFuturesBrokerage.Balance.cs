@@ -28,9 +28,14 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 : new List<CashAmount>();
         }
 
+        protected virtual ExchangeParameters AccountHoldingsExchangeParameters => new ExchangeParameters();
         public override List<Holding> GetAccountHoldings()
         {
-            var res = RunSync(() => _orderClient.GetPositionsAsync(new GetPositionsRequest()));
+            var request = new GetPositionsRequest
+            {
+                ExchangeParameters = AccountHoldingsExchangeParameters
+            };
+            var res = RunSync(() => _orderClient.GetPositionsAsync(request));
 
             if (res.Success && res.Data != null)
             {

@@ -106,6 +106,16 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 return parameters;
             }
         }
+        protected override ExchangeParameters AccountHoldingsExchangeParameters
+        {
+            get
+            {
+                var parameters = new ExchangeParameters();
+                parameters.AddValue(new ExchangeParameter("Bybit", "category", "linear"));
+                parameters.AddValue(new ExchangeParameter("Bybit", "settleCoin", "USDT"));
+                return parameters;
+            }
+        }
 
         public override void Connect()
         {
