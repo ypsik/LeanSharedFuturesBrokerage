@@ -177,7 +177,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                     var now = DateTime.UtcNow;
                     var tickerData = data.Data;
 
-                    onFundingRate(now, tickerData.FundingRate ?? 0);
+                    if(tickerData.FundingRate.HasValue)
+                        onFundingRate(now, tickerData.FundingRate.Value);
                 });
         }
 
