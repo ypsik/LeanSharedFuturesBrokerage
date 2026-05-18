@@ -53,7 +53,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         public override decimal MinimumOrderNotionalValue => 10m;
         protected override int MaxHistoryLookbackMinutes => 5000;
 
-        protected override string SettleAsset => SettleAsset;
+        protected override string SettleAsset => "USDC";
 
 
 
