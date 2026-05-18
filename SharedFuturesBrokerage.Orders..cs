@@ -29,16 +29,42 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         /// </summary>
         public virtual bool ExchangeModifiesOrdersInPlace => false;
 
-        // --- CACHES ---
-        protected readonly ConcurrentDictionary<string, Order> _orderCache = new();
-        private readonly ConcurrentDictionary<string, decimal> _filledQtyCache = new();
+        #region State Machine Models
 
-        // NEU: clientOrderId (= LEAN order.Id) → aktueller brokerId
-        // Ermöglicht Modify-Tracking wenn Hyperliquid neue OID bei Cancel+Replace erstellt
-        private readonly ConcurrentDictionary<string, string> _clientOrderIdToBrokerId = new();
+        public enum OrderLifeCycleState
+        {
+            Submitted,
+            Open,
+            PartiallyFilled,
+            Filled,
+            Canceled,
+            Replaced,
+            Invalid
+        }
 
-        // NEU: BrokerIds die gerade in einem Modify stecken → Cancel-Event unterdrücken
-        private readonly ConcurrentDictionary<string, byte> _pendingModifies = new();
+        public sealed class OrderState
+        {
+            public Order Order;
+            public decimal OriginalQuantity;
+            public decimal FilledQuantity;
+            public string BrokerId;
+            public string ClientOrderId;
+            public OrderLifeCycleState State;
+            public DateTime LastUpdateUtc;
+
+            public decimal Remaining => OriginalQuantity - FilledQuantity;
+
+            public bool IsClosed => State is OrderLifeCycleState.Filled
+                                          or OrderLifeCycleState.Canceled
+                                          or OrderLifeCycleState.Invalid
+                                          or OrderLifeCycleState.Replaced;
+        }
+
+        #endregion
+
+        // --- SINGLE SOURCE OF TRUTH CACHES ---
+        private readonly ConcurrentDictionary<string, OrderState> _statesByBrokerId = new();
+        private readonly ConcurrentDictionary<string, string> _clientToBroker = new();
 
         #region Order Management
 
@@ -46,29 +72,45 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         public override List<Order> GetOpenOrders()
         {
-
             var res = RunSync(() => _orderClient.GetOpenFuturesOrdersAsync(
                 new GetOpenOrdersRequest(exchangeParameters: OpenOrdersExchangeParameters)));
+
             if (!res.Success || res.Data == null) return new List<Order>();
 
             return res.Data.Select(o =>
             {
                 var symbol = Symbol.Create(NormalizeSymbol(o.Symbol), SecurityType.CryptoFuture, Name);
-                var qty = (o.OrderQuantity?.QuantityInBaseAsset ?? 0m) * (o.Side == SharedOrderSide.Sell ? -1 : 1);
+
+                // 1. Vorzeichen zentral definieren
+                var sign = o.Side == SharedOrderSide.Sell ? -1m : 1m;
+
+                // 2. Beide Quantities konsequent signieren
+                var qty = (o.OrderQuantity?.QuantityInBaseAsset ?? 0m) * sign;
+                var filledQty = (o.QuantityFilled?.QuantityInBaseAsset ?? 0m) * sign;
 
                 Order order = o.OrderType == SharedOrderType.Limit
                     ? new LimitOrder(symbol, qty, o.OrderPrice ?? 0m, DateTime.UtcNow)
                     : new MarketOrder(symbol, qty, DateTime.UtcNow);
 
                 order.BrokerId.Add(o.OrderId);
-                order.Status = MapStatus(o.Status, o.QuantityFilled?.QuantityInBaseAsset ?? 0m);
 
-                _orderCache[o.OrderId] = order;
-                _filledQtyCache[o.OrderId] = o.QuantityFilled?.QuantityInBaseAsset ?? 0m;
+                // 3. MapStatus braucht den absoluten Wert, sonst schlägt "filled > 0" bei Shorts fehl
+                order.Status = MapStatus(o.Status, Math.Abs(filledQty));
 
-                // NEU: clientOrderId Index beim Laden bestehender Orders aufbauen
-                if (!string.IsNullOrEmpty(o.ClientOrderId))
-                    _clientOrderIdToBrokerId[o.ClientOrderId] = o.OrderId;
+                var state = new OrderState
+                {
+                    Order = order,
+                    OriginalQuantity = qty,
+                    FilledQuantity = filledQty, // Jetzt korrekt signiert gespeichert
+                    BrokerId = o.OrderId,
+                    ClientOrderId = o.ClientOrderId ?? string.Empty,
+                    State = order.Status == OrderStatus.PartiallyFilled ? OrderLifeCycleState.PartiallyFilled : OrderLifeCycleState.Open,
+                    LastUpdateUtc = DateTime.UtcNow
+                };
+
+                _statesByBrokerId[o.OrderId] = state;
+                if(!string.IsNullOrEmpty(state.ClientOrderId))
+                    _clientToBroker[state.ClientOrderId] = o.OrderId;
 
                 return order;
             }).ToList();
@@ -128,11 +170,20 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             }
 
             order.BrokerId.Add(res.Data.Id);
-            _orderCache[res.Data.Id] = order;
-            _filledQtyCache[res.Data.Id] = 0m;
 
-            // NEU: Reverse-Index clientOrderId → aktuelle brokerId
-            _clientOrderIdToBrokerId[GenerateClientId(order.Id)] = res.Data.Id;
+            var state = new OrderState
+            {
+                Order = order,
+                OriginalQuantity = executionQuantity,
+                FilledQuantity = 0m,
+                BrokerId = res.Data.Id,
+                ClientOrderId = request.ClientOrderId,
+                State = OrderLifeCycleState.Submitted,
+                LastUpdateUtc = DateTime.UtcNow
+            };
+
+            _statesByBrokerId[res.Data.Id] = state;
+            _clientToBroker[state.ClientOrderId] = res.Data.Id;
 
             OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero) { Status = OrderStatus.Submitted });
             return true;
@@ -152,79 +203,102 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 return false;
             }
 
+            if (_statesByBrokerId.TryGetValue(id, out var state))
+            {
+                state.State = OrderLifeCycleState.Canceled;
+                state.LastUpdateUtc = DateTime.UtcNow;
+
+                _statesByBrokerId.TryRemove(id, out _);
+                _clientToBroker.TryRemove(state.ClientOrderId, out _);
+            }
+
             return true;
         }
 
         public override bool UpdateOrder(Order order)
         {
-            if (!order.BrokerId.Any() || ExecuteUpdateOrderAsync == null) return false;
+            if (!order.BrokerId.Any() || ExecuteUpdateOrderAsync == null)
+                return false;
 
             var ticket = _orderManager.GetOrderTicket(order.Id);
             var lastUpdate = ticket?.UpdateRequests.LastOrDefault();
 
             decimal price = lastUpdate?.LimitPrice ?? order.Price;
+            decimal quantity = order.Quantity;
 
-            decimal quantity;
+            var clientOrderId = GenerateClientId(order.Id);
 
-            if (lastUpdate?.Quantity.HasValue == true)
+            if (_clientToBroker.TryGetValue(clientOrderId, out var brokerId) &&
+                _statesByBrokerId.TryGetValue(brokerId, out var state))
             {
-                quantity = lastUpdate.Quantity.Value;
-            }
-            else if (_clientOrderIdToBrokerId.TryGetValue(GenerateClientId(order.Id), out var brokerId) &&
-                     _orderCache.TryGetValue(brokerId, out var cached))
-            {
-                var filled = _filledQtyCache.TryGetValue(brokerId, out var f) ? f : 0m;
-                quantity = Math.Abs(cached.Quantity) - filled;
-                if (cached.Quantity < 0) quantity = -quantity;
-            }
-            else
-            {
-                quantity = order.Quantity;
+                // 1. PRIORITY: explicit LEAN update request
+                if (lastUpdate?.Quantity.HasValue == true)
+                {
+                    quantity = lastUpdate.Quantity.Value;
+                }
+                else
+                {
+                    // 2. FALLBACK: Alter Intent (LEAN semantics)
+                    // Wenn kein neues Quantity-Ziel gesendet wurde, bleibt das ursprüngliche Ziel erhalten!
+                    quantity = state.OriginalQuantity;
+                }
             }
 
             // Minimum notional check
             if (MinimumOrderNotionalValue > 0m && price > 0m)
             {
                 decimal notional = Math.Abs(quantity) * price;
+
                 if (notional < MinimumOrderNotionalValue)
                 {
-                    var props = _spdb.GetSymbolProperties(order.Symbol.ID.Market, order.Symbol, order.Symbol.SecurityType, SettleAsset);
+                    var props = _spdb.GetSymbolProperties(
+                        order.Symbol.ID.Market,
+                        order.Symbol,
+                        order.Symbol.SecurityType,
+                        SettleAsset);
+
                     decimal lotSize = props?.LotSize ?? 0.01m;
                     decimal adjusted = Math.Ceiling((MinimumOrderNotionalValue / price) / lotSize) * lotSize;
+
                     quantity = quantity < 0 ? -adjusted : adjusted;
+
                     Log.Trace($"{Name}.UpdateOrder: Adjusting quantity for {order.Symbol.Value} to {Math.Abs(quantity)} to meet minimum ${MinimumOrderNotionalValue}.");
                 }
             }
 
-            // NEU: Aktuelle brokerId als "pending modify" markieren
-            // → HandleOrderSocket unterdrückt Cancel-Event für diese OID (nur bei Cancel+Replace Börsen)
-            var oldBrokerId = order.BrokerId.LastOrDefault();
-            if (oldBrokerId == null)
-                return false;
-
-            if (!ExchangeModifiesOrdersInPlace)
-            {
-                _pendingModifies[oldBrokerId] = 0;
-            }
-
-            var res = RunSync(() => ExecuteUpdateOrderAsync(order, GenerateClientId(order.Id), price, quantity));
+            var res = RunSync(() => ExecuteUpdateOrderAsync(order, clientOrderId, price, quantity));
 
             if (res?.Success != true)
             {
-                // NEU: Bei Fehler pending entfernen da kein Modify stattfindet
-                if (!ExchangeModifiesOrdersInPlace)
-                {
-                    _pendingModifies.TryRemove(oldBrokerId, out _);
-                }
                 var errorMsg = res?.Error?.ToString() ?? "Unknown exchange error";
                 Log.Error($"{Name}.UpdateOrder({order.Symbol.Value}): {errorMsg}");
-                OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "UpdateOrder", errorMsg));
+
+                OnMessage(new BrokerageMessageEvent(
+                    BrokerageMessageType.Warning,
+                    "UpdateOrder",
+                    errorMsg));
+
                 return false;
             }
 
-            // NEU: Bei Erfolg bleibt _pendingModifies[oldBrokerId] aktiv bis
-            // HandleOrderSocket den Cancel-Event empfängt und es entfernt.
-            // Die neue OID wird in HandleOrderSocket via clientOrderId nachgetragen.
+            // =========================================================
+            // 🔥 CRITICAL STATE SYNC FIX (LEAN CONSISTENCY)
+            // =========================================================
+            if (_clientToBroker.TryGetValue(clientOrderId, out var activeBrokerId) &&
+                _statesByBrokerId.TryGetValue(activeBrokerId, out var activeState))
+            {
+                // Update reflects new INTENT, not execution
+                activeState.OriginalQuantity = quantity;
+                activeState.LastUpdateUtc = DateTime.UtcNow;
+
+                // safety: if order is already partially filled,
+                // ensure remaining stays consistent
+                if (Math.Abs(activeState.FilledQuantity) > 0)
+                {
+                    // nothing to do here except keep consistency
+                    // Remaining is derived anyway
+                }
+            }
 
             return true;
         }
@@ -233,7 +307,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             => _orderClient.PlaceFuturesOrderAsync(request);
 
         protected virtual Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(Order order, string clientOrderId, decimal price, decimal quantity)
-    => Task.FromResult<ExchangeWebResult<SharedId>>(null);
+            => Task.FromResult<ExchangeWebResult<SharedId>>(null);
 
         protected virtual Task<ExchangeWebResult<SharedId>> ExecuteCancelOrderAsync(CxCancelOrderRequest request)
             => _orderClient.CancelFuturesOrderAsync(request);
@@ -246,31 +320,32 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         {
             foreach (var trade in update.Data)
             {
-                if (string.IsNullOrEmpty(trade.OrderId)) continue;
-                if (!_orderCache.TryGetValue(trade.OrderId, out var order)) continue;
+                if (string.IsNullOrEmpty(trade.OrderId) || !_statesByBrokerId.TryGetValue(trade.OrderId, out var state))
+                    continue;
 
-                var tradeQty = trade.Quantity;
-                var prevTotal = _filledQtyCache.TryGetValue(trade.OrderId, out var pf) ? pf : 0m;
-                var totalFilled = prevTotal + tradeQty;
+                var sign = trade.Side == SharedOrderSide.Buy ? 1m : -1m;
+                var signedFill = trade.Quantity * sign;
 
-                _filledQtyCache[trade.OrderId] = totalFilled;
+                state.FilledQuantity += signedFill;
+                state.LastUpdateUtc = DateTime.UtcNow;
 
-                var status = totalFilled >= Math.Abs(order.Quantity) ? OrderStatus.Filled : OrderStatus.PartiallyFilled;
-                var sign = trade.Side == SharedOrderSide.Buy ? 1 : -1;
+                var leanStatus = Math.Abs(state.FilledQuantity) >= Math.Abs(state.OriginalQuantity)
+                    ? OrderStatus.Filled
+                    : OrderStatus.PartiallyFilled;
 
-                if (status == OrderStatus.Filled)
+                state.State = leanStatus == OrderStatus.Filled ? OrderLifeCycleState.Filled : OrderLifeCycleState.PartiallyFilled;
+
+                if (state.IsClosed)
                 {
-                    if (!_orderCache.TryRemove(trade.OrderId, out _)) continue;
-                    _filledQtyCache.TryRemove(trade.OrderId, out _);
-                    // NEU: clientOrderId Index aufräumen bei Fill
-                    _clientOrderIdToBrokerId.TryRemove(GenerateClientId(order.Id), out _);
+                    _statesByBrokerId.TryRemove(state.BrokerId, out _);
+                    _clientToBroker.TryRemove(state.ClientOrderId, out _);
                 }
 
-                OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, new OrderFee(new CashAmount(trade.Fee ?? 0m, trade.FeeAsset ?? SettleAsset)))
-                {   
-                    Status = status,
+                OnOrderEvent(new OrderEvent(state.Order, DateTime.UtcNow, new OrderFee(new CashAmount(trade.Fee ?? 0m, trade.FeeAsset ?? SettleAsset)))
+                {
+                    Status = leanStatus,
                     FillPrice = trade.Price,
-                    FillQuantity = tradeQty * sign,
+                    FillQuantity = signedFill,
                     Message = "User trade socket"
                 });
             }
@@ -282,66 +357,66 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             {
                 if (string.IsNullOrEmpty(o.OrderId)) continue;
 
-                // FALL 1: Bekannte brokerId → normale Verarbeitung
-                if (_orderCache.TryGetValue(o.OrderId, out var order))
+                // Modify Replacement Detection via ClientOrderId
+                if (!string.IsNullOrEmpty(o.ClientOrderId) &&
+                    _clientToBroker.TryGetValue(o.ClientOrderId, out var oldBrokerId) &&
+                    oldBrokerId != o.OrderId)
                 {
-                    var totalFilled = o.QuantityFilled?.QuantityInBaseAsset ?? 0m;
-                    var status = MapStatus(o.Status, totalFilled);
-
-                    if (status is OrderStatus.Canceled or OrderStatus.Invalid)
+                    if (_statesByBrokerId.TryGetValue(oldBrokerId, out var existingState))
                     {
-                        // NEU: Prüfen ob Modify-Cancel (Cancel+Replace durch Exchange)
-                        if (_pendingModifies.TryRemove(o.OrderId, out _))
+                        // Normal path: State vorhanden, BrokerId rebinden
+                        _statesByBrokerId.TryRemove(oldBrokerId, out _);
+
+                        existingState.BrokerId = o.OrderId;
+                        existingState.LastUpdateUtc = DateTime.UtcNow;
+
+                        _statesByBrokerId[o.OrderId] = existingState;
+                        _clientToBroker[o.ClientOrderId] = o.OrderId;
+
+                        existingState.Order.BrokerId.Add(o.OrderId);
+                        OnOrderIdChangedEvent(new BrokerageOrderIdChangedEvent
                         {
-                            // Kein Event an LEAN – echter Cancel kommt erst wenn
-                            // neuer Open-Event (FALL 2) die OID nicht aktualisiert
-                            // Cache-Eintrag bleibt für FALL 2 erhalten
-                            continue;
-                        }
-
-                        // Echter Cancel → Cache aufräumen und Event feuern
-                        if (!_orderCache.TryRemove(o.OrderId, out _)) continue;
-                        _filledQtyCache.TryRemove(o.OrderId, out _);
-
-                        // NEU: clientOrderId Index aufräumen
-                        if (!string.IsNullOrEmpty(o.ClientOrderId))
-                            _clientOrderIdToBrokerId.TryRemove(o.ClientOrderId, out _);
-
-                        OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero)
-                        {
-                            Status = status,
-                            Message = "order socket"
+                            OrderId = existingState.Order.Id,
+                            BrokerId = existingState.Order.BrokerId
                         });
+
+                        Log.Trace($"{Name}.HandleOrderSocket: Modify detected for {existingState.Order.Symbol.Value} | OldOID: {oldBrokerId} → NewOID: {o.OrderId}");
+                    }
+                    else
+                    {
+                        // State bereits abgeräumt (Reconcile/Socket-Race), aber ID-Mapping
+                        // aktualisieren damit _clientToBroker nicht auf veraltete BrokerId zeigt
+                        _clientToBroker[o.ClientOrderId] = o.OrderId;
+
+                        Log.Trace($"{Name}.HandleOrderSocket: Modify detected for ClientOrderId {o.ClientOrderId} but old state for BrokerId {oldBrokerId} not found (already reconciled?). ID mapping updated to {o.OrderId}.");
                     }
                 }
-                // NEU: FALL 2: Unbekannte brokerId → Modify-Replacement erkennen via clientOrderId
-                // Hyperliquid erstellt bei modify neue OID; clientOrderId bleibt konstant (= LEAN order.Id)
-                else if (!string.IsNullOrEmpty(o.ClientOrderId) &&
-                         _clientOrderIdToBrokerId.TryGetValue(o.ClientOrderId, out var oldBrokerId) &&
-                         _orderCache.TryGetValue(oldBrokerId, out var existingOrder))
+
+                // Normal Status Update
+                if (_statesByBrokerId.TryGetValue(o.OrderId, out var state))
                 {
-                    // Cache von alter auf neue brokerId umhängen
-                    _orderCache.TryRemove(oldBrokerId, out _);
-                    _filledQtyCache.TryGetValue(oldBrokerId, out var filledSoFar);
-                    _filledQtyCache.TryRemove(oldBrokerId, out _);
-                    _pendingModifies.TryRemove(oldBrokerId, out _);
+                    // FIX: FilledQuantity mit Exchange synchronisieren (inkl. korrektem Vorzeichen)
+                    var sign = state.OriginalQuantity > 0 ? 1m : -1m;
+                    var absFilled = o.QuantityFilled?.QuantityInBaseAsset ?? 0m;
 
-                    _orderCache[o.OrderId] = existingOrder;
-                    _filledQtyCache[o.OrderId] = filledSoFar;
+                    state.FilledQuantity = absFilled * sign;
+                    state.LastUpdateUtc = DateTime.UtcNow;
 
-                    // NEU: Reverse-Index auf neue brokerId aktualisieren
-                    _clientOrderIdToBrokerId[o.ClientOrderId] = o.OrderId;
+                    var leanStatus = MapStatus(o.Status, absFilled);
 
-                    // NEU: LEAN über neue brokerId informieren
-                    existingOrder.BrokerId.Add(o.OrderId);
-                    OnOrderIdChangedEvent(new BrokerageOrderIdChangedEvent
+                    if (leanStatus is OrderStatus.Canceled or OrderStatus.Invalid)
                     {
-                        OrderId = existingOrder.Id,
-                        BrokerId = existingOrder.BrokerId
-                    });
+                        state.State = OrderLifeCycleState.Canceled;
 
-                    Log.Trace($"{Name}.HandleOrderSocket: Modify detected for {existingOrder.Symbol.Value} " +
-                              $"| OldOID: {oldBrokerId} → NewOID: {o.OrderId}");
+                        _statesByBrokerId.TryRemove(state.BrokerId, out _);
+                        _clientToBroker.TryRemove(state.ClientOrderId, out _);
+
+                        OnOrderEvent(new OrderEvent(state.Order, DateTime.UtcNow, OrderFee.Zero)
+                        {
+                            Status = leanStatus,
+                            Message = "Order socket update"
+                        });
+                    }
                 }
             }
         }
@@ -354,66 +429,90 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 {
                     await Task.Delay(_reconciliationInterval, ct).ConfigureAwait(false);
 
-                    var open = await _orderClient.GetOpenFuturesOrdersAsync(
+                    var openRes = await _orderClient.GetOpenFuturesOrdersAsync(
                         new GetOpenOrdersRequest(exchangeParameters: OpenOrdersExchangeParameters)
                     ).ConfigureAwait(false);
-                    
-                    if (!open.Success || open.Data == null)
+
+                    if (!openRes.Success || openRes.Data == null)
                     {
-                        Log.Error($"{Name}.ReconcileLoop: Failed to fetch open orders: {open.Error}");
+                        Log.Error($"{Name}.ReconcileLoop: Failed to fetch open orders: {openRes.Error}");
                         continue;
                     }
 
-                    var map = open.Data.ToDictionary(x => x.OrderId);
-                    foreach (var kv in _orderCache.ToArray())
+                    var openExchangeOrders = openRes.Data
+                        .GroupBy(x => x.OrderId)
+                        .ToDictionary(g => g.Key, g => g.First());
+
+
+                    foreach (var kv in _statesByBrokerId.ToArray())
                     {
-                        if (map.ContainsKey(kv.Key)) continue;
+                        var brokerId = kv.Key;
+                        var state = kv.Value;
 
-                        // NEU: Überspringe Reconciliation, wenn diese Order gerade modifiziert wird.
-                        // Verhindert versehentliche Cancels, wenn REST die alte Order schon als Canceled meldet,
-                        // der Socket die neue OID aber noch nicht geliefert hat.
-                        if (_pendingModifies.ContainsKey(kv.Key)) continue;
+                        // -----------------------------
+                        // PERFORMANCE- & ZEIT-CHECK (VOR DEM API CALL)
+                        // -----------------------------
+                        // Wenn die Order im Batch-Call als offen gemeldet wurde oder taufrisch ist, überspringen.
+                        if (openExchangeOrders.ContainsKey(brokerId) || (DateTime.UtcNow - state.LastUpdateUtc).TotalSeconds < 5)
+                            continue;
 
-                        var symbol = kv.Value.Symbol;
-                        var sharedSymbol = GetSharedSymbol(symbol);
+                        var sharedSymbol = GetSharedSymbol(state.Order.Symbol);
+                        var statusCheck = await _orderClient
+                            .GetFuturesOrderAsync(new GetOrderRequest(sharedSymbol, brokerId))
+                            .ConfigureAwait(false);
 
-                        if (!_orderCache.TryRemove(kv.Key, out _)) continue;
-                        _filledQtyCache.TryRemove(kv.Key, out _);
-                        // NEU: clientOrderId Index aufräumen bei Reconcile
-                        _clientOrderIdToBrokerId.TryRemove(GenerateClientId(kv.Value.Id), out _);
-
-                        var statusCheck = await _orderClient.GetFuturesOrderAsync(new GetOrderRequest(sharedSymbol, kv.Key)).ConfigureAwait(false);
-
-                        if (statusCheck.Success && statusCheck.Data != null)
+                        // -----------------------------
+                        // API FAIL = NO STATE CHANGE (CRITICAL FIX)
+                        // -----------------------------
+                        if (!statusCheck.Success || statusCheck.Data == null)
                         {
-                            var brokerOrder = statusCheck.Data;
+                            Log.Error($"{Name}.ReconcileLoop: Failed to verify order {brokerId}. Error: {statusCheck.Error}");
+                            continue;
+                        }
 
-                            if (brokerOrder.Status == SharedOrderStatus.Filled)
+                        var brokerOrder = statusCheck.Data;
+
+                        // -----------------------------
+                        // SAFE REMOVE (RACE CONDITION PREVENTION)
+                        // -----------------------------
+                        // Wenn der Socket die Order in der Zwischenzeit abgeräumt hat, hier abbrechen.
+                        if (!_statesByBrokerId.TryRemove(brokerId, out var removedState))
+                            continue;
+
+                        _clientToBroker.TryRemove(removedState.ClientOrderId, out _);
+
+                        // -----------------------------
+                        // CASE 1: FILLED
+                        // -----------------------------
+                        if (brokerOrder.Status == SharedOrderStatus.Filled)
+                        {
+                            var finalFillAbsQty = brokerOrder.QuantityFilled?.QuantityInBaseAsset
+                                                  ?? Math.Abs(removedState.OriginalQuantity);
+
+                            var finalSignedFillQty = finalFillAbsQty * (removedState.OriginalQuantity > 0 ? 1m : -1m);
+                            var remainingToFill = finalSignedFillQty - removedState.FilledQuantity;
+
+                            if (Math.Abs(remainingToFill) > 0)
                             {
-                                OnOrderEvent(new OrderEvent(kv.Value, DateTime.UtcNow, OrderFee.Zero)
+                                OnOrderEvent(new OrderEvent(removedState.Order, DateTime.UtcNow, OrderFee.Zero)
                                 {
                                     Status = OrderStatus.Filled,
                                     FillPrice = brokerOrder.AveragePrice ?? 0,
-                                    FillQuantity = (brokerOrder.QuantityFilled?.QuantityInBaseAsset ?? 0) * (kv.Value.Quantity > 0 ? 1 : -1),
+                                    FillQuantity = remainingToFill,
                                     OrderFee = new OrderFee(new CashAmount(brokerOrder.Fee ?? 0, brokerOrder.FeeAsset ?? SettleAsset)),
                                     Message = "Reconciled Fill"
                                 });
                             }
-                            else
-                            {
-                                OnOrderEvent(new OrderEvent(kv.Value, DateTime.UtcNow, OrderFee.Zero)
-                                {
-                                    Status = OrderStatus.Canceled,
-                                    Message = "Reconciled Cancel"
-                                });
-                            }
                         }
+                        // -----------------------------
+                        // CASE 2: CANCELED / UNKNOWN
+                        // -----------------------------
                         else
                         {
-                            OnOrderEvent(new OrderEvent(kv.Value, DateTime.UtcNow, OrderFee.Zero)
+                            OnOrderEvent(new OrderEvent(removedState.Order, DateTime.UtcNow, OrderFee.Zero)
                             {
                                 Status = OrderStatus.Canceled,
-                                Message = "Reconcile: Order not found on exchange"
+                                Message = "Reconciled Cancel"
                             });
                         }
                     }
