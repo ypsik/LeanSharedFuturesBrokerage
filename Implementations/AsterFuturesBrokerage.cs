@@ -48,7 +48,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 socketClient.FuturesApi.SharedClient,
                 _socketClient.FuturesApi.SharedClient,
                 null,
-                null,
+                _socketClient.FuturesApi.SharedClient,
                 restClient.FuturesApi.SharedClient,
                 restClient.FuturesApi.SharedClient,
                 aggregator,
@@ -70,7 +70,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 _socketClient.FuturesApi.SharedClient,
                 _socketClient.FuturesApi.SharedClient,
                 null,
-                null,
+                _socketClient.FuturesApi.SharedClient,
                 _restClient.FuturesApi.SharedClient,
                 _restClient.FuturesApi.SharedClient,
                 aggregator
@@ -89,7 +89,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         protected override string NormalizeSymbol(string rawSymbol)
         {
             var upper = rawSymbol.ToUpperInvariant();
-            return upper.EndsWith("USDT") ? upper : upper + "USDT";
+            return upper.EndsWith(SettleAsset) ? upper : upper + SettleAsset;
         }
 
         

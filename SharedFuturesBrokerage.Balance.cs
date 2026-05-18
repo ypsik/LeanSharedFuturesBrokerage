@@ -20,11 +20,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         public override List<CashAmount> GetCashBalance()
         {
             if(_balance.HasValue)
-                return new List<CashAmount> { new CashAmount(_balance.Value, "USDC") };
+                return new List<CashAmount> { new CashAmount(_balance.Value, SettleAsset) };
 
             var res = RunSync(() => _balanceClient.GetBalancesAsync(new GetBalancesRequest()));
             return res.Success && res.Data != null
-                ? res.Data.Select(x => new CashAmount(x.Total, x.Asset ?? "USDC")).ToList()
+                ? res.Data.Select(x => new CashAmount(x.Total, x.Asset ?? SettleAsset)).ToList()
                 : new List<CashAmount>();
         }
 

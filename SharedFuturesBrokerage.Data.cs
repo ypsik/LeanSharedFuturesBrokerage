@@ -155,7 +155,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 PageRequest? nextPage = null;
                 do
                 {
-                    ExchangeWebResult<SharedKline[]> res = null;
+                    ExchangeWebResult<SharedKline[]>? res = null;
                     int retryCount = 0;
                     const int maxRetries = 5;
 

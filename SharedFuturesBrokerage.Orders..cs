@@ -94,7 +94,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                     if (currentNotional < MinimumOrderNotionalValue && executionQuantity != 0m)
                     {
-                        var props = _spdb.GetSymbolProperties(order.Symbol.ID.Market, order.Symbol, order.Symbol.SecurityType, "USDC");
+                        var props = _spdb.GetSymbolProperties(order.Symbol.ID.Market, order.Symbol, order.Symbol.SecurityType, SettleAsset);
                         decimal baseLotSize = props?.LotSize ?? 0.01m;
                         decimal minUnitsRequired = MinimumOrderNotionalValue / price;
                         decimal adjustedQuantity = Math.Ceiling(minUnitsRequired / baseLotSize) * baseLotSize;
@@ -188,7 +188,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 decimal notional = Math.Abs(quantity) * price;
                 if (notional < MinimumOrderNotionalValue)
                 {
-                    var props = _spdb.GetSymbolProperties(order.Symbol.ID.Market, order.Symbol, order.Symbol.SecurityType, "USDC");
+                    var props = _spdb.GetSymbolProperties(order.Symbol.ID.Market, order.Symbol, order.Symbol.SecurityType, SettleAsset);
                     decimal lotSize = props?.LotSize ?? 0.01m;
                     decimal adjusted = Math.Ceiling((MinimumOrderNotionalValue / price) / lotSize) * lotSize;
                     quantity = quantity < 0 ? -adjusted : adjusted;
@@ -266,8 +266,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     _clientOrderIdToBrokerId.TryRemove(GenerateClientId(order.Id), out _);
                 }
 
-                OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, new OrderFee(new CashAmount(trade.Fee ?? 0m, trade.FeeAsset ?? "USDC")))
-                {
+                OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, new OrderFee(new CashAmount(trade.Fee ?? 0m, trade.FeeAsset ?? SettleAsset)))
+                {   
                     Status = status,
                     FillPrice = trade.Price,
                     FillQuantity = tradeQty * sign,
@@ -395,7 +395,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                                     Status = OrderStatus.Filled,
                                     FillPrice = brokerOrder.AveragePrice ?? 0,
                                     FillQuantity = (brokerOrder.QuantityFilled?.QuantityInBaseAsset ?? 0) * (kv.Value.Quantity > 0 ? 1 : -1),
-                                    OrderFee = new OrderFee(new CashAmount(brokerOrder.Fee ?? 0, brokerOrder.FeeAsset ?? "USDC")),
+                                    OrderFee = new OrderFee(new CashAmount(brokerOrder.Fee ?? 0, brokerOrder.FeeAsset ?? SettleAsset)),
                                     Message = "Reconciled Fill"
                                 });
                             }
@@ -439,7 +439,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         protected virtual string NormalizeSymbol(string rawSymbol) => rawSymbol;
 
-        protected virtual SharedSymbol GetSharedSymbol(Symbol s)
+        private SharedSymbol GetSharedSymbol(Symbol s)
         {
             CurrencyPairUtil.DecomposeCurrencyPair(s, out var baseAsset, out var quoteAsset);
             return new SharedSymbol(TradingMode.PerpetualLinear, baseAsset, quoteAsset);

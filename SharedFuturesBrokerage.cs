@@ -54,6 +54,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         protected static readonly DateTime _startTime = DateTime.UtcNow;
 
+        protected virtual string SettleAsset => "USDT";
+
         protected SharedFuturesBrokerage(string exchangeName) : base(exchangeName)
         {
             _spdb = SymbolPropertiesDatabase.FromDataFolder();

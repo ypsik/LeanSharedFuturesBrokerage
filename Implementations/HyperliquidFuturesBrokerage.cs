@@ -53,6 +53,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         public override decimal MinimumOrderNotionalValue => 10m;
         protected override int MaxHistoryLookbackMinutes => 5000;
 
+        protected override string SettleAsset => SettleAsset;
+
+
 
         // 1. LEAN DataQueueHandler Konstruktor
         public HyperliquidFuturesBrokerage() : base("hyperliquid")
@@ -157,7 +160,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
             foreach (var symbol in result.Data.Where(s => !s.IsDelisted))
             {
-                var ticker = symbol.Name + "USDC";
+                var ticker = symbol.Name + SettleAsset;
 
                 var lotSize = (decimal)Math.Pow(10, -symbol.QuantityDecimals);
 
@@ -172,7 +175,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
                 var symbolProperties = new SymbolProperties(
                     description: $"Hyperliquid {symbol.Name} Perpetual",
-                    quoteCurrency: "USDC",
+                    quoteCurrency: SettleAsset,
                     contractMultiplier: 1m,
                     minimumPriceVariation: tickSize,
                     lotSize: lotSize,
@@ -187,7 +190,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         protected override string NormalizeSymbol(string rawSymbol)
         {
             var upper = rawSymbol.ToUpperInvariant();
-            return upper.EndsWith("USDC") ? upper : upper + "USDC";
+            return upper.EndsWith(SettleAsset) ? upper : upper + SettleAsset;
         }
 
         protected override string NativeTicker(Symbol symbol)
@@ -263,13 +266,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             var decimalPlaces = Math.Max(0, Math.Min(6, 5 - (exponent + 1)));
             decimal tickSize = (decimal)Math.Pow(10, -decimalPlaces);
 
-            var props = _spdb.GetSymbolProperties(symbol.ID.Market, symbol, symbol.SecurityType, "USDC");
+            var props = _spdb.GetSymbolProperties(symbol.ID.Market, symbol, symbol.SecurityType, SettleAsset);
 
             if (props != null && props.MinimumPriceVariation == tickSize) return;
 
             var newProps = new SymbolProperties(
                 props?.Description ?? $"Hyperliquid {symbol.Value} Perpetual",
-                props?.QuoteCurrency ?? "USDC",
+                props?.QuoteCurrency ?? SettleAsset,
                 props?.ContractMultiplier ?? 1m,
                 tickSize,
                 props?.LotSize ?? (decimal)Math.Pow(10, -6),

@@ -102,7 +102,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             get
             {
                 var parameters = new ExchangeParameters();
-                parameters.AddValue(new ExchangeParameter("Bybit", "SettleAsset", "USDT"));
+                parameters.AddValue(new ExchangeParameter("Bybit", "SettleAsset", SettleAsset));
                 return parameters;
             }
         }
@@ -112,8 +112,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             {
                 var parameters = new ExchangeParameters();
                 parameters.AddValue(new ExchangeParameter("Bybit", "category", "linear"));
-                parameters.AddValue(new ExchangeParameter("Bybit", "settleCoin", "USDT"));
-                parameters.AddValue(new ExchangeParameter("Bybit", "SettleAsset", "USDT"));
+                parameters.AddValue(new ExchangeParameter("Bybit", "settleCoin", SettleAsset));
+                parameters.AddValue(new ExchangeParameter("Bybit", "SettleAsset", SettleAsset));
                 return parameters;
             }
         }
@@ -184,12 +184,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         public override List<CashAmount> GetCashBalance()
         {
             if (_balance.HasValue)
-                return new List<CashAmount> { new CashAmount(_balance.Value, "USDC") };
+                return new List<CashAmount> { new CashAmount(_balance.Value, SettleAsset) };
 
             var res = RunSync(() => _restClient.V5Api.Account.GetBalancesAsync(Bybit.Net.Enums.AccountType.Unified));
             var result = new List<CashAmount>
             {
-                new CashAmount(res?.Data?.List?.FirstOrDefault()?.TotalMarginBalance ?? 0, "USDT")
+                new CashAmount(res?.Data?.List?.FirstOrDefault()?.TotalMarginBalance ?? 0, SettleAsset)
             };
             return result;
         }
