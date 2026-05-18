@@ -174,7 +174,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             return await _socketClientExData.V5LinearApi.SubscribeToTickerUpdatesAsync(
                 nativeTicker, data =>
                 {
-                    var now = DateTime.UtcNow;
+                    var now = data.DataTime ?? data.ReceiveTime;
                     var tickerData = data.Data;
 
                     if(tickerData.FundingRate.HasValue)

@@ -249,7 +249,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             return await _socketClientExData.FuturesApi.ExchangeData.SubscribeToSymbolUpdatesAsync(
                 nativeTicker, data =>
                 {
-                    var now = DateTime.UtcNow;
+                    var now = data.DataTime ?? data.ReceiveTime;
                     var tickerData = data.Data;
 
                     if (!onFundingRate(now, tickerData.FundingRate ?? 0)) return;
