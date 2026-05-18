@@ -60,7 +60,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                                           or OrderLifeCycleState.Invalid
                                           or OrderLifeCycleState.Replaced;
         }
-        
+
         #endregion
 
         // --- SINGLE SOURCE OF TRUTH CACHES ---
@@ -109,9 +109,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     LastUpdateUtc = DateTime.UtcNow
                 };
 
-                _statesByBrokerId[o.OrderId] = state;
-                if(!string.IsNullOrEmpty(state.ClientOrderId))
-                    _clientToBroker[state.ClientOrderId] = o.OrderId;
+                // FIX Bug 5: TryAdd statt direkter Zuweisung – schützt IsUpdatePending laufender Updates
+                if (_statesByBrokerId.TryAdd(o.OrderId, state))
+                {
+                    if (!string.IsNullOrEmpty(state.ClientOrderId))
+                        _clientToBroker.TryAdd(state.ClientOrderId, o.OrderId);
+                }
 
                 return order;
             }).ToList();
@@ -204,13 +207,19 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 return false;
             }
 
-            if (_statesByBrokerId.TryGetValue(id, out var state))
+            // FIX Bug 1: State zuerst aus dem Dict entfernen, dann Event feuern.
+            // Damit schlägt der Socket-Handler fehl (TryGetValue miss) → kein doppeltes Event.
+            if (_statesByBrokerId.TryRemove(id, out var state))
             {
+                _clientToBroker.TryRemove(state.ClientOrderId, out _);
                 state.State = OrderLifeCycleState.Canceled;
                 state.LastUpdateUtc = DateTime.UtcNow;
 
-                _statesByBrokerId.TryRemove(id, out _);
-                _clientToBroker.TryRemove(state.ClientOrderId, out _);
+                OnOrderEvent(new OrderEvent(state.Order, DateTime.UtcNow, OrderFee.Zero)
+                {
+                    Status = OrderStatus.Canceled,
+                    Message = "Cancel confirmed"
+                });
             }
 
             return true;
@@ -436,6 +445,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                             Message = "Order socket update"
                         });
                     }
+                    else
+                    {
+                        // FIX Bug 3: In-place update bestätigt (gleiche BrokerId) → Flag zurücksetzen.
+                        // Für Cancel+Replace bleibt IsUpdatePending aktiv bis zum Replacement-Pfad oben.
+                        state.IsUpdatePending = false;
+                    }
                 }
             }
         }
@@ -523,7 +538,20 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                             }
                         }
                         // -----------------------------
-                        // CASE 2: CANCELED / UNKNOWN
+                        // FIX Bug 4: CASE 2: STILL OPEN (z.B. Paginierungslücke im Batch-Call)
+                        // Order wieder eintragen statt fälschlich zu canceln.
+                        // -----------------------------
+                        else if (brokerOrder.Status == SharedOrderStatus.Open)
+                        {
+                            // FIX: Timestamp aktualisieren, sonst greift der 5s-Guard im nächsten Loop nicht
+                            // → ohne das würde jeder Reconcile-Durchlauf einen separaten REST-Call für diese Order produzieren
+                            removedState.LastUpdateUtc = DateTime.UtcNow;
+                            _statesByBrokerId[brokerId] = removedState;
+                            _clientToBroker[removedState.ClientOrderId] = brokerId;
+                            Log.Trace($"{Name}.ReconcileLoop: Order {brokerId} still open on exchange, re-registered.");
+                        }
+                        // -----------------------------
+                        // CASE 3: CANCELED / UNKNOWN
                         // -----------------------------
                         else
                         {
