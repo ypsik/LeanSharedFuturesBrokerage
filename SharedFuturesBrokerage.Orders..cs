@@ -51,6 +51,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             public string ClientOrderId;
             public OrderLifeCycleState State;
             public DateTime LastUpdateUtc;
+            public bool IsUpdatePending;
 
             public decimal Remaining => OriginalQuantity - FilledQuantity;
 
@@ -59,7 +60,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                                           or OrderLifeCycleState.Invalid
                                           or OrderLifeCycleState.Replaced;
         }
-
+        
         #endregion
 
         // --- SINGLE SOURCE OF TRUTH CACHES ---
@@ -242,6 +243,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     // Wenn kein neues Quantity-Ziel gesendet wurde, bleibt das ursprüngliche Ziel erhalten!
                     quantity = state.OriginalQuantity;
                 }
+
+                // FIX: Setze das Flag, bevor der API-Call rausgeht
+                state.IsUpdatePending = true;
             }
 
             // Minimum notional check
@@ -270,6 +274,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
             if (res?.Success != true)
             {
+                // FIX: Flag zurücksetzen, wenn der Call hart fehlschlägt
+                if (_clientToBroker.TryGetValue(clientOrderId, out var errorBrokerId) &&
+                    _statesByBrokerId.TryGetValue(errorBrokerId, out var errorState))
+                {
+                    errorState.IsUpdatePending = false;
+                }
+
                 var errorMsg = res?.Error?.ToString() ?? "Unknown exchange error";
                 Log.Error($"{Name}.UpdateOrder({order.Symbol.Value}): {errorMsg}");
 
@@ -369,6 +380,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                         existingState.BrokerId = o.OrderId;
                         existingState.LastUpdateUtc = DateTime.UtcNow;
+                        existingState.IsUpdatePending = false; // FIX: Update via Socket bestätigt, Flag entfernen!
 
                         _statesByBrokerId[o.OrderId] = existingState;
                         _clientToBroker[o.ClientOrderId] = o.OrderId;
@@ -406,6 +418,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                     if (leanStatus is OrderStatus.Canceled or OrderStatus.Invalid)
                     {
+                        // FIX: IGNORIERE DEN CANCEL VOM SOCKET, WENN EIN UPDATE LÄUFT
+                        if (state.IsUpdatePending)
+                        {
+                            Log.Trace($"{Name}.HandleOrderSocket: Suppressing Cancel event for {state.BrokerId} because an Update is pending.");
+                            continue;
+                        }
+
                         state.State = OrderLifeCycleState.Canceled;
 
                         _statesByBrokerId.TryRemove(state.BrokerId, out _);
@@ -420,7 +439,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 }
             }
         }
-
         private async Task ReconcileLoop(CancellationToken ct)
         {
             while (!ct.IsCancellationRequested)
