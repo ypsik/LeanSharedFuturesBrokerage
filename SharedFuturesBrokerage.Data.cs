@@ -20,6 +20,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         private readonly ConcurrentDictionary<string, UpdateSubscription> _subscriptions = new();
         private readonly object _fundingLock = new();
         private readonly ConcurrentDictionary<Symbol, int> _lastFundingHour = new();
+        private readonly ConcurrentDictionary<Symbol, (int Hour, decimal Rate)> _lastFundingState = new();
 
         protected virtual int FundingRolloverHours => 8;
 
@@ -331,22 +332,34 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                 _subRateGate.WaitToProceed();
 
-                // Base builds the funding handler. HL captures now in the socket callback and passes it in.
-                // Returns true on first tick or rollover — HL uses this to gate exchange-specific logic.
-                Func<DateTime, decimal, bool> onFundingRate = (now, fundingRate) =>
+                // Signatur auf decimal? geändert
+                Func<DateTime, decimal?, bool> onFundingRate = (now, fundingRate) =>
                 {
                     bool isFirstTick = false;
                     bool isHourRollover = false;
+                    decimal rateToReport = 0m;
 
                     var currentHour = (now.Hour / FundingRolloverHours) * FundingRolloverHours;
 
-                    _lastFundingHour.AddOrUpdate(
+                    // _lastFundingState ist ein ConcurrentDictionary<Symbol, (int Hour, decimal Rate)>
+                    _lastFundingState.AddOrUpdate(
                       symbol,
-                      addValueFactory: _ => { isFirstTick = true; return currentHour; },
-                      updateValueFactory: (_, oldHour) =>
+                      addValueFactory: _ =>
                       {
-                          if (oldHour != currentHour) { isHourRollover = true; return currentHour; }
-                          return oldHour;
+                          isFirstTick = true;
+                          return (currentHour, fundingRate ?? 0m);
+                      },
+                      updateValueFactory: (_, state) =>
+                      {
+                          if (state.Hour != currentHour)
+                          {
+                              isHourRollover = true;
+                              rateToReport = state.Rate;
+                              return (currentHour, fundingRate ?? state.Rate);
+                          }
+
+                          // Innerhalb der Stunde: Nur aktualisieren, wenn ein Wert vorhanden ist
+                          return (state.Hour, fundingRate ?? state.Rate);
                       });
 
                     if (!isFirstTick && !isHourRollover) return false;
@@ -354,8 +367,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     if (isHourRollover)
                     {
                         var roundedTime = new DateTime(now.Year, now.Month, now.Day, currentHour, 0, 0, DateTimeKind.Utc);
-                        _aggregator.Update(new MarginInterestRate { Symbol = symbol, Time = roundedTime, InterestRate = fundingRate });
-                        Log.Trace($"{Name} Funding Update: {symbol.Value} -> Rate: {fundingRate}");
+                        // Nutzt die ermittelte rateToReport (entweder neu vom Exchange oder aus dem Cache)
+                        _aggregator.Update(new MarginInterestRate { Symbol = symbol, Time = roundedTime, InterestRate = rateToReport });
+                        Log.Trace($"{Name} Funding Update: {symbol.Value} -> Rate: {rateToReport} (Rollover)");
                     }
 
                     return true;
@@ -375,7 +389,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 }
                 return false;
             }
-        }        
+        }
 
         protected virtual bool UnsubscribeFunding(Symbol symbol)
         {
@@ -387,7 +401,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         }
 
         protected abstract Task<CallResult<UpdateSubscription>> CreateFundingSubscriptionAsync(
-            string nativeTicker, Symbol symbol, Func<DateTime, decimal, bool> onFundingRate);
+            string nativeTicker, Symbol symbol, Func<DateTime, decimal?, bool> onFundingRate);
 
         protected void EmitTick(Tick tick) => _aggregator?.Update(tick);
     }

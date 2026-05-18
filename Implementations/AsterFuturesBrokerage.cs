@@ -79,7 +79,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
 
         protected override async Task<CallResult<UpdateSubscription>> CreateFundingSubscriptionAsync(
-               string nativeTicker, Symbol symbol, Func<DateTime, decimal, bool> onFundingRate)
+               string nativeTicker, Symbol symbol, Func<DateTime, decimal?, bool> onFundingRate)
         {
             return null;
         }
