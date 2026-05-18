@@ -495,7 +495,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         // Wenn die Order im Batch-Call als offen gemeldet wurde oder taufrisch ist, überspringen.
                         // FIX GPT-5: Auch bei pending Update überspringen – sonst wird die alte Order beim Cancel+Replace
                         // als Canceled markiert bevor die neue Order im nächsten Batch-Call erscheint.
-                        if (state.IsUpdatePending ||
+                        // Timeout 300s: Blockchain-Transaktionen können lange hängen (Netzwerküberlastung, Slot-Delays).
+                        var updateStillPending = state.IsUpdatePending &&
+                            (DateTime.UtcNow - state.LastUpdateUtc).TotalSeconds < 300;
+
+                        if (updateStillPending ||
                             openExchangeOrders.ContainsKey(brokerId) ||
                             (DateTime.UtcNow - state.LastUpdateUtc).TotalSeconds < 5)
                             continue;
