@@ -184,8 +184,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         public override List<CashAmount> GetCashBalance()
         {
-            if (_balance.HasValue)
-                return new List<CashAmount> { new CashAmount(_balance.Value, SettleAsset) };
+            if (Balance.HasValue)
+                return new List<CashAmount> { new CashAmount(Balance.Value, SettleAsset) };
 
             var res = RunSync(() => _restClient.V5Api.Account.GetBalancesAsync(Bybit.Net.Enums.AccountType.Unified));
             var result = new List<CashAmount>
@@ -193,6 +193,21 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 new CashAmount(res?.Data?.List?.FirstOrDefault()?.TotalMarginBalance ?? 0, SettleAsset)
             };
             return result;
+        }
+
+        protected override async Task<CallResult<UpdateSubscription>> ExecuteBalanceSubscriptionAsync(Action<List<CashAmount>> onUpdate)
+        {
+            return await _socketClient.V5PrivateApi.SubscribeToWalletUpdatesAsync(update =>
+            {
+                var wallet = update.Data.FirstOrDefault();
+                if (wallet?.TotalMarginBalance.HasValue??false)
+                {
+                    onUpdate(
+                        [
+                            new CashAmount(wallet.TotalMarginBalance.Value, SettleAsset)
+                        ]);
+                }
+            });
         }
 
         protected override async Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(Order order, string clientOrderId, decimal price, decimal quantity)

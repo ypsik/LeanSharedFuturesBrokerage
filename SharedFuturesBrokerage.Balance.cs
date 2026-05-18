@@ -1,4 +1,5 @@
-﻿using CryptoExchange.Net.Objects.Sockets;
+﻿using CryptoExchange.Net.Objects;
+using CryptoExchange.Net.Objects.Sockets;
 using CryptoExchange.Net.SharedApis;
 using QuantConnect;
 using QuantConnect.Brokerages;
@@ -13,14 +14,14 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 {
     public abstract partial class SharedFuturesBrokerage
     {
-        protected decimal? _balance;
+        protected decimal? Balance { get; set; }
         private UpdateSubscription _balanceUpdatesSocketSub;
         bool _balanceUpdated;
 
         public override List<CashAmount> GetCashBalance()
         {
-            if(_balance.HasValue)
-                return new List<CashAmount> { new CashAmount(_balance.Value, SettleAsset) };
+            if(Balance.HasValue)
+                return new List<CashAmount> { new CashAmount(Balance.Value, SettleAsset) };
 
             var res = RunSync(() => _balanceClient.GetBalancesAsync(new GetBalancesRequest()));
             return res.Success && res.Data != null
@@ -84,17 +85,27 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             _balanceUpdated = true;
         }
 
+        protected virtual async Task<CallResult<UpdateSubscription>> ExecuteBalanceSubscriptionAsync(Action<List<CashAmount>> onUpdate)
+        {
+            return await _balanceSocket.SubscribeToBalanceUpdatesAsync(new SubscribeBalancesRequest(), update =>
+            {
+                onUpdate(update.Data.Select(x => new CashAmount(x.Total, x.Asset)).ToList());
+            });
+        }
+        
         private async Task SubscribeToBalanceUpdatesAsync()
         {
             _subRateGate.WaitToProceed();
-            var sub = await _balanceSocket.SubscribeToBalanceUpdatesAsync(new SubscribeBalancesRequest(), update =>
+
+            // Hier wird jetzt die überschreibbare Methode aufgerufen
+            var sub = await ExecuteBalanceSubscriptionAsync(update =>
             {
-                foreach (var balance in update.Data)
+                foreach (var balance in update)
                 {
-                    _balance = balance.Total;                    
+                    Balance = balance.Amount;
                     if (_balanceUpdated)
                     {
-                        OnAccountChanged(new AccountEvent(balance.Asset, balance.Total));
+                        OnAccountChanged(new AccountEvent(balance.Currency, balance.Amount));
                         _balanceUpdated = false;
                     }
                 }
@@ -108,7 +119,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 "Balance updates socket failed",
                 sub.Error?.ToString()
             );
-            if(sub.Success) 
+            if (sub.Success)
                 _balanceUpdatesSocketSub = sub.Data;
         }
     }   
