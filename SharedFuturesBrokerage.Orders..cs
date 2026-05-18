@@ -394,7 +394,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         _statesByBrokerId[o.OrderId] = existingState;
                         _clientToBroker[o.ClientOrderId] = o.OrderId;
 
-                        existingState.Order.BrokerId.Add(o.OrderId);
+                        // FIX GPT-6: Contains-Check verhindert Duplikate bei Socket-Reconnect
+                        if (!existingState.Order.BrokerId.Contains(o.OrderId))
+                            existingState.Order.BrokerId.Add(o.OrderId);
                         OnOrderIdChangedEvent(new BrokerageOrderIdChangedEvent
                         {
                             OrderId = existingState.Order.Id,
@@ -420,7 +422,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     var sign = state.OriginalQuantity > 0 ? 1m : -1m;
                     var absFilled = o.QuantityFilled?.QuantityInBaseAsset ?? 0m;
 
-                    state.FilledQuantity = absFilled * sign;
+                    // FIX GPT-4: Nur überschreiben wenn Exchange mehr gemeldet hat als wir akkumuliert haben.
+                    // Verhindert dass ein stales/verspätetes OrderUpdate den TradeSocket-Fill-Stand zurücksetzt.
+                    var newFilled = absFilled * sign;
+                    if (Math.Abs(newFilled) > Math.Abs(state.FilledQuantity))
+                        state.FilledQuantity = newFilled;
+
                     state.LastUpdateUtc = DateTime.UtcNow;
 
                     var leanStatus = MapStatus(o.Status, absFilled);
@@ -486,7 +493,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         // PERFORMANCE- & ZEIT-CHECK (VOR DEM API CALL)
                         // -----------------------------
                         // Wenn die Order im Batch-Call als offen gemeldet wurde oder taufrisch ist, überspringen.
-                        if (openExchangeOrders.ContainsKey(brokerId) || (DateTime.UtcNow - state.LastUpdateUtc).TotalSeconds < 5)
+                        // FIX GPT-5: Auch bei pending Update überspringen – sonst wird die alte Order beim Cancel+Replace
+                        // als Canceled markiert bevor die neue Order im nächsten Batch-Call erscheint.
+                        if (state.IsUpdatePending ||
+                            openExchangeOrders.ContainsKey(brokerId) ||
+                            (DateTime.UtcNow - state.LastUpdateUtc).TotalSeconds < 5)
                             continue;
 
                         var sharedSymbol = GetSharedSymbol(state.Order.Symbol);
