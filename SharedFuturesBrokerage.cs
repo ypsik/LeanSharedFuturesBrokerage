@@ -172,14 +172,14 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 subscriptionData.ConnectionLost += new Action(() =>
                 {
                     setConnectedState(false);
-                    Log.Error($"{Name}: Connection lost!");
+                    Log.Error($"{streamName}: Connection lost!");
                     OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "Disconnect", $"{streamName} stream lost."));
                 });
 
                 subscriptionData.ConnectionRestored += new Action<TimeSpan>((duration) =>
                 {
                     setConnectedState(true);
-                    Log.Trace($"{Name}: Connection restored after {duration}.");
+                    Log.Trace($"{streamName}: Connection restored after {duration}.");
                     OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Information, "Reconnect", $"{streamName} stream restored. Syncing..."));
                     //Task.Run(async () => await ForceReconcile());
                 });
@@ -188,7 +188,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             }
             else
             {
-                Log.Error($"{Name} {errorMessage} | Details: {errorDetails ?? "No additional error info available."}");
+                Log.Error($"{streamName} {errorMessage} | Details: {errorDetails ?? "No additional error info available."}");
             }
         }
 
