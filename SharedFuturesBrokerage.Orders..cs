@@ -518,17 +518,17 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     placingCandidate.State == OrderLifeCycleState.Placing &&
                     !_statesByBrokerId.ContainsKey(o.OrderId))
                 {
-                    // FIX: 1. ZUERST unter dem neuen echten Key registrieren (Atomarer Swap)
-                    _statesByBrokerId[o.OrderId] = placingCandidate;
-                    _clientToBroker[o.ClientOrderId] = o.OrderId;
-
-                    // 2. State-Werte aktualisieren
+                    // 1. ZUERST State-Werte aktualisieren (verhindert Publication Race Condition)
                     placingCandidate.BrokerId = o.OrderId;
                     placingCandidate.State = OrderLifeCycleState.Submitted;
                     placingCandidate.LastUpdateUtc = DateTime.UtcNow;
 
                     if (!placingCandidate.Order.BrokerId.Contains(o.OrderId))
                         placingCandidate.Order.BrokerId.Add(o.OrderId);
+
+                    // 2. DANN unter dem neuen echten Key registrieren (Publizieren)
+                    _statesByBrokerId[o.OrderId] = placingCandidate;
+                    _clientToBroker[o.ClientOrderId] = o.OrderId;
 
                     // 3. ERST JETZT den alten temp-Key sicher entfernen
                     _statesByBrokerId.TryRemove(o.ClientOrderId, out _);
@@ -557,16 +557,17 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         }
                         else
                         {
-                            // 1. ZUERST den neuen Key setzen (Atomarer Swap)
-                            _statesByBrokerId[o.OrderId] = existingState;
-                            _clientToBroker[o.ClientOrderId] = o.OrderId;
-
-                            // 2. State-Werte aktualisieren
+                            // 1. ZUERST State-Werte aktualisieren (verhindert Publication Race Condition)
                             existingState.BrokerId = o.OrderId;
                             existingState.LastUpdateUtc = DateTime.UtcNow;
                             existingState.IsUpdatePending = false;
 
-                            existingState.Order.BrokerId.Add(o.OrderId);
+                            if (!existingState.Order.BrokerId.Contains(o.OrderId))
+                                existingState.Order.BrokerId.Add(o.OrderId);
+
+                            // 2. DANN den neuen Key setzen (Publizieren)
+                            _statesByBrokerId[o.OrderId] = existingState;
+                            _clientToBroker[o.ClientOrderId] = o.OrderId;
 
                             // 3. ERST JETZT den alten Key sicher abräumen
                             _statesByBrokerId.TryRemove(oldBrokerId, out _);
