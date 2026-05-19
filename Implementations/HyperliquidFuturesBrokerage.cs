@@ -212,12 +212,18 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 if (_fundingUpdateSubscription == null && _socketClient != null)
                 {
                     _subRateGate.WaitToProceed();
+                    bool isFirstFundingMessage = true;
                     var sub = RunSync(() =>
-
-                        _socketClient.FuturesApi.Account.SubscribeToUserFundingUpdatesAsync(null,
+                            _socketClient.FuturesApi.Account.SubscribeToUserFundingUpdatesAsync(null,
                             update =>
                             {
                                 if (update?.Data == null) return;
+
+                                if (isFirstFundingMessage) 
+                                {
+                                    isFirstFundingMessage = false;
+                                    return;
+                                }
 
                                 foreach (var fundingsRecord in update.Data.Where(f => f != null))
                                 {
