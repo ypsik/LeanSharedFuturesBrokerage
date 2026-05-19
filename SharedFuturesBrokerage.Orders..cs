@@ -33,6 +33,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         public enum OrderLifeCycleState
         {
+            Placing,    // Order ist lokal registriert, BrokerId noch ausstehend (REST-Call läuft)
             Submitted,
             Open,
             PartiallyFilled,
@@ -66,6 +67,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         // --- SINGLE SOURCE OF TRUTH CACHES ---
         private readonly ConcurrentDictionary<string, OrderState> _statesByBrokerId = new();
         private readonly ConcurrentDictionary<string, string> _clientToBroker = new();
+
 
         #region Order Management
 
@@ -154,6 +156,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 }
             }
 
+            var clientOrderId = GenerateClientId(order.Id);
+
             var request = new PlaceFuturesOrderRequest(
                 GetSharedSymbol(order.Symbol),
                 executionQuantity > 0 ? SharedOrderSide.Buy : SharedOrderSide.Sell,
@@ -161,12 +165,32 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 new SharedQuantity { QuantityInBaseAsset = Math.Abs(executionQuantity) })
             {
                 Price = (order as LimitOrder)?.LimitPrice,
-                ClientOrderId = GenerateClientId(order.Id)
+                ClientOrderId = clientOrderId
             };
+
+            // State Machine: Order mit Placing-State registrieren bevor API-Call rausgeht.
+            // Socket-Handler kann die Order damit sofort finden falls HL instantan füllt
+            // und das WS-Event noch während RunSync() ankommt.
+            var placingState = new OrderState
+            {
+                Order = order,
+                OriginalQuantity = executionQuantity,
+                FilledQuantity = 0m,
+                BrokerId = clientOrderId, // temp key bis BrokerId bekannt
+                ClientOrderId = clientOrderId,
+                State = OrderLifeCycleState.Placing,
+                LastUpdateUtc = DateTime.UtcNow
+            };
+            _statesByBrokerId[clientOrderId] = placingState;
+            _clientToBroker[clientOrderId] = clientOrderId; // self-reference als Sentinel
 
             var res = RunSync(() => ExecutePlaceOrderAsync(request));
             if (!res.Success)
             {
+                // Placing-State wieder austragen
+                _statesByBrokerId.TryRemove(clientOrderId, out _);
+                _clientToBroker.TryRemove(clientOrderId, out _);
+
                 var errorMsg = res.Error?.ToString() ?? "Unknown exchange error";
                 Log.Error($"{Name}.PlaceOrder({order.Symbol.Value}): {errorMsg}");
                 OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "PlaceOrder", errorMsg));
@@ -175,21 +199,28 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
             order.BrokerId.Add(res.Data.Id);
 
-            var state = new OrderState
+            // Wir prüfen, ob der temporäre Key noch existiert.
+            // Falls nicht, hat 'HandleOrderSocket' bereits übernommen und den Swap durchgeführt.
+            if (_statesByBrokerId.TryGetValue(clientOrderId, out _))
             {
-                Order = order,
-                OriginalQuantity = executionQuantity,
-                FilledQuantity = 0m,
-                BrokerId = res.Data.Id,
-                ClientOrderId = request.ClientOrderId,
-                State = OrderLifeCycleState.Submitted,
-                LastUpdateUtc = DateTime.UtcNow
-            };
+                // 1. ZUERST den State unter der echten BrokerId registrieren und das Mapping überschreiben.
+                // Ein Zuweisen (=) bei ConcurrentDictionary ist thread-safe und überschreibt den Wert.
+                _statesByBrokerId[res.Data.Id] = placingState;
+                _clientToBroker[clientOrderId] = res.Data.Id; // Überschreibt den Sentinel (self-reference)
 
-            _statesByBrokerId[res.Data.Id] = state;
-            _clientToBroker[state.ClientOrderId] = res.Data.Id;
+                // 2. State Properties aktualisieren
+                placingState.BrokerId = res.Data.Id;
+                placingState.State = OrderLifeCycleState.Submitted;
+                placingState.LastUpdateUtc = DateTime.UtcNow;
 
-            OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero) { Status = OrderStatus.Submitted });
+                // 3. ERST JETZT den alten temporären Key entfernen.
+                // Wenn jetzt parallel ein Fill kommt, findet er die Order bereits unter res.Data.Id in Schritt 1.
+                _statesByBrokerId.TryRemove(clientOrderId, out _);
+
+                OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero) { Status = OrderStatus.Submitted });
+            }
+            // else: Socket hat Placing-State bereits umgebogen + Events gefeuert
+
             return true;
         }
 
@@ -463,6 +494,43 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             foreach (var o in update.Data)
             {
                 if (string.IsNullOrEmpty(o.OrderId)) continue;
+
+                // -------------------------------------------------------
+                // PLACING STATE: Instantaner Fill während PlaceOrder() auf REST-Response wartet
+                // -------------------------------------------------------
+                // Wenn die Order im Placing-State ist (ClientOrderId == temp BrokerId-Key),
+                // kennen wir die echte BrokerId jetzt vom Socket – State umbiegen und Fill verarbeiten.
+                if (!string.IsNullOrEmpty(o.ClientOrderId) &&
+                    _statesByBrokerId.TryGetValue(o.ClientOrderId, out var placingCandidate) &&
+                    placingCandidate.State == OrderLifeCycleState.Placing &&
+                    !_statesByBrokerId.ContainsKey(o.OrderId))
+                {
+                    // 1. ZUERST unter dem neuen echten Key registrieren und Mapping aktualisieren,
+                    // damit ein in dieser Millisekunde eintreffender Fill (Trade Socket) den State sofort findet.
+                    _statesByBrokerId[o.OrderId] = placingCandidate;
+                    _clientToBroker[o.ClientOrderId] = o.OrderId;
+
+                    // 2. Werte des Reference Types aktualisieren
+                    placingCandidate.BrokerId = o.OrderId;
+                    placingCandidate.State = OrderLifeCycleState.Submitted;
+                    placingCandidate.LastUpdateUtc = DateTime.UtcNow;
+                    // FilledQuantity bewusst NICHT setzen – HandleUserTradeSocket akkumuliert korrekt mit Fees
+
+                    if (!placingCandidate.Order.BrokerId.Contains(o.OrderId))
+                    {
+                        placingCandidate.Order.BrokerId.Add(o.OrderId);
+                    }
+
+                    // 3. ERST JETZT den alten Placing-Key sicher entfernen.
+                    _statesByBrokerId.TryRemove(o.ClientOrderId, out _);
+
+                    Log.Trace($"{Name}.HandleOrderSocket: Placing→Submitted for {o.OrderId} via socket. Fill (if any) follows via trade socket.");
+
+                    // Submitted-Event – PlaceOrder überspringt es da TryRemove des Placing-Keys fehlschlägt
+                    OnOrderEvent(new OrderEvent(placingCandidate.Order, DateTime.UtcNow, OrderFee.Zero) { Status = OrderStatus.Submitted });
+
+                    continue;
+                }
 
                 // Modify Replacement Detection via ClientOrderId
                 if (!string.IsNullOrEmpty(o.ClientOrderId) &&
