@@ -53,6 +53,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             public OrderLifeCycleState State;
             public DateTime LastUpdateUtc;
             public bool IsUpdatePending;
+            public decimal CumulativeFeePaid;
 
             public decimal Remaining => OriginalQuantity - FilledQuantity;
 
@@ -83,35 +84,44 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             return res.Data.Select(o =>
             {
                 var symbol = Symbol.Create(NormalizeSymbol(o.Symbol), SecurityType.CryptoFuture, Name);
-
-                // 1. Vorzeichen zentral definieren
                 var sign = o.Side == SharedOrderSide.Sell ? -1m : 1m;
-
-                // 2. Beide Quantities konsequent signieren
                 var qty = (o.OrderQuantity?.QuantityInBaseAsset ?? 0m) * sign;
                 var filledQty = (o.QuantityFilled?.QuantityInBaseAsset ?? 0m) * sign;
+                var price = o.OrderPrice ?? 0m;
 
-                Order order = o.OrderType == SharedOrderType.Limit
-                    ? new LimitOrder(symbol, qty, o.OrderPrice ?? 0m, DateTime.UtcNow)
-                    : new MarketOrder(symbol, qty, DateTime.UtcNow);
+                Order order;
+
+                // FIX: Explizite Trennung der Order-Typen um Portfolio-Korruption beim Startup zu verhindern.
+                if (o.OrderType == SharedOrderType.Limit)
+                {
+                    order = new LimitOrder(symbol, qty, price, DateTime.UtcNow);
+                }
+                else if (o.OrderType == SharedOrderType.Market)
+                {
+                    order = new MarketOrder(symbol, qty, DateTime.UtcNow);
+                }
+                else
+                {
+                    // Fallback für StopMarket, StopLimit, TrailingStop, etc.
+                    // Durch das Mappen auf StopMarketOrder weiß LEAN, dass diese Order 
+                    // bedingungsgeknüpft ist und führt sie nicht sofort als Market-Order aus.
+                    order = new StopMarketOrder(symbol, qty, price, DateTime.UtcNow);
+                }
 
                 order.BrokerId.Add(o.OrderId);
-
-                // 3. MapStatus braucht den absoluten Wert, sonst schlägt "filled > 0" bei Shorts fehl
                 order.Status = MapStatus(o.Status, Math.Abs(filledQty));
 
                 var state = new OrderState
                 {
                     Order = order,
                     OriginalQuantity = qty,
-                    FilledQuantity = filledQty, // Jetzt korrekt signiert gespeichert
+                    FilledQuantity = filledQty,
                     BrokerId = o.OrderId,
                     ClientOrderId = o.ClientOrderId ?? string.Empty,
                     State = order.Status == OrderStatus.PartiallyFilled ? OrderLifeCycleState.PartiallyFilled : OrderLifeCycleState.Open,
                     LastUpdateUtc = DateTime.UtcNow
                 };
 
-                // FIX Bug 5: TryAdd statt direkter Zuweisung – schützt IsUpdatePending laufender Updates
                 if (_statesByBrokerId.TryAdd(o.OrderId, state))
                 {
                     if (!string.IsNullOrEmpty(state.ClientOrderId))
@@ -463,8 +473,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                 var sign = trade.Side == SharedOrderSide.Buy ? 1m : -1m;
                 var signedFill = trade.Quantity * sign;
+                var fee = trade.Fee ?? 0m;
 
                 state.FilledQuantity += signedFill;
+
+                // FIX 3: Tracken der kumulierten Gebühren
+                state.CumulativeFeePaid += fee;
                 state.LastUpdateUtc = DateTime.UtcNow;
 
                 var leanStatus = Math.Abs(state.FilledQuantity) >= Math.Abs(state.OriginalQuantity)
@@ -479,7 +493,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     _clientToBroker.TryRemove(state.ClientOrderId, out _);
                 }
 
-                OnOrderEvent(new OrderEvent(state.Order, DateTime.UtcNow, new OrderFee(new CashAmount(trade.Fee ?? 0m, trade.FeeAsset ?? SettleAsset)))
+                // Hier wird LEAN nur die Gebühr für genau DIESEN Teil-Fill belastet
+                OnOrderEvent(new OrderEvent(state.Order, DateTime.UtcNow, new OrderFee(new CashAmount(fee, trade.FeeAsset ?? SettleAsset)))
                 {
                     Status = leanStatus,
                     FillPrice = trade.Price,
@@ -496,62 +511,58 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 if (string.IsNullOrEmpty(o.OrderId)) continue;
 
                 // -------------------------------------------------------
-                // PLACING STATE: Instantaner Fill während PlaceOrder() auf REST-Response wartet
+                // PLACING STATE: Instantaner Fill während PlaceOrder() 
                 // -------------------------------------------------------
-                // Wenn die Order im Placing-State ist (ClientOrderId == temp BrokerId-Key),
-                // kennen wir die echte BrokerId jetzt vom Socket – State umbiegen und Fill verarbeiten.
                 if (!string.IsNullOrEmpty(o.ClientOrderId) &&
                     _statesByBrokerId.TryGetValue(o.ClientOrderId, out var placingCandidate) &&
                     placingCandidate.State == OrderLifeCycleState.Placing &&
                     !_statesByBrokerId.ContainsKey(o.OrderId))
                 {
-                    // 1. ZUERST unter dem neuen echten Key registrieren und Mapping aktualisieren,
-                    // damit ein in dieser Millisekunde eintreffender Fill (Trade Socket) den State sofort findet.
+                    // FIX: 1. ZUERST unter dem neuen echten Key registrieren (Atomarer Swap)
                     _statesByBrokerId[o.OrderId] = placingCandidate;
                     _clientToBroker[o.ClientOrderId] = o.OrderId;
 
-                    // 2. Werte des Reference Types aktualisieren
+                    // 2. State-Werte aktualisieren
                     placingCandidate.BrokerId = o.OrderId;
                     placingCandidate.State = OrderLifeCycleState.Submitted;
                     placingCandidate.LastUpdateUtc = DateTime.UtcNow;
-                    // FilledQuantity bewusst NICHT setzen – HandleUserTradeSocket akkumuliert korrekt mit Fees
 
                     if (!placingCandidate.Order.BrokerId.Contains(o.OrderId))
-                    {
                         placingCandidate.Order.BrokerId.Add(o.OrderId);
-                    }
 
-                    // 3. ERST JETZT den alten Placing-Key sicher entfernen.
+                    // 3. ERST JETZT den alten temp-Key sicher entfernen
                     _statesByBrokerId.TryRemove(o.ClientOrderId, out _);
 
                     Log.Trace($"{Name}.HandleOrderSocket: Placing→Submitted for {o.OrderId} via socket. Fill (if any) follows via trade socket.");
 
-                    // Submitted-Event – PlaceOrder überspringt es da TryRemove des Placing-Keys fehlschlägt
                     OnOrderEvent(new OrderEvent(placingCandidate.Order, DateTime.UtcNow, OrderFee.Zero) { Status = OrderStatus.Submitted });
-
                     continue;
                 }
 
-                // Modify Replacement Detection via ClientOrderId
+                // -------------------------------------------------------
+                // MODIFY / REPLACEMENT DETECTION (Cancel + Replace)
+                // -------------------------------------------------------
                 if (!string.IsNullOrEmpty(o.ClientOrderId) &&
                     _clientToBroker.TryGetValue(o.ClientOrderId, out var oldBrokerId) &&
                     oldBrokerId != o.OrderId)
                 {
                     if (_statesByBrokerId.TryGetValue(oldBrokerId, out var existingState))
                     {
-                        // Normal path: State vorhanden, BrokerId rebinden
-                        _statesByBrokerId.TryRemove(oldBrokerId, out _);
-
-                        existingState.BrokerId = o.OrderId;
-                        existingState.LastUpdateUtc = DateTime.UtcNow;
-                        existingState.IsUpdatePending = false; // FIX: Update via Socket bestätigt, Flag entfernen!
-
+                        // FIX: 1. ZUERST den neuen Key setzen (Atomarer Swap)
                         _statesByBrokerId[o.OrderId] = existingState;
                         _clientToBroker[o.ClientOrderId] = o.OrderId;
 
-                        // FIX GPT-6: Contains-Check verhindert Duplikate bei Socket-Reconnect
+                        // 2. State-Werte aktualisieren
+                        existingState.BrokerId = o.OrderId;
+                        existingState.LastUpdateUtc = DateTime.UtcNow;
+                        existingState.IsUpdatePending = false;
+
                         if (!existingState.Order.BrokerId.Contains(o.OrderId))
                             existingState.Order.BrokerId.Add(o.OrderId);
+
+                        // 3. ERST JETZT den alten Key sicher abräumen
+                        _statesByBrokerId.TryRemove(oldBrokerId, out _);
+
                         OnOrderIdChangedEvent(new BrokerageOrderIdChangedEvent
                         {
                             OrderId = existingState.Order.Id,
@@ -562,34 +573,29 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     }
                     else
                     {
-                        // State bereits abgeräumt (Reconcile/Socket-Race), aber ID-Mapping
-                        // aktualisieren damit _clientToBroker nicht auf veraltete BrokerId zeigt
+                        // State bereits abgeräumt (Race mit REST/Reconcile), aber ID-Mapping updaten
                         _clientToBroker[o.ClientOrderId] = o.OrderId;
-
-                        Log.Trace($"{Name}.HandleOrderSocket: Modify detected for ClientOrderId {o.ClientOrderId} but old state for BrokerId {oldBrokerId} not found (already reconciled?). ID mapping updated to {o.OrderId}.");
+                        Log.Trace($"{Name}.HandleOrderSocket: Modify detected for ClientOrderId {o.ClientOrderId} but old state not found. ID mapping updated to {o.OrderId}.");
                     }
                 }
 
-                // Normal Status Update
+                // -------------------------------------------------------
+                // NORMAL STATUS UPDATE
+                // -------------------------------------------------------
                 if (_statesByBrokerId.TryGetValue(o.OrderId, out var state))
                 {
-                    // FIX: FilledQuantity mit Exchange synchronisieren (inkl. korrektem Vorzeichen)
                     var sign = state.OriginalQuantity > 0 ? 1m : -1m;
                     var absFilled = o.QuantityFilled?.QuantityInBaseAsset ?? 0m;
 
-                    // FIX GPT-4: Nur überschreiben wenn Exchange mehr gemeldet hat als wir akkumuliert haben.
-                    // Verhindert dass ein stales/verspätetes OrderUpdate den TradeSocket-Fill-Stand zurücksetzt.
                     var newFilled = absFilled * sign;
                     if (Math.Abs(newFilled) > Math.Abs(state.FilledQuantity))
                         state.FilledQuantity = newFilled;
 
                     state.LastUpdateUtc = DateTime.UtcNow;
-
                     var leanStatus = MapStatus(o.Status, absFilled);
 
                     if (leanStatus is OrderStatus.Canceled or OrderStatus.Invalid)
                     {
-                        // FIX: IGNORIERE DEN CANCEL VOM SOCKET, WENN EIN UPDATE LÄUFT
                         if (state.IsUpdatePending)
                         {
                             Log.Trace($"{Name}.HandleOrderSocket: Suppressing Cancel event for {state.BrokerId} because an Update is pending.");
@@ -597,7 +603,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         }
 
                         state.State = OrderLifeCycleState.Canceled;
-
                         _statesByBrokerId.TryRemove(state.BrokerId, out _);
                         _clientToBroker.TryRemove(state.ClientOrderId, out _);
 
@@ -609,13 +614,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     }
                     else
                     {
-                        // FIX Bug 3: In-place update bestätigt (gleiche BrokerId) → Flag zurücksetzen.
-                        // Für Cancel+Replace bleibt IsUpdatePending aktiv bis zum Replacement-Pfad oben.
                         state.IsUpdatePending = false;
                     }
                 }
             }
         }
+
         private async Task ReconcileLoop(CancellationToken ct)
         {
             while (!ct.IsCancellationRequested)
@@ -638,21 +642,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         .GroupBy(x => x.OrderId)
                         .ToDictionary(g => g.Key, g => g.First());
 
-
                     foreach (var kv in _statesByBrokerId.ToArray())
                     {
                         var brokerId = kv.Key;
                         var state = kv.Value;
 
-                        // -----------------------------
-                        // PERFORMANCE- & ZEIT-CHECK (VOR DEM API CALL)
-                        // -----------------------------
-                        // Wenn die Order im Batch-Call als offen gemeldet wurde oder taufrisch ist, überspringen.
-                        // FIX GPT-5: Auch bei pending Update überspringen – sonst wird die alte Order beim Cancel+Replace
-                        // als Canceled markiert bevor die neue Order im nächsten Batch-Call erscheint.
-                        // Timeout 300s: Blockchain-Transaktionen können lange hängen (Netzwerküberlastung, Slot-Delays).
                         var updateStillPending = state.IsUpdatePending &&
-                            (DateTime.UtcNow - state.LastUpdateUtc).TotalSeconds < 300;
+                            (DateTime.UtcNow - state.LastUpdateUtc).TotalSeconds < 10;
 
                         if (updateStillPending ||
                             openExchangeOrders.ContainsKey(brokerId) ||
@@ -664,9 +660,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                             .GetFuturesOrderAsync(new GetOrderRequest(sharedSymbol, brokerId))
                             .ConfigureAwait(false);
 
-                        // -----------------------------
-                        // API FAIL = NO STATE CHANGE (CRITICAL FIX)
-                        // -----------------------------
                         if (!statusCheck.Success || statusCheck.Data == null)
                         {
                             Log.Error($"{Name}.ReconcileLoop: Failed to verify order {brokerId}. Error: {statusCheck.Error}");
@@ -675,10 +668,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                         var brokerOrder = statusCheck.Data;
 
-                        // -----------------------------
-                        // SAFE REMOVE (RACE CONDITION PREVENTION)
-                        // -----------------------------
-                        // Wenn der Socket die Order in der Zwischenzeit abgeräumt hat, hier abbrechen.
+                        // SAFE REMOVE
                         if (!_statesByBrokerId.TryRemove(brokerId, out var removedState))
                             continue;
 
@@ -697,24 +687,28 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                             if (Math.Abs(remainingToFill) > 0)
                             {
+                                // -----------------------------
+                                // FIX 3: Doppelbuchungen der Gebühren verhindern!
+                                // -----------------------------
+                                var totalExchangeFee = brokerOrder.Fee ?? 0m;
+                                var remainingFee = Math.Max(0m, totalExchangeFee - removedState.CumulativeFeePaid);
+
                                 OnOrderEvent(new OrderEvent(removedState.Order, DateTime.UtcNow, OrderFee.Zero)
                                 {
                                     Status = OrderStatus.Filled,
                                     FillPrice = brokerOrder.AveragePrice ?? 0,
                                     FillQuantity = remainingToFill,
-                                    OrderFee = new OrderFee(new CashAmount(brokerOrder.Fee ?? 0, brokerOrder.FeeAsset ?? SettleAsset)),
+                                    // Wir stellen LEAN nur noch das Rest-Delta in Rechnung
+                                    OrderFee = new OrderFee(new CashAmount(remainingFee, brokerOrder.FeeAsset ?? SettleAsset)),
                                     Message = "Reconciled Fill"
                                 });
                             }
                         }
                         // -----------------------------
-                        // FIX Bug 4: CASE 2: STILL OPEN (z.B. Paginierungslücke im Batch-Call)
-                        // Order wieder eintragen statt fälschlich zu canceln.
+                        // CASE 2: STILL OPEN
                         // -----------------------------
                         else if (brokerOrder.Status == SharedOrderStatus.Open)
                         {
-                            // FIX: Timestamp aktualisieren, sonst greift der 5s-Guard im nächsten Loop nicht
-                            // → ohne das würde jeder Reconcile-Durchlauf einen separaten REST-Call für diese Order produzieren
                             removedState.LastUpdateUtc = DateTime.UtcNow;
                             _statesByBrokerId[brokerId] = removedState;
                             _clientToBroker[removedState.ClientOrderId] = brokerId;
