@@ -175,7 +175,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 new SharedQuantity { QuantityInBaseAsset = Math.Abs(executionQuantity) })
             {
                 Price = (order as LimitOrder)?.LimitPrice,
-                ClientOrderId = clientOrderId
+                ClientOrderId = clientOrderId,
+                ExchangeParameters = PlaceFuturesOrderExchangeParameters
             };
 
             // State Machine: Order mit Placing-State registrieren bevor API-Call rausgeht.
@@ -239,7 +240,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             if (!order.BrokerId.Any()) return false;
             var id = order.BrokerId.Last();
 
-            var res = RunSync(() => ExecuteCancelOrderAsync(new CxCancelOrderRequest(GetSharedSymbol(order.Symbol), id)));
+            var res = RunSync(() => ExecuteCancelOrderAsync(new CxCancelOrderRequest(GetSharedSymbol(order.Symbol), id, CancelFuturesOrderExchangeParameters)));
             if (!res.Success)
             {
                 var errorMsg = res.Error?.ToString() ?? "Unknown exchange error";
@@ -376,13 +377,14 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
             return true;
         }
-
+        protected virtual ExchangeParameters PlaceFuturesOrderExchangeParameters => new ExchangeParameters();
         protected virtual Task<ExchangeWebResult<SharedId>> ExecutePlaceOrderAsync(PlaceFuturesOrderRequest request)
             => _orderClient.PlaceFuturesOrderAsync(request);
 
         protected virtual Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(Order order, string clientOrderId, decimal price, decimal quantity)
             => Task.FromResult<ExchangeWebResult<SharedId>>(null);
 
+        protected virtual ExchangeParameters CancelFuturesOrderExchangeParameters => new ExchangeParameters();
         protected virtual Task<ExchangeWebResult<SharedId>> ExecuteCancelOrderAsync(CxCancelOrderRequest request)
             => _orderClient.CancelFuturesOrderAsync(request);
 
