@@ -221,8 +221,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
                                 foreach (var fundingsRecord in update.Data.Where(f => f != null))
                                 {
-                                    _algorithm.Portfolio.CashBook[SettleAsset].AddAmount(fundingsRecord.Usdc);
-                                    OnMessage(new FundingBrokerageMessageEvent(SettleAsset, fundingsRecord.Usdc));                                
+                                    if (_algorithm?.Portfolio?.CashBook != null)
+                                    {
+                                        _algorithm.Portfolio.CashBook[SettleAsset].AddAmount(fundingsRecord.Usdc);
+                                        OnMessage(new FundingBrokerageMessageEvent(SettleAsset, fundingsRecord.Usdc));
+                                    }
                                 }
                             }));
 
