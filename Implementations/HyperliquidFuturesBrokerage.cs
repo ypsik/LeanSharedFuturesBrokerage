@@ -217,7 +217,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                         _socketClient.FuturesApi.Account.SubscribeToUserFundingUpdatesAsync(null,
                             update =>
                             {
-                                foreach(var fundingsRecord in update.Data)
+                                if (update?.Data == null) return;
+
+                                foreach (var fundingsRecord in update.Data)
                                 {
                                     _algorithm.Portfolio.CashBook[SettleAsset].AddAmount(fundingsRecord.Usdc);
                                     OnMessage(new FundingBrokerageMessageEvent(SettleAsset, fundingsRecord.Usdc));                                
