@@ -283,7 +283,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
             if (res?.Success != true)
             {
-                // FIX: Flag zurücksetzen, wenn der Call hart fehlschlägt
+                // Flag zurücksetzen, wenn der Call hart fehlschlägt
                 if (_clientToBroker.TryGetValue(clientOrderId, out var errorBrokerId) &&
                     _statesByBrokerId.TryGetValue(errorBrokerId, out var errorState))
                 {
@@ -297,6 +297,19 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     BrokerageMessageType.Warning,
                     "UpdateOrder",
                     errorMsg));
+
+                // TERMINAL ERROR DETECTION:
+                // Wenn die Exchange explizit sagt die Order ist bereits closed (z.B. HL: "Cannot modify canceled or filled order"),
+                // sofort den echten Status holen und das korrekte Event feuern – nicht auf den nächsten ReconcileLoop warten.
+                if (IsTerminalUpdateError(errorMsg))
+                {
+                    var terminalBrokerId = order.BrokerId.LastOrDefault();
+                    if (terminalBrokerId != null)
+                    {
+                        Log.Trace($"{Name}.UpdateOrder: Terminal error detected for {order.Symbol.Value} ({terminalBrokerId}). Triggering immediate status check.");
+                        _ = Task.Run(() => ReconcileOrderImmediateAsync(terminalBrokerId, order));
+                    }
+                }
 
                 return false;
             }
@@ -331,6 +344,80 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         protected virtual Task<ExchangeWebResult<SharedId>> ExecuteCancelOrderAsync(CxCancelOrderRequest request)
             => _orderClient.CancelFuturesOrderAsync(request);
+
+        /// <summary>
+        /// Überschreiben um exchange-spezifische "Order ist bereits terminal"-Fehler zu erkennen.
+        /// Wenn true zurückgegeben wird, löst UpdateOrder sofort einen Reconcile für die Order aus.
+        /// Beispiel Hyperliquid: errorMsg.Contains("canceled or filled")
+        /// </summary>
+        protected virtual bool IsTerminalUpdateError(string errorMsg) => false;
+
+        /// <summary>
+        /// Holt den echten Order-Status von der Exchange und feuert das korrekte LEAN-Event.
+        /// Wird aufgerufen wenn UpdateOrder einen Terminal-Fehler erkennt (Order bereits filled/canceled).
+        /// </summary>
+        private async Task ReconcileOrderImmediateAsync(string brokerId, Order order)
+        {
+            try
+            {
+                var sharedSymbol = GetSharedSymbol(order.Symbol);
+                var statusCheck = await _orderClient
+                    .GetFuturesOrderAsync(new GetOrderRequest(sharedSymbol, brokerId))
+                    .ConfigureAwait(false);
+
+                if (!statusCheck.Success || statusCheck.Data == null)
+                {
+                    Log.Error($"{Name}.ReconcileOrderImmediateAsync: Failed to fetch status for {brokerId}: {statusCheck.Error}");
+                    return;
+                }
+
+                // Safe remove – Socket könnte in der Zwischenzeit abgeräumt haben
+                if (!_statesByBrokerId.TryRemove(brokerId, out var removedState))
+                {
+                    Log.Trace($"{Name}.ReconcileOrderImmediateAsync: State for {brokerId} already removed (socket beat us).");
+                    return;
+                }
+
+                _clientToBroker.TryRemove(removedState.ClientOrderId, out _);
+
+                var brokerOrder = statusCheck.Data;
+
+                if (brokerOrder.Status == SharedOrderStatus.Filled)
+                {
+                    var finalFillAbsQty = brokerOrder.QuantityFilled?.QuantityInBaseAsset
+                                          ?? Math.Abs(removedState.OriginalQuantity);
+                    var sign = removedState.OriginalQuantity > 0 ? 1m : -1m;
+                    var finalSignedFillQty = finalFillAbsQty * sign;
+                    var remainingToFill = finalSignedFillQty - removedState.FilledQuantity;
+
+                    if (Math.Abs(remainingToFill) > 0)
+                    {
+                        Log.Trace($"{Name}.ReconcileOrderImmediateAsync: Order {brokerId} confirmed FILLED. Emitting fill event.");
+                        OnOrderEvent(new OrderEvent(removedState.Order, DateTime.UtcNow, OrderFee.Zero)
+                        {
+                            Status = OrderStatus.Filled,
+                            FillPrice = brokerOrder.AveragePrice ?? 0,
+                            FillQuantity = remainingToFill,
+                            OrderFee = new OrderFee(new CashAmount(brokerOrder.Fee ?? 0, brokerOrder.FeeAsset ?? SettleAsset)),
+                            Message = "Immediate Reconcile – Fill"
+                        });
+                    }
+                }
+                else
+                {
+                    Log.Trace($"{Name}.ReconcileOrderImmediateAsync: Order {brokerId} confirmed CANCELED. Emitting cancel event.");
+                    OnOrderEvent(new OrderEvent(removedState.Order, DateTime.UtcNow, OrderFee.Zero)
+                    {
+                        Status = OrderStatus.Canceled,
+                        Message = "Immediate Reconcile – Cancel"
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"{Name}.ReconcileOrderImmediateAsync Error for {brokerId}: {ex.Message}");
+            }
+        }
 
         #endregion
 
