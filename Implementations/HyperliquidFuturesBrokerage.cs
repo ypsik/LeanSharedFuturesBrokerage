@@ -220,8 +220,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                                 var fundingsRecord = update.Data.FirstOrDefault();
                                 if(fundingsRecord != null)
                                 {
+                                    _algorithm.Portfolio.CashBook[fundingsRecord.Symbol].AddAmount(fundingsRecord.FundingRate);
                                     OnMessage(new FundingBrokerageMessageEvent(fundingsRecord.Symbol, fundingsRecord.FundingRate));                                
-                                    OnBalanceUpdated();
                                 }
                             }));
 
