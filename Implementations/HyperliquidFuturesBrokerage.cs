@@ -217,7 +217,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                         _socketClient.FuturesApi.Account.SubscribeToUserFundingUpdatesAsync(null,
                             update =>
                             {
-                                OnBalanceUpdated();
+                                var fundingsRecord = update.Data.FirstOrDefault();
+                                if(fundingsRecord != null)
+                                {
+                                    OnMessage(new FundingBrokerageMessageEvent(fundingsRecord.Symbol, fundingsRecord.FundingRate));                                
+                                    OnBalanceUpdated();
+                                }
                             }));
 
                     SetupSubscriptionEvents(
