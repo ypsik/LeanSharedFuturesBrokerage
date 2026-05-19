@@ -590,16 +590,25 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 // -------------------------------------------------------
                 if (_statesByBrokerId.TryGetValue(o.OrderId, out var state))
                 {
-                    var sign = state.OriginalQuantity > 0 ? 1m : -1m;
-                    var absFilled = o.QuantityFilled?.QuantityInBaseAsset ?? 0m;
-
-                    var newFilled = absFilled * sign;
-                    if (Math.Abs(newFilled) > Math.Abs(state.FilledQuantity))
-                        state.FilledQuantity = newFilled;
-
                     state.LastUpdateUtc = DateTime.UtcNow;
+                    var absFilled = o.QuantityFilled?.QuantityInBaseAsset ?? 0m;
                     var leanStatus = MapStatus(o.Status, absFilled);
 
+                    // 🔥 DEIN FIX: Wir entmachten den Order-Socket für Fills! 🔥
+                    // Wenn die Börse über den Order-Stream "Filled" oder "PartiallyFilled" meldet, 
+                    // ignorieren wir das hier komplett. Wir WARTEN auf den Trade-Socket, 
+                    // denn nur der hat die genauen Ausführungspreise und Gebühren!
+                    if (leanStatus == OrderStatus.Filled || leanStatus == OrderStatus.PartiallyFilled)
+                    {
+                        Log.Trace($"{Name}.HandleOrderSocket: Ignoring {leanStatus} for {o.OrderId} in Order-Stream. Deferring to Trade-Stream.");
+
+                        // Wir setzen nur das Pending-Flag zurück, falls die Order gerade modifiziert wurde.
+                        state.IsUpdatePending = false;
+                        continue;
+                    }
+
+                    // Stornos und Ablehnungen behandeln wir weiterhin hier, 
+                    // da diese keine Trade-Events generieren.
                     if (leanStatus is OrderStatus.Canceled or OrderStatus.Invalid)
                     {
                         if (state.IsUpdatePending)
@@ -618,11 +627,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                             Message = "Order socket update"
                         });
                     }
-                    else
-                    {
-                        state.IsUpdatePending = false;
-                    }
                 }
+
             }
         }
 
