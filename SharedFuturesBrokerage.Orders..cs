@@ -548,34 +548,37 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 {
                     if (_statesByBrokerId.TryGetValue(oldBrokerId, out var existingState))
                     {
-                        // FIX: 1. ZUERST den neuen Key setzen (Atomarer Swap)
-                        _statesByBrokerId[o.OrderId] = existingState;
-                        _clientToBroker[o.ClientOrderId] = o.OrderId;
+                        // 🔥 THE ANTI-ZOMBIE GUARD 🔥
+                        // Verhindert Rückwärts-Swaps, falls das Cancel-Event der ALTEN Order 
+                        // nach dem New-Event der NEUEN Order eintrifft.
+                        if (existingState.Order.BrokerId.Contains(o.OrderId))
+                        {
+                            Log.Trace($"{Name}.HandleOrderSocket: Ignoring backwards swap to old ID {o.OrderId}.");
+                        }
+                        else
+                        {
+                            // 1. ZUERST den neuen Key setzen (Atomarer Swap)
+                            _statesByBrokerId[o.OrderId] = existingState;
+                            _clientToBroker[o.ClientOrderId] = o.OrderId;
 
-                        // 2. State-Werte aktualisieren
-                        existingState.BrokerId = o.OrderId;
-                        existingState.LastUpdateUtc = DateTime.UtcNow;
-                        existingState.IsUpdatePending = false;
+                            // 2. State-Werte aktualisieren
+                            existingState.BrokerId = o.OrderId;
+                            existingState.LastUpdateUtc = DateTime.UtcNow;
+                            existingState.IsUpdatePending = false;
 
-                        if (!existingState.Order.BrokerId.Contains(o.OrderId))
                             existingState.Order.BrokerId.Add(o.OrderId);
 
-                        // 3. ERST JETZT den alten Key sicher abräumen
-                        _statesByBrokerId.TryRemove(oldBrokerId, out _);
+                            // 3. ERST JETZT den alten Key sicher abräumen
+                            _statesByBrokerId.TryRemove(oldBrokerId, out _);
 
-                        OnOrderIdChangedEvent(new BrokerageOrderIdChangedEvent
-                        {
-                            OrderId = existingState.Order.Id,
-                            BrokerId = existingState.Order.BrokerId
-                        });
+                            OnOrderIdChangedEvent(new BrokerageOrderIdChangedEvent
+                            {
+                                OrderId = existingState.Order.Id,
+                                BrokerId = existingState.Order.BrokerId
+                            });
 
-                        Log.Trace($"{Name}.HandleOrderSocket: Modify detected for {existingState.Order.Symbol.Value} | OldOID: {oldBrokerId} → NewOID: {o.OrderId}");
-                    }
-                    else
-                    {
-                        // State bereits abgeräumt (Race mit REST/Reconcile), aber ID-Mapping updaten
-                        _clientToBroker[o.ClientOrderId] = o.OrderId;
-                        Log.Trace($"{Name}.HandleOrderSocket: Modify detected for ClientOrderId {o.ClientOrderId} but old state not found. ID mapping updated to {o.OrderId}.");
+                            Log.Trace($"{Name}.HandleOrderSocket: Modify mapped via Socket | Old: {oldBrokerId} → New: {o.OrderId}");
+                        }
                     }
                 }
 
@@ -722,7 +725,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                             OnOrderEvent(new OrderEvent(removedState.Order, DateTime.UtcNow, OrderFee.Zero)
                             {
                                 Status = OrderStatus.Canceled,
-                                Message = "Reconciled Cancel"
+                                Message = $"Order {brokerOrder.OrderId} reconciled cancel"
                             });
                         }
                     }
