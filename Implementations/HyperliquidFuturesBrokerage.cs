@@ -322,7 +322,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 return parameters;
             }
         }
-
+        /*
 
         protected override async Task<ExchangeWebResult<SharedId>> ExecutePlaceOrderAsync(PlaceFuturesOrderRequest request)
         {
@@ -350,7 +350,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                     res.As(new SharedId(res.Data.OrderId.ToString()))
                 );
         }
-
+        */
         protected override async Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(Order order, string clientOrderId, decimal price, decimal quantity)
         {
             var ticker = NativeTicker(order.Symbol);
