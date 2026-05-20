@@ -312,6 +312,18 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             Log.Trace($"{Name}: SPDB Fix for {symbol.Value} - TickSize: {tickSize} (Price: {oraclePrice})");
         }
 
+        protected override ExchangeParameters PlaceFuturesOrderExchangeParameters
+        {
+            get
+            {
+                var parameters = base.PlaceFuturesOrderExchangeParameters;
+                if (String.IsNullOrEmpty(_vaultAdress))
+                    parameters.AddValue(new ExchangeParameter("Hyperliquid", "vaultAddress", _vaultAdress));
+                return parameters;
+            }
+        }
+
+
         protected override async Task<ExchangeWebResult<SharedId>> ExecutePlaceOrderAsync(PlaceFuturesOrderRequest request)
         {
             var res = await _restClient.FuturesApi.Trading.PlaceOrderAsync(
