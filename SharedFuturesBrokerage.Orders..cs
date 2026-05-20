@@ -548,7 +548,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 // Wir loggen exakt, was reinkommt, um das Rätselraten zu beenden.
                 // =======================================================
                 Log.Trace($"{Name}.HandleOrderSocket RAW PAYLOAD: " +
-                          $"UpdateTime='{o.UpdateTime}', " +
+                         $"UpdateTimeTicks='{o.UpdateTime?.Ticks}', " +
                           $"OrderId='{o.OrderId}', " +
                           $"ClientOrderId='{o.ClientOrderId}', " +
                           $"Symbol='{o.Symbol}', " +
