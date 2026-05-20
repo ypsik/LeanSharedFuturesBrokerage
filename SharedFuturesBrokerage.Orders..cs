@@ -9,6 +9,7 @@ using QuantConnect.Orders.Fees;
 using QuantConnect.Securities;
 using QuantConnect.Statistics;
 using QuantConnect.Util;
+using SilverQuant.Lean.Brokerages.Futures.Shared.Common;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -65,9 +66,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         #endregion
 
-        // --- SINGLE SOURCE OF TRUTH CACHES ---
-        private readonly ConcurrentDictionary<string, OrderState> _statesByBrokerId = new();
-        private readonly ConcurrentDictionary<string, string> _clientToBroker = new();
+        // --- SINGLE SOURCE OF TRUTH ---
+        // Primary key: clientOrderId (permanent, never changes).
+        // Exchange ID is indexed separately via _orderStateManager for O(1) socket lookups.
+        private readonly OrderStateManager _orderStateManager = new();
 
 
         #region Order Management
@@ -103,7 +105,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 else
                 {
                     // Fallback für StopMarket, StopLimit, TrailingStop, etc.
-                    // Durch das Mappen auf StopMarketOrder weiß LEAN, dass diese Order 
+                    // Durch das Mappen auf StopMarketOrder weiß LEAN, dass diese Order
                     // bedingungsgeknüpft ist und führt sie nicht sofort als Market-Order aus.
                     order = new StopMarketOrder(symbol, qty, price, DateTime.UtcNow);
                 }
@@ -122,11 +124,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     LastUpdateUtc = DateTime.UtcNow
                 };
 
-                if (_statesByBrokerId.TryAdd(o.OrderId, state))
-                {
-                    if (!string.IsNullOrEmpty(state.ClientOrderId))
-                        _clientToBroker.TryAdd(state.ClientOrderId, o.OrderId);
-                }
+                // TryAdd: nop if clientId already registered (idempotent on reconnect).
+                // BrokerId is already set → manager auto-indexes in _statesByExchangeId.
+                if (!string.IsNullOrEmpty(state.ClientOrderId))
+                    _orderStateManager.TryAdd(state.ClientOrderId, state);
 
                 return order;
             }).ToList();
@@ -182,25 +183,25 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             // State Machine: Order mit Placing-State registrieren bevor API-Call rausgeht.
             // Socket-Handler kann die Order damit sofort finden falls HL instantan füllt
             // und das WS-Event noch während RunSync() ankommt.
+            // BrokerId = clientOrderId (temp) → manager indexes it in _statesByExchangeId as well.
+            // No self-reference sentinel needed anymore.
             var placingState = new OrderState
             {
                 Order = order,
                 OriginalQuantity = executionQuantity,
                 FilledQuantity = 0m,
-                BrokerId = clientOrderId, // temp key bis BrokerId bekannt
+                BrokerId = clientOrderId, // temp key bis echte Exchange-ID bekannt
                 ClientOrderId = clientOrderId,
                 State = OrderLifeCycleState.Placing,
                 LastUpdateUtc = DateTime.UtcNow
             };
-            _statesByBrokerId[clientOrderId] = placingState;
-            _clientToBroker[clientOrderId] = clientOrderId; // self-reference als Sentinel
+            _orderStateManager.TryAdd(clientOrderId, placingState);
 
             var res = RunSync(() => ExecutePlaceOrderAsync(request));
             if (!res.Success)
             {
                 // Placing-State wieder austragen
-                _statesByBrokerId.TryRemove(clientOrderId, out _);
-                _clientToBroker.TryRemove(clientOrderId, out _);
+                _orderStateManager.TryRemove(clientOrderId, out _);
 
                 var errorMsg = res.Error?.ToString() ?? "Unknown exchange error";
                 Log.Error($"{Name}.PlaceOrder({order.Symbol.Value}): {errorMsg}");
@@ -210,23 +211,23 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
             order.BrokerId.Add(res.Data.Id);
 
-            // Wir prüfen, ob der temporäre Key noch existiert.
-            // Falls nicht, hat 'HandleOrderSocket' bereits übernommen und den Swap durchgeführt.
-            if (_statesByBrokerId.TryGetValue(clientOrderId, out _))
+            // Prüfen ob der State noch im Placing-Zustand ist.
+            // Falls nicht, hat 'HandleOrderSocket' bereits übernommen, den Exchange-ID-Swap
+            // per MapNewExchangeId durchgeführt und das Submitted-Event gefeuert.
+            if (_orderStateManager.TryGetValue(clientOrderId, out var currentState) &&
+                currentState.State == OrderLifeCycleState.Placing)
             {
-                // 1. ZUERST den State unter der echten BrokerId registrieren und das Mapping überschreiben.
-                // Ein Zuweisen (=) bei ConcurrentDictionary ist thread-safe und überschreibt den Wert.
-                _statesByBrokerId[res.Data.Id] = placingState;
-                _clientToBroker[clientOrderId] = res.Data.Id; // Überschreibt den Sentinel (self-reference)
-
-                // 2. State Properties aktualisieren
-                placingState.BrokerId = res.Data.Id;
+                // 1. State-Properties aktualisieren
                 placingState.State = OrderLifeCycleState.Submitted;
                 placingState.LastUpdateUtc = DateTime.UtcNow;
 
-                // 3. ERST JETZT den alten temporären Key entfernen.
-                // Wenn jetzt parallel ein Fill kommt, findet er die Order bereits unter res.Data.Id in Schritt 1.
-                _statesByBrokerId.TryRemove(clientOrderId, out _);
+                // 2. Exchange-ID im Manager atomar eintragen:
+                //    - entfernt temp BrokerId aus _statesByExchangeId
+                //    - setzt state.BrokerId = res.Data.Id
+                //    - trägt unter res.Data.Id in _statesByExchangeId ein
+                //    - ergänzt Order.BrokerId
+                //    - _statesByClientId[clientOrderId] bleibt unverändert
+                _orderStateManager.MapNewExchangeId(clientOrderId, res.Data.Id);
 
                 OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero) { Status = OrderStatus.Submitted });
             }
@@ -249,11 +250,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 return false;
             }
 
-            // FIX Bug 1: State zuerst aus dem Dict entfernen, dann Event feuern.
-            // Damit schlägt der Socket-Handler fehl (TryGetValue miss) → kein doppeltes Event.
-            if (_statesByBrokerId.TryRemove(id, out var state))
+            // FIX Bug 1: State zuerst aus dem Manager entfernen, dann Event feuern.
+            // Damit schlägt der Socket-Handler fehl (TryGetByExchangeId miss) → kein doppeltes Event.
+            // Lookup via Exchange-ID → ClientOrderId → TryRemove (bereinigt beide internen Dicts).
+            if (_orderStateManager.TryGetByExchangeId(id, out var state))
             {
-                _clientToBroker.TryRemove(state.ClientOrderId, out _);
+                _orderStateManager.TryRemove(state.ClientOrderId, out _);
                 state.State = OrderLifeCycleState.Canceled;
                 state.LastUpdateUtc = DateTime.UtcNow;
 
@@ -280,8 +282,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
             var clientOrderId = GenerateClientId(order.Id);
 
-            if (_clientToBroker.TryGetValue(clientOrderId, out var brokerId) &&
-                _statesByBrokerId.TryGetValue(brokerId, out var state))
+            // Direct lookup via clientOrderId – no two-step _clientToBroker detour needed.
+            if (_orderStateManager.TryGetValue(clientOrderId, out var state))
             {
                 // 1. PRIORITY: explicit LEAN update request
                 if (lastUpdate?.Quantity.HasValue == true)
@@ -326,8 +328,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             if (res?.Success != true)
             {
                 // Flag zurücksetzen, wenn der Call hart fehlschlägt
-                if (_clientToBroker.TryGetValue(clientOrderId, out var errorBrokerId) &&
-                    _statesByBrokerId.TryGetValue(errorBrokerId, out var errorState))
+                if (_orderStateManager.TryGetValue(clientOrderId, out var errorState))
                 {
                     errorState.IsUpdatePending = false;
                 }
@@ -359,8 +360,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             // =========================================================
             // 🔥 CRITICAL STATE SYNC FIX (LEAN CONSISTENCY)
             // =========================================================
-            if (_clientToBroker.TryGetValue(clientOrderId, out var activeBrokerId) &&
-                _statesByBrokerId.TryGetValue(activeBrokerId, out var activeState))
+            if (_orderStateManager.TryGetValue(clientOrderId, out var activeState))
             {
                 // Update reflects new INTENT, not execution
                 activeState.OriginalQuantity = quantity;
@@ -377,6 +377,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
             return true;
         }
+
         protected virtual ExchangeParameters PlaceFuturesOrderExchangeParameters => new ExchangeParameters();
         protected virtual Task<ExchangeWebResult<SharedId>> ExecutePlaceOrderAsync(PlaceFuturesOrderRequest request)
             => _orderClient.PlaceFuturesOrderAsync(request);
@@ -414,14 +415,15 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     return;
                 }
 
-                // Safe remove – Socket könnte in der Zwischenzeit abgeräumt haben
-                if (!_statesByBrokerId.TryRemove(brokerId, out var removedState))
+                // Lookup via Exchange-ID, then remove via ClientOrderId (safe remove).
+                // Socket könnte in der Zwischenzeit abgeräumt haben.
+                if (!_orderStateManager.TryGetByExchangeId(brokerId, out var removedState))
                 {
                     Log.Trace($"{Name}.ReconcileOrderImmediateAsync: State for {brokerId} already removed (socket beat us).");
                     return;
                 }
 
-                _clientToBroker.TryRemove(removedState.ClientOrderId, out _);
+                _orderStateManager.TryRemove(removedState.ClientOrderId, out _);
 
                 var brokerOrder = statusCheck.Data;
 
@@ -475,31 +477,25 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 OrderState state = null;
 
                 // =======================================================
-                // 1. VERSUCH: Klassisch über die Exchange OrderId
+                // 1. VERSUCH: O(1) Lookup via Exchange-ID (Hidden Index)
                 // =======================================================
-                if (!_statesByBrokerId.TryGetValue(trade.OrderId, out state))
+                if (!_orderStateManager.TryGetByExchangeId(trade.OrderId, out state))
                 {
                     // =======================================================
-                    // 2. VERSUCH: Der "Instant-Fill" Fallback über ClientOrderId
+                    // 2. VERSUCH: Fallback via ClientOrderId (Master-Dict)
+                    // Deckt ab:
+                    //   Fall A – Order noch im Placing-State (BrokerId = clientId, daher kein Hit oben)
+                    //   Fall B – Cancel+Replace: MapNewExchangeId noch nicht gelaufen,
+                    //            aber _statesByClientId[clientOrderId] zeigt immer auf den aktuellen State
                     // =======================================================
                     if (!string.IsNullOrEmpty(trade.ClientOrderId))
                     {
-                        // Fall A: Order ist noch im Placing-Status. 
-                        // Hier liegt sie temporär direkt unter der ClientOrderId im Dictionary.
-                        if (!_statesByBrokerId.TryGetValue(trade.ClientOrderId, out state))
-                        {
-                            // Fall B: Order ist ein Edit (Cancel+Replace).
-                            // Der Swap der OrderId ist noch nicht passiert. Wir finden die Order 
-                            // aber über das Mapping, das auf die "alte" BrokerId zeigt!
-                            if (_clientToBroker.TryGetValue(trade.ClientOrderId, out var mappedBrokerId))
-                            {
-                                _statesByBrokerId.TryGetValue(mappedBrokerId, out state);
-                            }
-                        }
+                        _orderStateManager.TryGetValue(trade.ClientOrderId, out state);
+                        _orderStateManager.MapNewExchangeId(trade.ClientOrderId, trade.OrderId);
                     }
                 }
 
-                // Wenn sie nach beiden Versuchen immer noch null ist, 
+                // Wenn sie nach beiden Versuchen immer noch null ist,
                 // gehört der Trade definitiv nicht zu unserer Sitzung.
                 if (state == null)
                 {
@@ -525,10 +521,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 state.State = leanStatus == OrderStatus.Filled ? OrderLifeCycleState.Filled : OrderLifeCycleState.PartiallyFilled;
 
                 // Wenn der Trade die Order schließt, räumen wir ab.
+                // TryRemove bereinigt beide internen Dicts (_statesByClientId + _statesByExchangeId).
                 if (state.IsClosed)
                 {
-                    _statesByBrokerId.TryRemove(state.BrokerId, out _);
-                    _clientToBroker.TryRemove(state.ClientOrderId, out _);
+                    _orderStateManager.TryRemove(state.ClientOrderId, out _);
                 }
 
                 OnOrderEvent(new OrderEvent(state.Order, DateTime.UtcNow, new OrderFee(new CashAmount(fee, trade.FeeAsset ?? SettleAsset)))
@@ -548,27 +544,25 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 if (string.IsNullOrEmpty(o.OrderId)) continue;
 
                 // -------------------------------------------------------
-                // PLACING STATE: Instantaner Fill während PlaceOrder() 
+                // PLACING STATE: Instantaner Fill während PlaceOrder()
+                // Order liegt in _statesByClientId[clientOrderId], BrokerId = clientOrderId (temp).
                 // -------------------------------------------------------
                 if (!string.IsNullOrEmpty(o.ClientOrderId) &&
-                    _statesByBrokerId.TryGetValue(o.ClientOrderId, out var placingCandidate) &&
+                    _orderStateManager.TryGetValue(o.ClientOrderId, out var placingCandidate) &&
                     placingCandidate.State == OrderLifeCycleState.Placing &&
-                    !_statesByBrokerId.ContainsKey(o.OrderId))
+                    !_orderStateManager.TryGetByExchangeId(o.OrderId, out _))
                 {
-                    // 1. ZUERST State-Werte aktualisieren (verhindert Publication Race Condition)
-                    placingCandidate.BrokerId = o.OrderId;
+                    // 1. State-Properties aktualisieren
                     placingCandidate.State = OrderLifeCycleState.Submitted;
                     placingCandidate.LastUpdateUtc = DateTime.UtcNow;
 
-                    if (!placingCandidate.Order.BrokerId.Contains(o.OrderId))
-                        placingCandidate.Order.BrokerId.Add(o.OrderId);
-
-                    // 2. DANN unter dem neuen echten Key registrieren (Publizieren)
-                    _statesByBrokerId[o.OrderId] = placingCandidate;
-                    _clientToBroker[o.ClientOrderId] = o.OrderId;
-
-                    // 3. ERST JETZT den alten temp-Key sicher entfernen
-                    _statesByBrokerId.TryRemove(o.ClientOrderId, out _);
+                    // 2. Exchange-ID atomar im Manager eintragen:
+                    //    - entfernt temp clientOrderId aus _statesByExchangeId
+                    //    - setzt state.BrokerId = o.OrderId
+                    //    - trägt unter o.OrderId in _statesByExchangeId ein
+                    //    - ergänzt Order.BrokerId
+                    //    - _statesByClientId[o.ClientOrderId] bleibt unverändert
+                    _orderStateManager.MapNewExchangeId(o.ClientOrderId, o.OrderId);
 
                     Log.Trace($"{Name}.HandleOrderSocket: Placing→Submitted for {o.OrderId} via socket. Fill (if any) follows via trade socket.");
 
@@ -580,58 +574,52 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 // MODIFY / REPLACEMENT DETECTION (Cancel + Replace)
                 // -------------------------------------------------------
                 if (!string.IsNullOrEmpty(o.ClientOrderId) &&
-                    _clientToBroker.TryGetValue(o.ClientOrderId, out var oldBrokerId) &&
-                    oldBrokerId != o.OrderId)
+                    _orderStateManager.TryGetValue(o.ClientOrderId, out var existingState) &&
+                    existingState.BrokerId != o.OrderId)
                 {
-                    if (_statesByBrokerId.TryGetValue(oldBrokerId, out var existingState))
+                    // 🔥 THE ANTI-ZOMBIE GUARD 🔥
+                    // Verhindert Rückwärts-Swaps, falls das Cancel-Event der ALTEN Order
+                    // nach dem New-Event der NEUEN Order eintrifft.
+                    if (existingState.Order.BrokerId.Contains(o.OrderId))
                     {
-                        // 🔥 THE ANTI-ZOMBIE GUARD 🔥
-                        // Verhindert Rückwärts-Swaps, falls das Cancel-Event der ALTEN Order 
-                        // nach dem New-Event der NEUEN Order eintrifft.
-                        if (existingState.Order.BrokerId.Contains(o.OrderId))
+                        Log.Trace($"{Name}.HandleOrderSocket: Ignoring backwards swap to old ID {o.OrderId}.");
+                    }
+                    else
+                    {
+                        // 1. State-Properties aktualisieren
+                        existingState.LastUpdateUtc = DateTime.UtcNow;
+                        existingState.IsUpdatePending = false;
+
+                        // 2. Exchange-ID atomar tauschen:
+                        //    - entfernt alte BrokerId aus _statesByExchangeId
+                        //    - setzt state.BrokerId = o.OrderId
+                        //    - trägt unter o.OrderId in _statesByExchangeId ein
+                        //    - ergänzt Order.BrokerId
+                        //    - _statesByClientId[o.ClientOrderId] bleibt unverändert
+                        _orderStateManager.MapNewExchangeId(o.ClientOrderId, o.OrderId);
+
+                        OnOrderIdChangedEvent(new BrokerageOrderIdChangedEvent
                         {
-                            Log.Trace($"{Name}.HandleOrderSocket: Ignoring backwards swap to old ID {o.OrderId}.");
-                        }
-                        else
-                        {
-                            // 1. ZUERST State-Werte aktualisieren (verhindert Publication Race Condition)
-                            existingState.BrokerId = o.OrderId;
-                            existingState.LastUpdateUtc = DateTime.UtcNow;
-                            existingState.IsUpdatePending = false;
+                            OrderId = existingState.Order.Id,
+                            BrokerId = existingState.Order.BrokerId
+                        });
 
-                            if (!existingState.Order.BrokerId.Contains(o.OrderId))
-                                existingState.Order.BrokerId.Add(o.OrderId);
-
-                            // 2. DANN den neuen Key setzen (Publizieren)
-                            _statesByBrokerId[o.OrderId] = existingState;
-                            _clientToBroker[o.ClientOrderId] = o.OrderId;
-
-                            // 3. ERST JETZT den alten Key sicher abräumen
-                            _statesByBrokerId.TryRemove(oldBrokerId, out _);
-
-                            OnOrderIdChangedEvent(new BrokerageOrderIdChangedEvent
-                            {
-                                OrderId = existingState.Order.Id,
-                                BrokerId = existingState.Order.BrokerId
-                            });
-
-                            Log.Trace($"{Name}.HandleOrderSocket: Modify mapped via Socket | Old: {oldBrokerId} → New: {o.OrderId}");
-                        }
+                        Log.Trace($"{Name}.HandleOrderSocket: Modify mapped via Socket | Old: {existingState.BrokerId} → New: {o.OrderId}");
                     }
                 }
 
                 // -------------------------------------------------------
                 // NORMAL STATUS UPDATE
                 // -------------------------------------------------------
-                if (_statesByBrokerId.TryGetValue(o.OrderId, out var state))
+                if (_orderStateManager.TryGetByExchangeId(o.OrderId, out var state))
                 {
                     state.LastUpdateUtc = DateTime.UtcNow;
                     var absFilled = o.QuantityFilled?.QuantityInBaseAsset ?? 0m;
                     var leanStatus = MapStatus(o.Status, absFilled);
 
                     // 🔥 DEIN FIX: Wir entmachten den Order-Socket für Fills! 🔥
-                    // Wenn die Börse über den Order-Stream "Filled" oder "PartiallyFilled" meldet, 
-                    // ignorieren wir das hier komplett. Wir WARTEN auf den Trade-Socket, 
+                    // Wenn die Börse über den Order-Stream "Filled" oder "PartiallyFilled" meldet,
+                    // ignorieren wir das hier komplett. Wir WARTEN auf den Trade-Socket,
                     // denn nur der hat die genauen Ausführungspreise und Gebühren!
                     if (leanStatus == OrderStatus.Filled || leanStatus == OrderStatus.PartiallyFilled)
                     {
@@ -642,7 +630,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         continue;
                     }
 
-                    // Stornos und Ablehnungen behandeln wir weiterhin hier, 
+                    // Stornos und Ablehnungen behandeln wir weiterhin hier,
                     // da diese keine Trade-Events generieren.
                     if (leanStatus is OrderStatus.Canceled or OrderStatus.Invalid)
                     {
@@ -653,8 +641,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         }
 
                         state.State = OrderLifeCycleState.Canceled;
-                        _statesByBrokerId.TryRemove(state.BrokerId, out _);
-                        _clientToBroker.TryRemove(state.ClientOrderId, out _);
+                        // TryRemove bereinigt beide internen Dicts.
+                        _orderStateManager.TryRemove(state.ClientOrderId, out _);
 
                         OnOrderEvent(new OrderEvent(state.Order, DateTime.UtcNow, OrderFee.Zero)
                         {
@@ -663,7 +651,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         });
                     }
                 }
-
             }
         }
 
@@ -689,10 +676,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         .GroupBy(x => x.OrderId)
                         .ToDictionary(g => g.Key, g => g.First());
 
-                    foreach (var kv in _statesByBrokerId.ToArray())
+                    foreach (var state in _orderStateManager.GetAllStates().ToArray())
                     {
-                        var brokerId = kv.Key;
-                        var state = kv.Value;
+                        // Skip orders still in Placing phase – they have no real exchange ID yet.
+                        // The REST call hasn't returned; no point querying the exchange for a temp ID.
+                        if (state.State == OrderLifeCycleState.Placing) continue;
+
+                        var brokerId = state.BrokerId;
 
                         var updateStillPending = state.IsUpdatePending &&
                             (DateTime.UtcNow - state.LastUpdateUtc).TotalSeconds < 10;
@@ -715,11 +705,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                         var brokerOrder = statusCheck.Data;
 
-                        // SAFE REMOVE
-                        if (!_statesByBrokerId.TryRemove(brokerId, out var removedState))
+                        // SAFE REMOVE via ClientOrderId (bereinigt beide internen Dicts).
+                        if (!_orderStateManager.TryRemove(state.ClientOrderId, out var removedState))
                             continue;
-
-                        _clientToBroker.TryRemove(removedState.ClientOrderId, out _);
 
                         // -----------------------------
                         // CASE 1: FILLED
@@ -756,9 +744,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         // -----------------------------
                         else if (brokerOrder.Status == SharedOrderStatus.Open)
                         {
+                            // Re-register: TryAdd indexes by both ClientOrderId and BrokerId (exchange ID).
                             removedState.LastUpdateUtc = DateTime.UtcNow;
-                            _statesByBrokerId[brokerId] = removedState;
-                            _clientToBroker[removedState.ClientOrderId] = brokerId;
+                            _orderStateManager.TryAdd(removedState.ClientOrderId, removedState);
                             Log.Trace($"{Name}.ReconcileLoop: Order {brokerId} still open on exchange, re-registered.");
                         }
                         // -----------------------------
