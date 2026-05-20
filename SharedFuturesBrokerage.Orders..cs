@@ -470,16 +470,51 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         {
             foreach (var trade in update.Data)
             {
-                if (string.IsNullOrEmpty(trade.OrderId) || !_statesByBrokerId.TryGetValue(trade.OrderId, out var state))
-                    continue;
+                if (string.IsNullOrEmpty(trade.OrderId)) continue;
 
+                OrderState state = null;
+
+                // =======================================================
+                // 1. VERSUCH: Klassisch über die Exchange OrderId
+                // =======================================================
+                if (!_statesByBrokerId.TryGetValue(trade.OrderId, out state))
+                {
+                    // =======================================================
+                    // 2. VERSUCH: Der "Instant-Fill" Fallback über ClientOrderId
+                    // =======================================================
+                    if (!string.IsNullOrEmpty(trade.ClientOrderId))
+                    {
+                        // Fall A: Order ist noch im Placing-Status. 
+                        // Hier liegt sie temporär direkt unter der ClientOrderId im Dictionary.
+                        if (!_statesByBrokerId.TryGetValue(trade.ClientOrderId, out state))
+                        {
+                            // Fall B: Order ist ein Edit (Cancel+Replace).
+                            // Der Swap der OrderId ist noch nicht passiert. Wir finden die Order 
+                            // aber über das Mapping, das auf die "alte" BrokerId zeigt!
+                            if (_clientToBroker.TryGetValue(trade.ClientOrderId, out var mappedBrokerId))
+                            {
+                                _statesByBrokerId.TryGetValue(mappedBrokerId, out state);
+                            }
+                        }
+                    }
+                }
+
+                // Wenn sie nach beiden Versuchen immer noch null ist, 
+                // gehört der Trade definitiv nicht zu unserer Sitzung.
+                if (state == null)
+                {
+                    Log.Trace($"{Name}.HandleUserTradeSocket: Ignoring trade {trade.OrderId}. Neither OrderId nor ClientOrderId {trade.ClientOrderId} found.");
+                    continue;
+                }
+
+                // =======================================================
+                // TRADE VERARBEITEN (Da 'state' eine Referenz ist, updaten wir das richtige Objekt!)
+                // =======================================================
                 var sign = trade.Side == SharedOrderSide.Buy ? 1m : -1m;
                 var signedFill = trade.Quantity * sign;
                 var fee = trade.Fee ?? 0m;
 
                 state.FilledQuantity += signedFill;
-
-                // FIX 3: Tracken der kumulierten Gebühren
                 state.CumulativeFeePaid += fee;
                 state.LastUpdateUtc = DateTime.UtcNow;
 
@@ -489,13 +524,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                 state.State = leanStatus == OrderStatus.Filled ? OrderLifeCycleState.Filled : OrderLifeCycleState.PartiallyFilled;
 
+                // Wenn der Trade die Order schließt, räumen wir ab.
                 if (state.IsClosed)
                 {
                     _statesByBrokerId.TryRemove(state.BrokerId, out _);
                     _clientToBroker.TryRemove(state.ClientOrderId, out _);
                 }
 
-                // Hier wird LEAN nur die Gebühr für genau DIESEN Teil-Fill belastet
                 OnOrderEvent(new OrderEvent(state.Order, DateTime.UtcNow, new OrderFee(new CashAmount(fee, trade.FeeAsset ?? SettleAsset)))
                 {
                     Status = leanStatus,
