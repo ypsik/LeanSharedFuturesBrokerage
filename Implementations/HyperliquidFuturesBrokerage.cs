@@ -311,7 +311,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
             Log.Trace($"{Name}: SPDB Fix for {symbol.Value} - TickSize: {tickSize} (Price: {oraclePrice})");
         }
-
+        /*
         protected override ExchangeParameters PlaceFuturesOrderExchangeParameters
         {
             get
@@ -321,8 +321,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                     parameters.AddValue(new ExchangeParameter("Hyperliquid", "vaultAddress", _vaultAdress));
                 return parameters;
             }
-        }
-        /*
+        }*/
+        
 
         protected override async Task<ExchangeWebResult<SharedId>> ExecutePlaceOrderAsync(PlaceFuturesOrderRequest request)
         {
@@ -350,7 +350,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                     res.As(new SharedId(res.Data.OrderId.ToString()))
                 );
         }
-        */
+        
         protected override async Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(Order order, string clientOrderId, decimal price, decimal quantity)
         {
             var ticker = NativeTicker(order.Symbol);

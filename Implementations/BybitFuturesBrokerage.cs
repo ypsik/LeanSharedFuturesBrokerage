@@ -101,7 +101,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         {
             get
             {
-                var parameters = new ExchangeParameters();
+                var parameters = base.PlaceFuturesOrderExchangeParameters;
                 parameters.AddValue(new ExchangeParameter("Bybit", "SettleAsset", SettleAsset));
                 return parameters;
             }
@@ -110,7 +110,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         {
             get
             {
-                var parameters = new ExchangeParameters();
+                var parameters = base.PlaceFuturesOrderExchangeParameters;
                 parameters.AddValue(new ExchangeParameter("Bybit", "category", "linear"));
                 parameters.AddValue(new ExchangeParameter("Bybit", "settleCoin", SettleAsset));
                 parameters.AddValue(new ExchangeParameter("Bybit", "SettleAsset", SettleAsset));
@@ -122,7 +122,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         {
             get
             {
-                var parameters = new ExchangeParameters();
+                var parameters = base.PlaceFuturesOrderExchangeParameters;
                 parameters.AddValue(new ExchangeParameter("Bybit", "category", "linear"));
                 return parameters;
             }
