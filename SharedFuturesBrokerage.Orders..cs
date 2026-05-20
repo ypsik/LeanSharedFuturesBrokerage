@@ -543,6 +543,18 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         {
             foreach (var o in update.Data)
             {
+                // =======================================================
+                // 🔥 RAW DIAGNOSTIC LOGGING 🔥
+                // Wir loggen exakt, was reinkommt, um das Rätselraten zu beenden.
+                // =======================================================
+                Log.Trace($"{Name}.HandleOrderSocket RAW PAYLOAD: " +
+                          $"OrderId='{o.OrderId}', " +
+                          $"ClientOrderId='{o.ClientOrderId}', " +
+                          $"Symbol='{o.Symbol}', " +
+                          $"Status='{o.Status}', " +
+                          $"Qty='{o.OrderQuantity?.QuantityInBaseAsset}', " +
+                          $"Price='{o.OrderPrice}'");
+
                 if (string.IsNullOrEmpty(o.OrderId)) continue;
 
                 // -------------------------------------------------------
