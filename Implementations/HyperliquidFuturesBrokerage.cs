@@ -317,7 +317,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             get
             {
                 var parameters = base.PlaceFuturesOrderExchangeParameters;
-                if (String.IsNullOrEmpty(_vaultAdress))
+                if (!String.IsNullOrEmpty(_vaultAdress))
                     parameters.AddValue(new ExchangeParameter("Hyperliquid", "vaultAddress", _vaultAdress));
                 return parameters;
             }
