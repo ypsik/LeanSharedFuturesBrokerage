@@ -490,8 +490,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     // =======================================================
                     if (!string.IsNullOrEmpty(trade.ClientOrderId))
                     {
-                        _orderStateManager.TryGetValue(trade.ClientOrderId, out state);
-                        _orderStateManager.MapNewExchangeId(trade.ClientOrderId, trade.OrderId);
+                        if (_orderStateManager.TryGetValue(trade.ClientOrderId, out state))
+                        {
+                            _orderStateManager.MapNewExchangeId(trade.ClientOrderId, trade.OrderId);
+                        }
                     }
                 }
 
