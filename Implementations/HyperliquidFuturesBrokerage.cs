@@ -228,10 +228,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                                     }
 
                                 }
-                                DateTime timeStamp = update.Data.Max(f => f?.Timestamp ?? DateTime.MinValue);
-                                if (timeStamp > connectTime)
+                                if (update.Data.Any())
                                 {
-                                    connectTime = timeStamp;
+                                    DateTime timeStamp = update.Data.Max(f => f?.Timestamp ?? DateTime.MinValue);
+                                    if (timeStamp > connectTime)
+                                    {
+                                        connectTime = timeStamp;
+                                    }
                                 }
                             }));
 
