@@ -570,6 +570,40 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         private void HandleOrderSocket(DataEvent<SharedFuturesOrder[]> update)
         {
+            // =======================================================
+            // 🔥 HYPERLIQUID BATCH-FIX: Cancel & Replace Payload verketten
+            // =======================================================
+            var newOrderUpdates = update.Data.Where(o =>
+                (o.Status == SharedOrderStatus.Open ||
+                 o.Status == SharedOrderStatus.Filled) &&
+                string.IsNullOrEmpty(o.ClientOrderId)).ToList();
+
+            var cancelUpdates = update.Data.Where(o => o.Status == SharedOrderStatus.Canceled).ToList();
+
+            if (newOrderUpdates.Any() && cancelUpdates.Any())
+            {
+                Log.Trace($"{Name}: Apply update match");
+                foreach (var newPayload in newOrderUpdates)
+                {
+                    // Wir suchen das passende Cancel-Event der alten Order im SELBEN Batch
+                    var match = cancelUpdates.FirstOrDefault(c =>
+                        c.Symbol == newPayload.Symbol &&
+                        c.UpdateTime == newPayload.UpdateTime);
+
+                    if (match != null)
+                    {
+                        // Die alte Exchange-ID im State-Manager nachschlagen
+                        if (_orderStateManager.TryGetByExchangeId(match.OrderId, out var state))
+                        {
+                            Log.Trace($"{Name}: Multi-Update Match! Injecting ClientOrderId {state.ClientOrderId} (from old ID {match.OrderId}) into new {newPayload.Status} Order {newPayload.OrderId}");
+
+                            // Die Master-Client-ID in das nackte Event (Open/Filled/PartiallyFilled) injizieren!
+                            newPayload.ClientOrderId = state.ClientOrderId;
+                        }
+                    }
+                }
+            }
+
             foreach (var o in update.Data)
             {
                 // =======================================================
