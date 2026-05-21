@@ -192,7 +192,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 Order = order,
                 OriginalQuantity = executionQuantity,
                 FilledQuantity = 0m,
-                BrokerId = clientOrderId, // temp key bis echte Exchange-ID bekannt
                 ClientOrderId = clientOrderId,
                 State = OrderLifeCycleState.Placing,
                 LastUpdateUtc = DateTime.UtcNow
