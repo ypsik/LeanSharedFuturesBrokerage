@@ -571,48 +571,51 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         private void HandleOrderSocket(DataEvent<SharedFuturesOrder[]> update)
         {
             // =======================================================
-            // 🔥 HYPERLIQUID BATCH-FIX: Cancel & Replace Payload verketten
+            // 🔥 UNZERSTÖRBARER BATCH-FIX: Unabhängig von ClientOrderId
             // =======================================================
             var newOrderUpdates = update.Data.Where(o =>
-                (o.Status == SharedOrderStatus.Open ||
-                 o.Status == SharedOrderStatus.Filled) &&
-                string.IsNullOrEmpty(o.ClientOrderId)).ToList();
+                o.Status == SharedOrderStatus.Open ||
+                o.Status == SharedOrderStatus.Filled).ToList();
 
             var cancelUpdates = update.Data.Where(o => o.Status == SharedOrderStatus.Canceled).ToList();
 
-            // 🔥 DEIN ANSATZ: Sammelbecken für Update-Stornos, die wir killen wollen
             var cancelsToDrop = new HashSet<SharedFuturesOrder>();
 
             if (newOrderUpdates.Any() && cancelUpdates.Any())
             {
-                Log.Trace($"{Name}: Apply update match");
                 foreach (var newPayload in newOrderUpdates)
                 {
-                    // Wir suchen das passende Cancel-Event der alten Order im SELBEN Batch
+                    // Match rein über Symbol und exakte Exchange-Zeitstempel
                     var match = cancelUpdates.FirstOrDefault(c =>
                         c.Symbol == newPayload.Symbol &&
                         c.UpdateTime == newPayload.UpdateTime);
 
                     if (match != null)
                     {
-                        // Die alte Exchange-ID im State-Manager nachschlagen
-                        if (_orderStateManager.TryGetByExchangeId(match.OrderId, out var state))
+                        // Fall A: NewPayload hat KEINE ClientOrderId (Der HL-Standardfehler)
+                        // -> Wir holen sie uns von der alten ID aus dem State-Manager
+                        if (string.IsNullOrEmpty(newPayload.ClientOrderId))
                         {
-                            Log.Trace($"{Name}: Multi-Update Match! Injecting ClientOrderId {state.ClientOrderId} (from old ID {match.OrderId}) into new {newPayload.Status} Order {newPayload.OrderId}");
-
-                            // 1. Die Master-Client-ID in das nackte Event injizieren
-                            newPayload.ClientOrderId = state.ClientOrderId;
-
-                            // 2. Das verbrauchte Cancel-Event auf die Abschussliste setzen!
-                            cancelsToDrop.Add(match);
+                            if (_orderStateManager.TryGetByExchangeId(match.OrderId, out var state))
+                            {
+                                Log.Trace($"{Name}: Multi-Update Match (Naked)! Injecting ClientOrderId {state.ClientOrderId} into new {newPayload.Status} Order {newPayload.OrderId}");
+                                newPayload.ClientOrderId = state.ClientOrderId;
+                                cancelsToDrop.Add(match); // Altes Cancel vernichten
+                            }
+                        }
+                        // Fall B: NewPayload HAT bereits eine ClientOrderId
+                        // -> Perfekt, aber wir müssen das alte Cancel TROTZDEM vernichten, 
+                        // damit es in der Schleife keinen Schaden anrichtet!
+                        else
+                        {
+                            Log.Trace($"{Name}: Multi-Update Match (Identified)! Dropping redundant Cancel for old ID {match.OrderId}");
+                            cancelsToDrop.Add(match); // Altes Cancel trotzdem vernichten!
                         }
                     }
                 }
             }
 
-            // 🔥 Vor der Schleife die toten Update-Cancels rausfiltern!
             var cleanPayload = update.Data.Where(o => !cancelsToDrop.Contains(o));
-
             foreach (var o in cleanPayload)
             {
                 // =======================================================
