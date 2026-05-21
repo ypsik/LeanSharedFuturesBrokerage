@@ -472,6 +472,17 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         {
             foreach (var trade in update.Data)
             {
+                // =======================================================
+                // 🔥 RAW DIAGNOSTIC LOGGING 🔥
+                // =======================================================
+                Log.Trace($"{Name}.HandleOrderSocket RAW PAYLOAD: " +
+                          $"UpdateTimeTicks='{trade.Timestamp.Ticks}', " +
+                          $"OrderId='{trade.OrderId}', " +
+                          $"ClientOrderId='{trade.ClientOrderId}', " +
+                          $"Symbol='{trade.Symbol}', " +
+                          $"Qty='{trade.Quantity}', " +
+                          $"Price='{trade.Price}'");
+
                 if (string.IsNullOrEmpty(trade.OrderId)) continue;
 
                 OrderState state = null;
@@ -545,7 +556,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             {
                 // =======================================================
                 // 🔥 RAW DIAGNOSTIC LOGGING 🔥
-                // Wir loggen exakt, was reinkommt, um das Rätselraten zu beenden.
                 // =======================================================
                 Log.Trace($"{Name}.HandleOrderSocket RAW PAYLOAD: " +
                           $"UpdateTimeTicks='{o.UpdateTime?.Ticks}', " +

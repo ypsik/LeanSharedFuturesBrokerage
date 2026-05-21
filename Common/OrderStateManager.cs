@@ -73,23 +73,33 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.Common
         /// </summary>
         public void MapNewExchangeId(string clientId, string newExchangeId)
         {
+            if (string.IsNullOrEmpty(newExchangeId)) return;
+
             if (_statesByClientId.TryGetValue(clientId, out var state))
             {
-                // Alte Exchange-ID aus dem versteckten Index löschen
-                if (!string.IsNullOrEmpty(state.BrokerId))
+                // ATOMARE SPERRE
+                lock (state)
                 {
-                    _statesByExchangeId.TryRemove(state.BrokerId, out _);
-                }
+                    // 🔥 DOUBLE-CHECKED LOCKING 🔥
+                    // War ein anderer Thread schneller, während wir an der lock-Tür warten mussten?
+                    if (state.BrokerId == newExchangeId)
+                    {
+                        // Arbeit ist bereits erledigt! Nichts weiter zu tun.
+                        return;
+                    }
 
-                // Neue IDs setzen
-                state.BrokerId = newExchangeId;
-                if (!state.Order.BrokerId.Contains(newExchangeId))
-                {
-                    state.Order.BrokerId.Add(newExchangeId);
-                }
+                    // 1. Die primäre aktive ID im State aktualisieren
+                    state.BrokerId = newExchangeId;
 
-                // In den versteckten Index eintragen
-                _statesByExchangeId[newExchangeId] = state;
+                    // 2. LEAN Liste synchronisieren
+                    if (!state.Order.BrokerId.Contains(newExchangeId))
+                    {
+                        state.Order.BrokerId.Add(newExchangeId);
+                    }
+
+                    // 3. Den neuen Key im Index registrieren
+                    _statesByExchangeId[newExchangeId] = state;
+                }
             }
         }
 
