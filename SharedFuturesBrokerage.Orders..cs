@@ -1,4 +1,5 @@
-﻿using CryptoExchange.Net.Objects;
+﻿using Accord.Math.Distances;
+using CryptoExchange.Net.Objects;
 using CryptoExchange.Net.Objects.Sockets;
 using CryptoExchange.Net.SharedApis;
 using QuantConnect;
@@ -14,6 +15,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.ConstrainedExecution;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -485,7 +487,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                 if (string.IsNullOrEmpty(trade.OrderId)) continue;
 
-                OrderState state = null;
+                OrderState? state = null;
 
                 // =======================================================
                 // 1. VERSUCH: O(1) Lookup via Exchange-ID (Hidden Index)
@@ -508,12 +510,29 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     }
                 }
 
-                // Wenn sie nach beiden Versuchen immer noch null ist,
-                // gehört der Trade definitiv nicht zu unserer Sitzung.
                 if (state == null)
                 {
-                    Log.Trace($"{Name}.HandleUserTradeSocket: Ignoring trade {trade.OrderId}. Neither OrderId nor ClientOrderId {trade.ClientOrderId} found.");
-                    continue;
+                    // 🔥 DIE "NO-BUFFER" LÖSUNG: Heuristisches Suchen der echten Order!
+                    // Wir suchen eine Order, die gerade platziert wurde und exakt zu Symbol und Menge passt.
+                    state = _orderStateManager.GetAllStates().FirstOrDefault(s =>
+                        (s.State == OrderLifeCycleState.Placing || s.State == OrderLifeCycleState.Submitted) &&
+                        s.Order.Symbol.Value == trade.Symbol &&
+                        Math.Abs(s.Order.Quantity) == Math.Abs(trade.Quantity) &&
+                        (s.Order.Direction == (trade.Side == SharedOrderSide.Buy ? OrderDirection.Buy : OrderDirection.Sell)) &&
+                        string.IsNullOrEmpty(s.BrokerId));
+
+                    if (state != null)
+                    {
+                        Log.Trace($"{Name}: Heuristic match successful! Linking unknown Trade {trade.OrderId} to ClientOrder {state.ClientOrderId}");
+
+                        // Der Trade-Socket mappt die ID! Er ist schneller als der Order-Socket.
+                        _orderStateManager.MapNewExchangeId(state.ClientOrderId, trade.OrderId);
+                    }
+                    else
+                    {
+                        Log.Trace($"{Name}.HandleUserTradeSocket: Ignoring trade {trade.OrderId}. Neither OrderId nor ClientOrderId {trade.ClientOrderId} found.");
+                        continue;
+                    }
                 }
 
                 // =======================================================
