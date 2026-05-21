@@ -511,26 +511,37 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                 if (state == null)
                 {
-                    // 🔥 DIE "NO-BUFFER" LÖSUNG: Heuristisches Suchen der echten Order!
-                    // Wir suchen eine Order, die gerade platziert wurde und exakt zu Symbol und Menge passt.
-                    state = _orderStateManager.GetAllStates().FirstOrDefault(s =>
-                        (s.State == OrderLifeCycleState.Placing || s.State == OrderLifeCycleState.Submitted) &&
-                        s.Order.Symbol.Value == trade.Symbol &&
-                        Math.Abs(s.Order.Quantity) == Math.Abs(trade.Quantity) &&
-                        (s.Order.Direction == (trade.Side == SharedOrderSide.Buy ? OrderDirection.Buy : OrderDirection.Sell)) &&
-                        string.IsNullOrEmpty(s.BrokerId));
-
-                    if (state != null)
+                    if (state == null)
                     {
-                        Log.Trace($"{Name}: Heuristic match successful! Linking unknown Trade {trade.OrderId} to ClientOrder {state.ClientOrderId}");
+                        state = _orderStateManager.GetAllStates().FirstOrDefault(s =>
+                            s.Order.Symbol.Value == trade.Symbol &&
+                            (s.Order.Direction == (trade.Side == SharedOrderSide.Buy ? OrderDirection.Buy : OrderDirection.Sell)) &&
+                            (
+                                // Fall A: Reguläre neue Order im Transit (BrokerId ist leer)
+                                // JEDER erste Teil-Fill (kleiner oder gleich der Gesamtmenge) wird akzeptiert!
+                                ((s.State == OrderLifeCycleState.Placing || s.State == OrderLifeCycleState.Submitted) &&
+                                 string.IsNullOrEmpty(s.BrokerId) &&
+                                 Math.Abs(trade.Quantity) <= Math.Abs(s.Order.Quantity))
+                                ||
+                                // Fall B: Schwebendes Update (IsUpdatePending ist aktiv)
+                                // JEDER Fill (egal wie groß) wird geschluckt, da Kontext eindeutig!
+                                (s.IsUpdatePending &&
+                                 (s.State == OrderLifeCycleState.Open || s.State == OrderLifeCycleState.PartiallyFilled))
+                            ));
 
-                        // Der Trade-Socket mappt die ID! Er ist schneller als der Order-Socket.
-                        _orderStateManager.MapNewExchangeId(state.ClientOrderId, trade.OrderId);
-                    }
-                    else
-                    {
-                        Log.Trace($"{Name}.HandleUserTradeSocket: Ignoring trade {trade.OrderId}. Neither OrderId nor ClientOrderId {trade.ClientOrderId} found.");
-                        continue;
+                        if (state != null)
+                        {
+                            Log.Trace($"{Name}: Heuristic match successful! Linking unknown Trade {trade.OrderId} (Qty: {trade.Quantity}) to ClientOrder {state.ClientOrderId}");
+
+                            // Der Trade-Socket mappt die neue ID sofort! 
+                            // Folge-Teil-Fills laufen ab jetzt instantan über den O(1) Exchange-ID Index.
+                            _orderStateManager.MapNewExchangeId(state.ClientOrderId, trade.OrderId);
+                        }
+                        else
+                        {
+                            Log.Trace($"{Name}.HandleUserTradeSocket: Ignoring trade {trade.OrderId}. Neither OrderId nor ClientOrderId {trade.ClientOrderId} found.");
+                            continue;
+                        }
                     }
                 }
 
