@@ -227,10 +227,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                                         OnMessage(new FundingBrokerageMessageEvent(SettleAsset, fundingsRecord.Usdc));
                                     }
 
-                                    if (fundingsRecord.Timestamp > connectTime)
-                                    {
-                                        connectTime = fundingsRecord.Timestamp.Value;
-                                    }
+                                }
+                                DateTime timeStamp = update.Data.Max(f => f?.Timestamp ?? DateTime.MinValue);
+                                if (timeStamp > connectTime)
+                                {
+                                    connectTime = timeStamp;
                                 }
                             }));
 
