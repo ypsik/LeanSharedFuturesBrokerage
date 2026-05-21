@@ -548,7 +548,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 // Wir loggen exakt, was reinkommt, um das Rätselraten zu beenden.
                 // =======================================================
                 Log.Trace($"{Name}.HandleOrderSocket RAW PAYLOAD: " +
-                         $"UpdateTimeTicks='{o.UpdateTime?.Ticks}', " +
+                          $"UpdateTimeTicks='{o.UpdateTime?.Ticks}', " +
                           $"OrderId='{o.OrderId}', " +
                           $"ClientOrderId='{o.ClientOrderId}', " +
                           $"Symbol='{o.Symbol}', " +
@@ -792,7 +792,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         protected virtual string GenerateClientId(int orderId)
         {
-            return $"0x{((ulong)(_startTime.Ticks + orderId)).ToString("x16").PadLeft(32, '0')}";
+            return $"0x{((ulong)(StartTime.Ticks + orderId)).ToString("x16").PadLeft(32, '0')}";
         }
 
         protected virtual string NativeTicker(Symbol symbol) => symbol.Value;

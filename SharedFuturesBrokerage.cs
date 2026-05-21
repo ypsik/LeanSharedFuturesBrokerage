@@ -52,7 +52,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         protected static readonly RateGate _subRateGate = new RateGate(3, TimeSpan.FromSeconds(1));
 
-        protected static readonly DateTime _startTime = DateTime.UtcNow;
+        private static DateTime _startTime = DateTime.UtcNow;
+        protected static DateTime StartTime => _startTime;
 
         protected virtual string SettleAsset => "USDT";
 

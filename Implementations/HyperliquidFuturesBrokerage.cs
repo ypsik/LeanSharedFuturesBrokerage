@@ -212,25 +212,24 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 if (_fundingUpdateSubscription == null && _socketClient != null)
                 {
                     _subRateGate.WaitToProceed();
-                    bool isFirstFundingMessage = true;
+                    DateTime connectTime = StartTime;
                     var sub = RunSync(() =>
                             _socketClient.FuturesApi.Account.SubscribeToUserFundingUpdatesAsync(null,
                             update =>
                             {
                                 if (update?.Data == null) return;
 
-                                if (isFirstFundingMessage) 
-                                {
-                                    isFirstFundingMessage = false;
-                                    return;
-                                }
-
-                                foreach (var fundingsRecord in update.Data.Where(f => f != null))
+                                foreach (var fundingsRecord in update.Data.Where(f => f != null && (f.Timestamp ?? DateTime.MinValue) > connectTime))
                                 {
                                     if (_algorithm?.Portfolio?.CashBook != null)
                                     {
                                         _algorithm.Portfolio.CashBook[SettleAsset].AddAmount(fundingsRecord.Usdc);
                                         OnMessage(new FundingBrokerageMessageEvent(SettleAsset, fundingsRecord.Usdc));
+                                    }
+
+                                    if (fundingsRecord.Timestamp > connectTime)
+                                    {
+                                        connectTime = fundingsRecord.Timestamp.Value;
                                     }
                                 }
                             }));
@@ -238,7 +237,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                     SetupSubscriptionEvents(
                                     sub.Success,
                                     sub.Data,
-                                    (state) => _fundingUpdateConnected = state,
+                                    (state) => { _fundingUpdateConnected = state; },
                                     "Funding updates",
                                     "Funding updates subscription failed",
                                     sub.Error?.ToString()
@@ -253,6 +252,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 base.Connect();
             }
         }
+
         public override void Disconnect()
         {
             RunSync(() => _fundingUpdateSubscription?.CloseAsync() ?? Task.CompletedTask);
