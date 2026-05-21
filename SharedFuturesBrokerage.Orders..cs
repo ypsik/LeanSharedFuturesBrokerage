@@ -580,6 +580,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
             var cancelUpdates = update.Data.Where(o => o.Status == SharedOrderStatus.Canceled).ToList();
 
+            // 🔥 DEIN ANSATZ: Sammelbecken für Update-Stornos, die wir killen wollen
+            var cancelsToDrop = new HashSet<SharedFuturesOrder>();
+
             if (newOrderUpdates.Any() && cancelUpdates.Any())
             {
                 Log.Trace($"{Name}: Apply update match");
@@ -597,14 +600,20 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         {
                             Log.Trace($"{Name}: Multi-Update Match! Injecting ClientOrderId {state.ClientOrderId} (from old ID {match.OrderId}) into new {newPayload.Status} Order {newPayload.OrderId}");
 
-                            // Die Master-Client-ID in das nackte Event (Open/Filled/PartiallyFilled) injizieren!
+                            // 1. Die Master-Client-ID in das nackte Event injizieren
                             newPayload.ClientOrderId = state.ClientOrderId;
+
+                            // 2. Das verbrauchte Cancel-Event auf die Abschussliste setzen!
+                            cancelsToDrop.Add(match);
                         }
                     }
                 }
             }
 
-            foreach (var o in update.Data)
+            // 🔥 Vor der Schleife die toten Update-Cancels rausfiltern!
+            var cleanPayload = update.Data.Where(o => !cancelsToDrop.Contains(o));
+
+            foreach (var o in cleanPayload)
             {
                 // =======================================================
                 // 🔥 RAW DIAGNOSTIC LOGGING 🔥

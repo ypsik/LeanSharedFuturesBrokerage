@@ -37,12 +37,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.Common
             return false;
         }
 
-        public bool TryGetValue(string clientId, out OrderState state)
+        public bool TryGetValue(string clientId, out OrderState? state)
         {
             return _statesByClientId.TryGetValue(clientId, out state);
         }
 
-        public bool TryRemove(string clientId, out OrderState state)
+        public bool TryRemove(string clientId, out OrderState? state)
         {
             if (_statesByClientId.TryRemove(clientId, out state))
             {
