@@ -283,22 +283,33 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
             var clientOrderId = GenerateClientId(order.Id);
 
-            // Direct lookup via clientOrderId – no two-step _clientToBroker detour needed.
             if (_orderStateManager.TryGetValue(clientOrderId, out var state))
             {
-                // 1. PRIORITY: explicit LEAN update request
+                // 🔥 FIX 1: DIE MENGEN-FALLE (Dein Screenshot-Beweis)
+                // Hyperliquid's modify platziert eine NEUE Order.
+                // Wir MÜSSEN die Restmenge senden, nicht das alte Gesamt-Ziel!
                 if (lastUpdate?.Quantity.HasValue == true)
                 {
-                    quantity = lastUpdate.Quantity.Value;
+                    var newTotal = lastUpdate.Quantity.Value;
+                    var sign = newTotal > 0 ? 1m : -1m;
+                    quantity = (Math.Abs(newTotal) - Math.Abs(state.FilledQuantity)) * sign;
                 }
                 else
                 {
-                    // 2. FALLBACK: Alter Intent (LEAN semantics)
-                    // Wenn kein neues Quantity-Ziel gesendet wurde, bleibt das ursprüngliche Ziel erhalten!
-                    quantity = state.OriginalQuantity;
+                    // Wenn LEAN nur den Preis ändert, behalten wir die exakte Restmenge!
+                    quantity = state.Remaining;
                 }
 
-                // FIX: Setze das Flag, bevor der API-Call rausgeht
+                // 🔥 FIX 2: DIE ALTE-ID-FALLE (Dein Log-Beweis)
+                // LEAN hat eine Historie aller IDs. Wir löschen die Liste und 
+                // erzwingen die aktive ID, damit der REST-Client niemals die falsche nimmt!
+                if (!string.IsNullOrEmpty(state.BrokerId))
+                {
+                    order.BrokerId.Clear();
+                    order.BrokerId.Add(state.BrokerId);
+                }
+
+                // Flag setzen, bevor der Call rausgeht
                 state.IsUpdatePending = true;
             }
 
@@ -324,17 +335,31 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 }
             }
 
-            var res = RunSync(() => ExecuteUpdateOrderAsync(order, clientOrderId, price, quantity));
+            // Call an die Börse mit der exakten Restmenge und isolierten ID
+            var res = RunSync(() => ExecuteUpdateOrderAsync(order, price, quantity));
 
             if (res?.Success != true)
             {
-                // Flag zurücksetzen, wenn der Call hart fehlschlägt
                 if (_orderStateManager.TryGetValue(clientOrderId, out var errorState))
                 {
                     errorState.IsUpdatePending = false;
                 }
 
                 var errorMsg = res?.Error?.ToString() ?? "Unknown exchange error";
+
+                if (errorMsg.Contains("canceled or filled") || errorMsg.Contains("Cannot modify"))
+                {
+                    Log.Trace($"{Name}.UpdateOrder: Race condition detected. Order was already filled or canceled on exchange. Suppressing LEAN ghost event.");
+
+                    var terminalBrokerId = order.BrokerId.LastOrDefault();
+                    if (terminalBrokerId != null)
+                    {
+                        _ = Task.Run(() => ReconcileOrderImmediateAsync(terminalBrokerId, order));
+                    }
+
+                    return true;
+                }
+
                 Log.Error($"{Name}.UpdateOrder({order.Symbol.Value}): {errorMsg}");
 
                 OnMessage(new BrokerageMessageEvent(
@@ -342,38 +367,17 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     "UpdateOrder",
                     errorMsg));
 
-                // TERMINAL ERROR DETECTION:
-                // Wenn die Exchange explizit sagt die Order ist bereits closed (z.B. HL: "Cannot modify canceled or filled order"),
-                // sofort den echten Status holen und das korrekte Event feuern – nicht auf den nächsten ReconcileLoop warten.
-                if (IsTerminalUpdateError(errorMsg))
-                {
-                    var terminalBrokerId = order.BrokerId.LastOrDefault();
-                    if (terminalBrokerId != null)
-                    {
-                        Log.Trace($"{Name}.UpdateOrder: Terminal error detected for {order.Symbol.Value} ({terminalBrokerId}). Triggering immediate status check.");
-                        _ = Task.Run(() => ReconcileOrderImmediateAsync(terminalBrokerId, order));
-                    }
-                }
-
                 return false;
             }
 
-            // =========================================================
-            // 🔥 CRITICAL STATE SYNC FIX (LEAN CONSISTENCY)
-            // =========================================================
             if (_orderStateManager.TryGetValue(clientOrderId, out var activeState))
             {
-                // Update reflects new INTENT, not execution
-                activeState.OriginalQuantity = quantity;
-                activeState.LastUpdateUtc = DateTime.UtcNow;
-
-                // safety: if order is already partially filled,
-                // ensure remaining stays consistent
-                if (Math.Abs(activeState.FilledQuantity) > 0)
+                // OriginalQuantity im State ist IMMER das LEAN-Gesamtziel!
+                if (lastUpdate?.Quantity.HasValue == true)
                 {
-                    // nothing to do here except keep consistency
-                    // Remaining is derived anyway
+                    activeState.OriginalQuantity = lastUpdate.Quantity.Value;
                 }
+                activeState.LastUpdateUtc = DateTime.UtcNow;
             }
 
             return true;
@@ -383,7 +387,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         protected virtual Task<ExchangeWebResult<SharedId>> ExecutePlaceOrderAsync(PlaceFuturesOrderRequest request)
             => _orderClient.PlaceFuturesOrderAsync(request);
 
-        protected virtual Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(Order order, string clientOrderId, decimal price, decimal quantity)
+        protected virtual Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(Order order, decimal price, decimal quantity)
             => Task.FromResult<ExchangeWebResult<SharedId>>(null);
 
         protected virtual ExchangeParameters CancelFuturesOrderExchangeParameters => new ExchangeParameters();
@@ -416,8 +420,17 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     return;
                 }
 
-                // Lookup via Exchange-ID, then remove via ClientOrderId (safe remove).
-                // Socket könnte in der Zwischenzeit abgeräumt haben.
+                var brokerOrder = statusCheck.Data;
+
+                // 🔥 FIX 3: DER RECONCILER-MORD 🔥
+                // Wenn die Order auf der Börse noch lebt, darf der Reconciler sie nicht anfassen!
+                if (brokerOrder.Status == SharedOrderStatus.Open)
+                {
+                    Log.Trace($"{Name}.ReconcileOrderImmediateAsync: Order {brokerId} is still OPEN on exchange. Reconciler stands down.");
+                    return;
+                }
+
+                // Ab hier wissen wir: Die Order ist wirklich tot (Terminal). Jetzt dürfen wir sie aus dem State löschen.
                 if (!_orderStateManager.TryGetByExchangeId(brokerId, out var removedState))
                 {
                     Log.Trace($"{Name}.ReconcileOrderImmediateAsync: State for {brokerId} already removed (socket beat us).");
@@ -425,8 +438,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 }
 
                 _orderStateManager.TryRemove(removedState.ClientOrderId, out _);
-
-                var brokerOrder = statusCheck.Data;
 
                 if (brokerOrder.Status == SharedOrderStatus.Filled)
                 {
@@ -464,7 +475,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 Log.Error($"{Name}.ReconcileOrderImmediateAsync Error for {brokerId}: {ex.Message}");
             }
         }
-
+        
         #endregion
 
         #region Socket / Reconcile
@@ -536,6 +547,17 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                             // Der Trade-Socket mappt die neue ID sofort! 
                             // Folge-Teil-Fills laufen ab jetzt instantan über den O(1) Exchange-ID Index.
                             _orderStateManager.MapNewExchangeId(state.ClientOrderId, trade.OrderId);
+
+                            if (state.IsUpdatePending)
+                            {
+                                var brokerId = state.Order.BrokerId;
+                                brokerId.Add(trade.Id);
+                                OnOrderIdChangedEvent(new BrokerageOrderIdChangedEvent
+                                {
+                                    OrderId = state.Order.Id,
+                                    BrokerId = brokerId
+                                });
+                            }
                         }
                         else
                         {
@@ -627,6 +649,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             }
 
             var cleanPayload = update.Data.Where(o => !cancelsToDrop.Contains(o));
+
             foreach (var o in cleanPayload)
             {
                 // =======================================================
@@ -687,6 +710,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     }
                     else
                     {
+                        var oldBrokerId = existingState.BrokerId;
+
                         // 1. State-Properties aktualisieren
                         existingState.LastUpdateUtc = DateTime.UtcNow;
                         existingState.IsUpdatePending = false;
@@ -699,40 +724,52 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         //    - _statesByClientId[o.ClientOrderId] bleibt unverändert
                         _orderStateManager.MapNewExchangeId(o.ClientOrderId, o.OrderId);
 
+                        var brokerid = existingState.Order.BrokerId;
+                        brokerid.Add(o.OrderId);
+
                         OnOrderIdChangedEvent(new BrokerageOrderIdChangedEvent
                         {
                             OrderId = existingState.Order.Id,
-                            BrokerId = existingState.Order.BrokerId
+                            BrokerId = brokerid
                         });
 
-                        Log.Trace($"{Name}.HandleOrderSocket: Modify mapped via Socket | Old: {existingState.BrokerId} → New: {o.OrderId}");
+                        Log.Trace($"{Name}.HandleOrderSocket: Modify mapped via Socket | Old: {oldBrokerId} → New: {o.OrderId}");
                     }
                 }
 
                 // -------------------------------------------------------
-                // NORMAL STATUS UPDATE
+                // 🔥 SENSEMANN-CHECK: Fills aus dem Order-Stream vernichten 🔥
+                // -------------------------------------------------------
+                // Dies MUSS vor dem State-Lookup passieren, damit es auch greift, 
+                // wenn der Trade-Socket die Order bereits gelöscht hat!
+                if (o.Status == SharedOrderStatus.Filled)
+                {
+                    Log.Trace($"{Name}.HandleOrderSocket: Hard-ignoring {o.Status} for {o.OrderId} in Order-Stream. Trade-Stream owns this.");
+
+                    // Wir setzen nur das Pending-Flag zurück, falls die Order noch modifiziert wurde.
+                    if (_orderStateManager.TryGetByExchangeId(o.OrderId, out var pendingState))
+                    {
+                        pendingState.IsUpdatePending = false;
+                    }
+                    continue;
+                }
+
+                // -------------------------------------------------------
+                // NORMAL STATUS UPDATE (Nur für Canceled / Open etc.)
                 // -------------------------------------------------------
                 if (_orderStateManager.TryGetByExchangeId(o.OrderId, out var state))
                 {
+                    // Ignoriere Status-Events von alten, ersetzten Tickets
+                    if (o.OrderId != state.BrokerId)
+                    {
+                        Log.Trace($"{Name}.HandleOrderSocket: Ignoring status '{o.Status}' for old replaced ticket {o.OrderId}. Current active ticket is {state.BrokerId}.");
+                        continue;
+                    }
+
                     state.LastUpdateUtc = DateTime.UtcNow;
                     var absFilled = o.QuantityFilled?.QuantityInBaseAsset ?? 0m;
                     var leanStatus = MapStatus(o.Status, absFilled);
 
-                    // 🔥 DEIN FIX: Wir entmachten den Order-Socket für Fills! 🔥
-                    // Wenn die Börse über den Order-Stream "Filled" oder "PartiallyFilled" meldet,
-                    // ignorieren wir das hier komplett. Wir WARTEN auf den Trade-Socket,
-                    // denn nur der hat die genauen Ausführungspreise und Gebühren!
-                    if (leanStatus == OrderStatus.Filled || leanStatus == OrderStatus.PartiallyFilled)
-                    {
-                        Log.Trace($"{Name}.HandleOrderSocket: Ignoring {leanStatus} for {o.OrderId} in Order-Stream. Deferring to Trade-Stream.");
-
-                        // Wir setzen nur das Pending-Flag zurück, falls die Order gerade modifiziert wurde.
-                        state.IsUpdatePending = false;
-                        continue;
-                    }
-
-                    // Stornos und Ablehnungen behandeln wir weiterhin hier,
-                    // da diese keine Trade-Events generieren.
                     if (leanStatus is OrderStatus.Canceled or OrderStatus.Invalid)
                     {
                         if (state.IsUpdatePending)

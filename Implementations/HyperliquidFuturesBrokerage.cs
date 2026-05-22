@@ -355,15 +355,17 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 );
         }
         
-        protected override async Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(Order order, string clientOrderId, decimal price, decimal quantity)
+        protected override async Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(Order order, decimal price, decimal quantity)
         {
             var ticker = NativeTicker(order.Symbol);
             OrderSide side = quantity > 0 ? OrderSide.Buy : OrderSide.Sell;
 
+            var activeExchangeId = order.BrokerId.Last();
+
             var res = await _restClient.FuturesApi.Trading.EditOrderAsync(
                           symbol: ticker,
-                          orderId: String.IsNullOrEmpty(clientOrderId) ?  long.Parse(order.BrokerId.Last()) : null,
-                          clientOrderId: clientOrderId,
+                          orderId: long.Parse(activeExchangeId),
+                          clientOrderId: null,
                           side: side,
                           orderType: order.Type == QuantConnect.Orders.OrderType.Limit
                               ? HyperLiquid.Net.Enums.OrderType.Limit
@@ -383,7 +385,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             return new ExchangeWebResult<SharedId>(
                     Name,
                     TradingMode.PerpetualLinear,
-                    res.As(new SharedId(order.Id.ToString()))
+                    res.As(new SharedId(activeExchangeId.ToString()))
                 );
         }
 
