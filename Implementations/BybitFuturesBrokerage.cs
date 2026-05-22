@@ -113,7 +113,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 var parameters = base.PlaceFuturesOrderExchangeParameters;
                 parameters.AddValue(new ExchangeParameter("Bybit", "category", "linear"));
                 parameters.AddValue(new ExchangeParameter("Bybit", "settleCoin", SettleAsset));
-                parameters.AddValue(new ExchangeParameter("Bybit", "SettleAsset", SettleAsset));
                 return parameters;
             }
         }
