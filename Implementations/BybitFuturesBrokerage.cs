@@ -137,7 +137,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                     var sub = RunSync(() =>
                         _socketClient.V5PrivateApi.SubscribeToUserTradeUpdatesAsync(update =>
                         {
-                            foreach (var fundingsRecord in update.Data.Where(f => f != null && f.TradeType.Value == Bybit.Net.Enums.TradeType.Funding))
+                            foreach (var fundingsRecord in update.Data.Where(f => f?.TradeType != null && f.TradeType == Bybit.Net.Enums.TradeType.Funding))
                             {
                                 if (_algorithm?.Portfolio?.CashBook != null)
                                 {
