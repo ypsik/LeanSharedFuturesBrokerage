@@ -135,10 +135,18 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 {
                     _subRateGate.WaitToProceed();
                     var sub = RunSync(() =>
-                        _socketClient.V5PrivateApi.SubscribeToWalletUpdatesAsync(update =>
+                        _socketClient.V5PrivateApi.SubscribeToUserTradeUpdatesAsync(update =>
                         {
-                            OnBalanceUpdated();
+                            foreach (var fundingsRecord in update.Data.Where(f => f != null && f.TradeType.Value == Bybit.Net.Enums.TradeType.Funding))
+                            {
+                                if (_algorithm?.Portfolio?.CashBook != null)
+                                {
+                                    _algorithm.Portfolio.CashBook[SettleAsset].AddAmount(fundingsRecord.Fee??0);
+                                    OnMessage(new FundingBrokerageMessageEvent(fundingsRecord.FeeAsset??SettleAsset, fundingsRecord.Fee??0));
+                                }
+                            }
                         }));
+
 
                     SetupSubscriptionEvents(
                                     sub.Success,
