@@ -33,7 +33,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         protected IBalanceSocketClient _balanceSocket;
         protected IKlineRestClient _klineClient;
         protected IFundingRateRestClient _fundingRateClient;
-        protected Func<List<Holding>> _getHoldingsFunc;
+        protected Func<List<Holding>>? _getHoldingsFunc;
 
         protected SymbolPropertiesDatabase _spdb;
 
@@ -79,7 +79,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             IFundingRateRestClient fundingRateClient,
             IKlineRestClient klineClient,
             IDataAggregator aggregator, // <-- Der kommt jetzt an
-            Func<List<Holding>> getHoldingsFunc = null)
+            Func<List<Holding>>? getHoldingsFunc = null)
         {
             // SICHERHEITSGURT: Wenn wir schon initialisiert sind, der Aggregator aber null war 
             // (z.B. weil die Factory zu früh dran war), dann updaten wir ihn hier durch den SetJob-Aufruf!

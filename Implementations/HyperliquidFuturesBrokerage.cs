@@ -69,7 +69,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             HyperLiquidSocketClient socketClient,
             string vaultAddress,
             IDataAggregator aggregator,
-            Func<List<Holding>> getHoldingsFunc = null) // 🔥 Fix: Optional gemacht
+            Func<List<Holding>>? getHoldingsFunc = null) // 🔥 Fix: Optional gemacht
             : base(algorithm, "hyperliquid")
         {
             _vaultAdress = vaultAddress;

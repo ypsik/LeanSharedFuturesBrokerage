@@ -33,7 +33,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             BybitRestClient restClient,
             BybitSocketClient socketClient,
             IDataAggregator aggregator,
-            Func<List<Holding>> getHoldingsFunc = null)
+            Func<List<Holding>>? getHoldingsFunc = null)
             : base(algorithm, "bybit")
         {
             _restClient = restClient;

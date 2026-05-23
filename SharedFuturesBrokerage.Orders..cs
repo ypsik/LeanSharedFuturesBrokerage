@@ -493,6 +493,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                           $"ClientOrderId='{trade.ClientOrderId}', " +
                           $"Symbol='{trade.Symbol}', " +
                           $"Qty='{trade.Quantity}', " +
+                          $"Side='{trade.Side}', " +
+                          $"Fee='{trade.Fee}', " +
                           $"Price='{trade.Price}'");
 
                 if (string.IsNullOrEmpty(trade.OrderId)) continue;
