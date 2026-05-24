@@ -12,6 +12,7 @@
     <PackageReference Include="Bybit.Net" Version="6.12.1" />
     <PackageReference Include="CryptoExchange.Net" Version="11.1.1" />
     <PackageReference Include="HyperLiquid.Net" Version="4.5.1" />
+    <PackageReference Include="JK.BingX.Net" Version="3.10.2" />
     <PackageReference Include="Jkorf.Aster.Net" Version="3.2.1" />
     <PackageReference Include="QuantConnect.Lean.Engine" Version="2.5.17677" />
   </ItemGroup>
