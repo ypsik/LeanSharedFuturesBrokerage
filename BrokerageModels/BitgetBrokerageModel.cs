@@ -9,9 +9,9 @@ using System.Text;
 
 namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageModels
 {
-    public class BingXBrokerageModel : DefaultBrokerageModel
+    public class BitgetBrokerageModel : DefaultBrokerageModel
     {
-        public BingXBrokerageModel(AccountType accountType = AccountType.Margin)
+        public BitgetBrokerageModel(AccountType accountType = AccountType.Margin)
             : base(accountType)
         {
         }
@@ -19,10 +19,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageModels
         // 1. Dein neues Gebührenmodell zuweisen
         public override IFeeModel GetFeeModel(Security security)
         {
-            return new BingXFeeModel();
+            return new BitgetFeeModel();
         }
 
-        // 2. Den Standard-Hebel (Buying Power) definieren
         public override IBuyingPowerModel GetBuyingPowerModel(Security security)
         {
             return new SecurityMarginModel(20m);

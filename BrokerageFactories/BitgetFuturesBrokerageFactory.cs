@@ -1,5 +1,5 @@
-﻿using Bybit.Net;
-using Bybit.Net.Clients;
+﻿using Bitget.Net;
+using Bitget.Net.Clients;
 using QuantConnect;
 using QuantConnect.Brokerages;
 using QuantConnect.Configuration;
@@ -16,44 +16,46 @@ using System.Text;
 
 namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
 {
-    public class BybitFuturesBrokerageFactory : BrokerageFactory
+    public class BitgetFuturesBrokerageFactory : BrokerageFactory
     {
-        public BybitFuturesBrokerageFactory() : base(typeof(BybitFuturesBrokerage))
+        public BitgetFuturesBrokerageFactory() : base(typeof(BitgetFuturesBrokerage))
         {
         }
 
         public override Dictionary<string, string> BrokerageData => new Dictionary<string, string>
         {
-            { "bybit-api-key", Config.Get("bybit-api-key") },
-            { "bybit-api-secret",  Config.Get("bybit-api-secret")  },
+            { "bitget-api-key", Config.Get("bitget-api-key") },
+            { "bitget-api-secret",  Config.Get("bitget-api-secret")  },
+            { "bitget-api-pass",  Config.Get("bitget-api-pass")  },
         };
 
         public override IBrokerageModel GetBrokerageModel(IOrderProvider orderProvider)
         {
-            return new BybitBrokerageModel(AccountType.Margin);
+            return new BitgetBrokerageModel(AccountType.Margin);
         }
 
         public override IBrokerage CreateBrokerage(LiveNodePacket job, IAlgorithm algorithm)
         {
             var errors = new List<string>();
 
-            var address = Read<string>(job.BrokerageData, "bybit-api-key", errors);
-            var secret = Read<string>(job.BrokerageData, "bybit-api-secret", errors);
+            var address = Read<string>(job.BrokerageData, "bitget-api-key", errors);
+            var secret = Read<string>(job.BrokerageData, "bitget-api-secret", errors);
+            var pass = Read<string>(job.BrokerageData, "bitget-api-pass", errors);
 
             if (errors.Any())
                 throw new ArgumentException(string.Join(Environment.NewLine, errors));
 
             errors = new List<string>();
-            
-            var credentials = new BybitCredentials(address, secret);
 
-            var restClient = new BybitRestClient(options =>
+            var credentials = new BitgetCredentials(address, secret, pass);
+
+            var restClient = new BitgetRestClient(options =>
             {
                 options.ApiCredentials = credentials;
                 options.OutputOriginalData = true;
             });
 
-            var socketClient = new BybitSocketClient(options =>
+            var socketClient = new BitgetSocketClient(options =>
             {
                 options.ApiCredentials = credentials;
                 options.DelayAfterConnect = TimeSpan.FromMilliseconds(500);
@@ -70,7 +72,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
                     .ToList();
 
             algorithm.Settings.DatabasesRefreshPeriod = TimeSpan.FromDays(36500);
-            var brokerage = new BybitFuturesBrokerage(algorithm, restClient, socketClient, aggregator, getHoldingsFunc);
+            var brokerage = new BitgetFuturesBrokerage(algorithm, restClient, socketClient, aggregator, getHoldingsFunc);
 
             // Register with MEF Composer so Lean reuses this instance when
             // resolving IDataQueueHandler instead of trying to construct a new one
