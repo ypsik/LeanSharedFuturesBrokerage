@@ -316,22 +316,22 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             // Minimum notional check
             if (MinimumOrderNotionalValue > 0m && price > 0m)
             {
-                decimal notional = Math.Abs(quantity) * price;
+                decimal currentNotional = Math.Abs(quantity) * price;
 
-                if (notional < MinimumOrderNotionalValue)
+                if (currentNotional < MinimumOrderNotionalValue)
                 {
-                    var props = _spdb.GetSymbolProperties(
-                        order.Symbol.ID.Market,
-                        order.Symbol,
-                        order.Symbol.SecurityType,
-                        SettleAsset);
+                    Log.Trace($"{Name}.UpdateOrder: Rejecting update for {order.Symbol.Value}. " +
+                              $"Remaining quantity {Math.Abs(quantity)} (~{currentNotional:F2}$) " +
+                              $"is below minimum ${MinimumOrderNotionalValue}. Returning false.");
 
-                    decimal lotSize = props?.LotSize ?? 0.01m;
-                    decimal adjusted = Math.Ceiling((MinimumOrderNotionalValue / price) / lotSize) * lotSize;
+                    OnMessage(new BrokerageMessageEvent(
+                            BrokerageMessageType.Warning,
+                            "UpdateOrderInvalid",
+                            $"Order remaining size too small ({currentNotional:F2}$). Update cancelled."));
 
-                    quantity = quantity < 0 ? -adjusted : adjusted;
-
-                    Log.Trace($"{Name}.UpdateOrder: Adjusting quantity for {order.Symbol.Value} to {Math.Abs(quantity)} to meet minimum ${MinimumOrderNotionalValue}.");
+                    // Wir liefern hier das FALSE zurück, damit LEAN weiß: Update abgelehnt.
+                    // Die Order bleibt mit ihrem alten, gültigen State im System bestehen.
+                    return false;
                 }
             }
 
