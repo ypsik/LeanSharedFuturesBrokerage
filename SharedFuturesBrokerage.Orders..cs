@@ -342,7 +342,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             {
                 if (_orderStateManager.TryGetValue(clientOrderId, out var errorState))
                 {
-                    errorState.IsUpdatePending = false;
+                    errorState?.IsUpdatePending = false;
                 }
 
                 var errorMsg = res?.Error?.ToString() ?? "Unknown exchange error";
@@ -716,8 +716,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                         // 1. State-Properties aktualisieren
                         existingState.LastUpdateUtc = DateTime.UtcNow;
-                        existingState.IsUpdatePending = false;
-
+                        
                         // 2. Exchange-ID atomar tauschen:
                         //    - entfernt alte BrokerId aus _statesByExchangeId
                         //    - setzt state.BrokerId = o.OrderId
@@ -725,6 +724,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         //    - ergänzt Order.BrokerId
                         //    - _statesByClientId[o.ClientOrderId] bleibt unverändert
                         _orderStateManager.MapNewExchangeId(o.ClientOrderId, o.OrderId);
+                        existingState.IsUpdatePending = false;
 
                         var brokerid = existingState.Order.BrokerId;
                         brokerid.Add(o.OrderId);
@@ -835,10 +835,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         var sharedSymbol = GetSharedSymbol(state.Order.Symbol);
                         var statusCheck = await _orderClient
                             .GetFuturesOrderAsync(new GetOrderRequest(sharedSymbol, brokerId))
-                            .ConfigureAwait(false);
+                                .ConfigureAwait(false);
 
                         if (!statusCheck.Success || statusCheck.Data == null)
-                        {
+                            {
                             Log.Error($"{Name}.ReconcileLoop: Failed to verify order {brokerId}. Error: {statusCheck.Error}");
                             continue;
                         }
@@ -849,9 +849,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         if (!_orderStateManager.TryRemove(state.ClientOrderId, out var removedState))
                             continue;
 
-                        // -----------------------------
                         // CASE 1: FILLED
-                        // -----------------------------
                         if (brokerOrder.Status == SharedOrderStatus.Filled)
                         {
                             var finalFillAbsQty = brokerOrder.QuantityFilled?.QuantityInBaseAsset
@@ -859,12 +857,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                             var finalSignedFillQty = finalFillAbsQty * (removedState.OriginalQuantity > 0 ? 1m : -1m);
                             var remainingToFill = finalSignedFillQty - removedState.FilledQuantity;
-
                             if (Math.Abs(remainingToFill) > 0)
                             {
-                                // -----------------------------
                                 // FIX 3: Doppelbuchungen der Gebühren verhindern!
-                                // -----------------------------
                                 var totalExchangeFee = brokerOrder.Fee ?? 0m;
                                 var remainingFee = Math.Max(0m, totalExchangeFee - removedState.CumulativeFeePaid);
 
@@ -873,15 +868,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                                     Status = OrderStatus.Filled,
                                     FillPrice = brokerOrder.AveragePrice ?? 0,
                                     FillQuantity = remainingToFill,
-                                    // Wir stellen LEAN nur noch das Rest-Delta in Rechnung
                                     OrderFee = new OrderFee(new CashAmount(remainingFee, brokerOrder.FeeAsset ?? SettleAsset)),
                                     Message = "Reconciled Fill"
                                 });
                             }
                         }
-                        // -----------------------------
+                        
                         // CASE 2: STILL OPEN
-                        // -----------------------------
                         else if (brokerOrder.Status == SharedOrderStatus.Open)
                         {
                             // Re-register: TryAdd indexes by both ClientOrderId and BrokerId (exchange ID).
@@ -889,9 +882,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                             _orderStateManager.TryAdd(removedState.ClientOrderId, removedState);
                             Log.Trace($"{Name}.ReconcileLoop: Order {brokerId} still open on exchange, re-registered.");
                         }
-                        // -----------------------------
                         // CASE 3: CANCELED / UNKNOWN
-                        // -----------------------------
                         else
                         {
                             OnOrderEvent(new OrderEvent(removedState.Order, DateTime.UtcNow, OrderFee.Zero)
