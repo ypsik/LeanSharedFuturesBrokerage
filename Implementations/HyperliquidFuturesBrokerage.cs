@@ -265,6 +265,21 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         }
         #endregion
 
+        public override List<CashAmount> GetCashBalance()
+        {
+            if (Balance.HasValue)
+                return new List<CashAmount> { new CashAmount(Balance.Value, SettleAsset) };
+
+            var res = RunSync(() => _restClient.SpotApi.Account.GetBalancesAsync());
+            var usdcvalue = res?.Data.FirstOrDefault(x => x.Asset == SettleAsset);
+            var result = new List<CashAmount>
+            {
+                new CashAmount(usdcvalue?.Total ?? 0m, SettleAsset)
+            };
+            return result;
+        }
+
+
         protected override async Task<CallResult<UpdateSubscription>> CreateFundingSubscriptionAsync(
             string nativeTicker, Symbol symbol, Func<DateTime, decimal?, bool> onFundingRate)
         {
