@@ -21,7 +21,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageModels
         // 1. Dein neues Gebührenmodell zuweisen
         public override IFeeModel GetFeeModel(Security security)
         {
-            return new BitgetFeeModel();
+            return new BitgetFuturesFeeModel();
         }
 
         public override IBuyingPowerModel GetBuyingPowerModel(Security security)

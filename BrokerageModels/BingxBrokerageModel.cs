@@ -21,7 +21,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageModels
         // 1. Dein neues Gebührenmodell zuweisen
         public override IFeeModel GetFeeModel(Security security)
         {
-            return new BingXFeeModel();
+            return new BingxFuturesFeeModel();
         }
 
         // 2. Den Standard-Hebel (Buying Power) definieren
