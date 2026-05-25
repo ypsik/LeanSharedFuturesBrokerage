@@ -11,6 +11,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageModels
 {
     public class BitgetBrokerageModel : DefaultBrokerageModel
     {
+        protected virtual string MarketName => "bitget";
+
         public BitgetBrokerageModel(AccountType accountType = AccountType.Margin)
             : base(accountType)
         {

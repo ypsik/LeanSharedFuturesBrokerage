@@ -11,6 +11,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageModels
 {
     public class AsterBrokerageModel : DefaultBrokerageModel
     {
+        protected virtual string MarketName => "aster";
+
         public AsterBrokerageModel(AccountType accountType = AccountType.Margin)
             : base(accountType)
         {

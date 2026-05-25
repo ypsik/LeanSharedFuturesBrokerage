@@ -11,6 +11,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageModels
 {
     public class HyperliquidBrokerageModel : DefaultBrokerageModel
     {
+        protected virtual string MarketName => "hyperliquid";
+
         public HyperliquidBrokerageModel(AccountType accountType = AccountType.Margin)
             : base(accountType)
         {

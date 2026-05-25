@@ -1,10 +1,12 @@
 ﻿using Bitget.Net;
 using Bitget.Net.Clients;
+using Bybit.Net.Clients;
 using CryptoExchange.Net.Interfaces.Clients;
 using CryptoExchange.Net.Objects;
 using CryptoExchange.Net.Objects.Sockets;
 using CryptoExchange.Net.SharedApis;
 using CryptoExchange.Net.Trackers.UserData;
+using NSec.Cryptography;
 using QuantConnect;
 using QuantConnect.Algorithm.Framework.Selection;
 using QuantConnect.Data;
@@ -72,6 +74,18 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
             if (_socketClient == null)
             {
+
+                job.BrokerageData.TryGetValue("bitget-api-key", out var key);
+                job.BrokerageData.TryGetValue("bitget-api-secret", out var secret);
+                job.BrokerageData.TryGetValue("bitget-api-pass", out var pass);
+
+                var socketClient = new BitgetSocketClient(options =>
+                {
+                    options.ApiCredentials = new BitgetCredentials(key: key, secret: secret, pass: pass);
+                    options.DelayAfterConnect = TimeSpan.FromMilliseconds(500);
+                    options.SocketIndividualSubscriptionCombineTarget = 50;
+                });
+
                 _socketClient = new BitgetSocketClient();
             }
 
@@ -161,8 +175,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         {
 
             _fundingUpdateConnected = true;
-//            _algorithm.Portfolio.CashBook[SettleAsset].AddAmount(fundings);
-//            OnMessage(new FundingBrokerageMessageEvent(fundingsRecord.FeeAsset ?? SettleAsset, fundings));
+            base.Connect();
+            //            _algorithm.Portfolio.CashBook[SettleAsset].AddAmount(fundings);
+            //            OnMessage(new FundingBrokerageMessageEvent(fundingsRecord.FeeAsset ?? SettleAsset, fundings));
         }
 
         public override void Disconnect()
@@ -225,12 +240,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
             if (!res.Success)
             {
-                Log.Error($"Bybit update error: {res.Error} | Ticker: {ticker} | Price: {price} | OriginalData: {res.OriginalData}");
+                Log.Error($"Bitget update error: {res.Error} | Ticker: {ticker} | Price: {price} | OriginalData: {res.OriginalData}");
                 return new ExchangeWebResult<SharedId>(Name, res.Error);
             }
 
-            // KORREKTUR: Bybit verändert die OrderId bei einem Modify NICHT. 
-            // Daher wird hier die echte, bestätigte OrderId durchgereicht.
             return new ExchangeWebResult<SharedId>(
                     Name,
                     TradingMode.PerpetualLinear,

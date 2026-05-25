@@ -11,6 +11,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageModels
 {
     public class BingXBrokerageModel : DefaultBrokerageModel
     {
+        protected virtual string MarketName => "bingx";
+
         public BingXBrokerageModel(AccountType accountType = AccountType.Margin)
             : base(accountType)
         {
