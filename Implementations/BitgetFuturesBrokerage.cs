@@ -140,7 +140,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             }
         }
 
-        protected override ExchangeParameters OpenOrdersExchangeParameters
+        protected override ExchangeParameters PlaceFuturesOrderExchangeParameters
         {
             get
             {
@@ -149,21 +149,41 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 return parameters;
             }
         }
-        protected override ExchangeParameters AccountHoldingsExchangeParameters
+        protected override ExchangeParameters CancelFuturesOrderExchangeParameters
         {
             get
             {
-                var parameters = base.PlaceFuturesOrderExchangeParameters;
+                var parameters = base.CancelFuturesOrderExchangeParameters;
                 parameters.AddValue(new ExchangeParameter("Bitget", "ProductType", "UsdtFutures"));
                 return parameters;
             }
         }
 
+        protected override ExchangeParameters OpenOrdersExchangeParameters
+        {
+            get
+            {
+                var parameters = base.OpenOrdersExchangeParameters;
+                parameters.AddValue(new ExchangeParameter("Bitget", "ProductType", "UsdtFutures"));
+                return parameters;
+            }
+        }
+        
+        protected override ExchangeParameters AccountHoldingsExchangeParameters
+        {
+            get
+            {
+                var parameters = base.AccountHoldingsExchangeParameters;
+                parameters.AddValue(new ExchangeParameter("Bitget", "ProductType", "UsdtFutures"));
+                return parameters;
+            }
+        }
+        
         protected override ExchangeParameters OrderUpdatesExchangeParameters
         {
             get
             {
-                var parameters = base.PlaceFuturesOrderExchangeParameters;
+                var parameters = base.OrderUpdatesExchangeParameters;
                 parameters.AddValue(new ExchangeParameter("Bitget", "ProductType", "UsdtFutures"));
                 return parameters;
             }
@@ -173,7 +193,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         {
             get
             {
-                var parameters = base.PlaceFuturesOrderExchangeParameters;
+                var parameters = base.UserTradesExchangeParameters;
                 parameters.AddValue(new ExchangeParameter("Bitget", "ProductType", "UsdtFutures"));
                 return parameters;
             }
@@ -183,7 +203,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         {
             get
             {
-                var parameters = base.PlaceFuturesOrderExchangeParameters;
+                var parameters = base.GetKlinesHistoryParameters;
                 parameters.AddValue(new ExchangeParameter("Bitget", "ProductType", "UsdtFutures"));
                 return parameters;
             }
@@ -193,7 +213,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         {
             get
             {
-                var parameters = base.PlaceFuturesOrderExchangeParameters;
+                var parameters = base.GetFundingRateHistoryParameters;
                 parameters.AddValue(new ExchangeParameter("Bitget", "ProductType", "UsdtFutures"));
                 return parameters;
             }
@@ -203,7 +223,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         {
             get
             {
-                var parameters = base.PlaceFuturesOrderExchangeParameters;
+                var parameters = base.TradesExchangeParameters;
                 parameters.AddValue(new ExchangeParameter("Bitget", "ProductType", "UsdtFutures"));
                 return parameters;
             }
@@ -213,7 +233,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         {
             get
             {
-                var parameters = base.PlaceFuturesOrderExchangeParameters;
+                var parameters = base.BookTickerExchangeParameters;
                 parameters.AddValue(new ExchangeParameter("Bitget", "ProductType", "UsdtFutures"));
                 return parameters;
             }
