@@ -167,7 +167,17 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 parameters.AddValue(new ExchangeParameter("Bitget", "ProductType", "UsdtFutures"));
                 return parameters;
             }
-        }        
+        }
+
+        protected override ExchangeParameters UserTradesExchangeParameters
+        {
+            get
+            {
+                var parameters = base.PlaceFuturesOrderExchangeParameters;
+                parameters.AddValue(new ExchangeParameter("Bitget", "ProductType", "UsdtFutures"));
+                return parameters;
+            }
+        }
 
         #region Connect
 
