@@ -20,7 +20,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
 {
     public class BingxFuturesBrokerageFactory : BrokerageFactory
     {
-        public BingxFuturesBrokerageFactory() : base(typeof(BybitFuturesBrokerage))
+        public BingxFuturesBrokerageFactory() : base(typeof(BingxFuturesBrokerage))
         {
         }
 
