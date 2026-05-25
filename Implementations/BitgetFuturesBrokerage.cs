@@ -176,6 +176,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             {
                 var parameters = base.AccountHoldingsExchangeParameters;
                 parameters.AddValue(new ExchangeParameter("Bitget", "ProductType", "UsdtFutures"));
+                parameters.AddValue(new ExchangeParameter("Bitget", "MarginAsset", SettleAsset));
                 return parameters;
             }
         }
