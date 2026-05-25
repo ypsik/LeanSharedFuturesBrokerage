@@ -241,6 +241,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         #endregion
 
         #region LEAN Data Manager
+
+        protected virtual ExchangeParameters TradesExchangeParameters => new ExchangeParameters();
+        protected virtual ExchangeParameters BookTickerExchangeParameters => new ExchangeParameters();
+
         private bool SubscribeSymbols(IEnumerable<Symbol> symbols, TickType tickType)
         {
             foreach (var symbol in symbols)
@@ -254,7 +258,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 if (tickType == TickType.Trade)
                 {
                     var sub = RunSync(() => _tradeSocket.SubscribeToTradeUpdatesAsync(
-                        new SubscribeTradeRequest(shared),
+                        new SubscribeTradeRequest(shared, TradesExchangeParameters),
                         update =>
                         {
                             foreach (var item in update.Data)
@@ -279,7 +283,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 else if (tickType == TickType.Quote)
                 {
                     var sub = RunSync(() => _bookTickerSocket.SubscribeToBookTickerUpdatesAsync(
-                        new SubscribeBookTickerRequest(shared),
+                        new SubscribeBookTickerRequest(shared, BookTickerExchangeParameters),
                         update =>
                         {
                             var q = update.Data;

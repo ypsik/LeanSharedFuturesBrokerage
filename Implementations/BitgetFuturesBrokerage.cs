@@ -189,6 +189,26 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             }
         }
 
+        protected override ExchangeParameters TradesExchangeParameters
+        {
+            get
+            {
+                var parameters = base.PlaceFuturesOrderExchangeParameters;
+                parameters.AddValue(new ExchangeParameter("Bitget", "ProductType", "UsdtFutures"));
+                return parameters;
+            }
+        }
+
+        protected override ExchangeParameters BookTickerExchangeParameters
+        {
+            get
+            {
+                var parameters = base.PlaceFuturesOrderExchangeParameters;
+                parameters.AddValue(new ExchangeParameter("Bitget", "ProductType", "UsdtFutures"));
+                return parameters;
+            }
+        }
+
         #region Connect
 
         public override bool IsConnected => base.IsConnected && _fundingUpdateConnected;

@@ -206,7 +206,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             }
             else
             {
-                Log.Error($"{streamName} {errorMessage} | Details: {errorDetails ?? "No additional error info available."}");
+                Log.Error($"{errorMessage} | Details: {errorDetails ?? "No additional error info available."}");
             }
         }
 
