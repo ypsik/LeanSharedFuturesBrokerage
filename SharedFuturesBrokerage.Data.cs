@@ -57,6 +57,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         #region History Implementation
 
         protected virtual ExchangeParameters GetFundingRateHistoryParameters => new ExchangeParameters();
+        protected virtual ExchangeParameters GetKlinesHistoryParameters => new ExchangeParameters();
 
         public override IEnumerable<BaseData> GetHistory(QuantConnect.Data.HistoryRequest request)
         {
@@ -149,7 +150,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 };
                 if (interval == null) yield break;
 
-                var klineReq = new GetKlinesRequest(shared, interval.Value) { StartTime = startTimeUtc, EndTime = request.EndTimeUtc };
+                var klineReq = new GetKlinesRequest(shared, interval.Value) { StartTime = startTimeUtc, EndTime = request.EndTimeUtc, ExchangeParameters = GetKlinesHistoryParameters };
 
                 int totalCandlesLoaded = 0;
                 int pagesLoaded = 0;
