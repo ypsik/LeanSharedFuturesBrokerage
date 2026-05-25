@@ -22,6 +22,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
     {
         public BingxFuturesBrokerageFactory() : base(typeof(BingxFuturesBrokerage))
         {
+            Market.Add("hyperliquid", 904);
+
+            var mhdb = MarketHoursDatabase.FromDataFolder();
+            var alwaysOpen = SecurityExchangeHours.AlwaysOpen(TimeZones.Utc);
+
+            mhdb.SetEntry("bingx", null, SecurityType.CryptoFuture, alwaysOpen, TimeZones.Utc);
         }
 
         public override Dictionary<string, string> BrokerageData => new Dictionary<string, string>
