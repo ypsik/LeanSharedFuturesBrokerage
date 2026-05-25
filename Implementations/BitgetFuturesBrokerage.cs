@@ -140,16 +140,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             }
         }
 
-        #region Connect
-
-        public override bool IsConnected => base.IsConnected && _fundingUpdateConnected;
-        public override bool ExchangeModifiesOrdersInPlace => true;
-
         protected override ExchangeParameters OpenOrdersExchangeParameters
         {
             get
             {
                 var parameters = base.PlaceFuturesOrderExchangeParameters;
+                parameters.AddValue(new ExchangeParameter("Bitget", "ProductType", "UsdtFutures"));
                 return parameters;
             }
         }
@@ -158,34 +154,40 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             get
             {
                 var parameters = base.PlaceFuturesOrderExchangeParameters;
+                parameters.AddValue(new ExchangeParameter("Bitget", "ProductType", "UsdtFutures"));
                 return parameters;
             }
         }
 
-        protected override ExchangeParameters GetFundingRateHistoryParameters
+        protected override ExchangeParameters OrderUpdatesExchangeParameters
         {
             get
             {
                 var parameters = base.PlaceFuturesOrderExchangeParameters;
+                parameters.AddValue(new ExchangeParameter("Bitget", "ProductType", "UsdtFutures"));
                 return parameters;
             }
-        }
+        }        
+
+        #region Connect
+
+        public override bool IsConnected => base.IsConnected && _fundingUpdateConnected;
+        public override bool ExchangeModifiesOrdersInPlace => true;
 
         public override void Connect()
         {
-
             _fundingUpdateConnected = true;
             base.Connect();
-            //            _algorithm.Portfolio.CashBook[SettleAsset].AddAmount(fundings);
-            //            OnMessage(new FundingBrokerageMessageEvent(fundingsRecord.FeeAsset ?? SettleAsset, fundings));
         }
 
         public override void Disconnect()
         {
+            _fundingUpdateConnected = false;
             _socketClientExData?.Dispose();
             base.Disconnect();
         }
         #endregion
+
 
         protected override async Task<CallResult<UpdateSubscription>> CreateFundingSubscriptionAsync(
            string nativeTicker, Symbol symbol, Func<DateTime, decimal?, bool> onFundingRate)

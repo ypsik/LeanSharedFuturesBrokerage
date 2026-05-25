@@ -1,19 +1,20 @@
-﻿using CryptoExchange.Net.Objects.Sockets;
+﻿using CryptoExchange.Net.Interfaces.Clients;
+using CryptoExchange.Net.Objects.Sockets;
 using CryptoExchange.Net.SharedApis;
+using QLNet;
 using QuantConnect;
 using QuantConnect.Brokerages;
 using QuantConnect.Configuration;
 using QuantConnect.Data;
 using QuantConnect.Interfaces;
-using QuantConnect.Packets;
-using QuantConnect.Util;
 using QuantConnect.Logging;
+using QuantConnect.Packets;
+using QuantConnect.Securities;
+using QuantConnect.Util;
 using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using QuantConnect.Securities;
-using QLNet;
 
 
 namespace SilverQuant.Lean.Brokerages.Futures.Shared
@@ -121,6 +122,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         public override bool IsConnected => _isConnectedOrder && _isConnectedUserTrade && _isConnectedBalance;
 
+        protected virtual ExchangeParameters UserTradesExchangeParameters => new ExchangeParameters();
+        protected virtual ExchangeParameters OrderUpdatesExchangeParameters => new ExchangeParameters();
+
         public override void Connect()
         {
             lock (_connectLock)
@@ -136,7 +140,14 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 if (!_isConnectedUserTrade)
                 {
                     _subRateGate.WaitToProceed();
-                    var sub = RunSync(() => _userTradeSocket.SubscribeToUserTradeUpdatesAsync(new SubscribeUserTradeRequest(), HandleUserTradeSocket));
+
+                    var userTradeRequest = new CryptoExchange.Net.SharedApis.SubscribeUserTradeRequest
+                    {
+                        ExchangeParameters = UserTradesExchangeParameters // <--- Nutzt die spezifische Property für User Trades
+                    };
+
+                    var sub = RunSync(() => _userTradeSocket.SubscribeToUserTradeUpdatesAsync(userTradeRequest, HandleUserTradeSocket));
+                    
                     SetupSubscriptionEvents(sub.Success, sub.Data, state => _isConnectedUserTrade = state, "User trade", "User trade socket failed", sub.Error?.ToString());
                     if (sub.Success)
                     {
@@ -146,16 +157,22 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     
                 }
 
-                if (!_isConnectedOrder) 
+                if (!_isConnectedOrder)
                 {
                     _subRateGate.WaitToProceed();
-                    var sub = RunSync(() => _orderSocket.SubscribeToFuturesOrderUpdatesAsync(new SubscribeFuturesOrderRequest(), HandleOrderSocket));
+                    var sub = RunSync(() => _orderSocket.SubscribeToFuturesOrderUpdatesAsync(new SubscribeFuturesOrderRequest
+                        {
+                            ExchangeParameters = OrderUpdatesExchangeParameters
+                        }, 
+                        HandleOrderSocket));
+
                     SetupSubscriptionEvents(sub.Success, sub.Data, state => _isConnectedOrder = state, "Order", "Order socket failed", sub.Error?.ToString());
                     if (sub.Success)
-                    {                     
+                    {
                         _orderSocketSub = sub.Data;
                     }
                 }
+
                 if (!_isConnectedBalance)
                 {
                     lock (_balanceUpdatesConnectLock)
