@@ -285,31 +285,40 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
             if (_orderStateManager.TryGetValue(clientOrderId, out var state))
             {
-                // 🔥 FIX 1: DIE MENGEN-FALLE (Dein Screenshot-Beweis)
-                // Hyperliquid's modify platziert eine NEUE Order.
-                // Wir MÜSSEN die Restmenge senden, nicht das alte Gesamt-Ziel!
-                if (lastUpdate?.Quantity.HasValue == true)
+                if (ExchangeModifiesOrdersInPlace)
                 {
-                    var newTotal = lastUpdate.Quantity.Value;
-                    var sign = newTotal > 0 ? 1m : -1m;
-                    quantity = (Math.Abs(newTotal) - Math.Abs(state.FilledQuantity)) * sign;
+                    // 🔥 BYBIT-FIX: In-Place-Börsen erwarten immer das globale Gesamtziel!
+                    if (lastUpdate?.Quantity.HasValue == true)
+                    {
+                        quantity = lastUpdate.Quantity.Value;
+                    }
+                    else
+                    {
+                        quantity = order.Quantity;
+                    }
                 }
                 else
                 {
-                    // Wenn LEAN nur den Preis ändert, behalten wir die exakte Restmenge!
-                    quantity = state.Remaining;
+                    // 🔥 HYPERLIQUID-FIX: Cancel+Replace-Börsen verlangen die nackte Restmenge!
+                    if (lastUpdate?.Quantity.HasValue == true)
+                    {
+                        var newTotal = lastUpdate.Quantity.Value;
+                        var sign = newTotal > 0 ? 1m : -1m;
+                        quantity = (Math.Abs(newTotal) - Math.Abs(state.FilledQuantity)) * sign;
+                    }
+                    else
+                    {
+                        quantity = state.Remaining;
+                    }
                 }
 
-                // 🔥 FIX 2: DIE ALTE-ID-FALLE (Dein Log-Beweis)
-                // LEAN hat eine Historie aller IDs. Wir löschen die Liste und 
-                // erzwingen die aktive ID, damit der REST-Client niemals die falsche nimmt!
+                // FIX: LEAN BrokerId-Historie isolieren
                 if (!string.IsNullOrEmpty(state.BrokerId))
                 {
                     order.BrokerId.Clear();
                     order.BrokerId.Add(state.BrokerId);
                 }
 
-                // Flag setzen, bevor der Call rausgeht
                 state.IsUpdatePending = true;
             }
 
