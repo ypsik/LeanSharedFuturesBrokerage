@@ -20,7 +20,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
     {
         public BitgetFuturesBrokerageFactory() : base(typeof(BitgetFuturesBrokerage))
         {
-            Market.Add("hyperliquid", 903);
+            Market.Add("bitget", 903);
 
             var mhdb = MarketHoursDatabase.FromDataFolder();
             var alwaysOpen = SecurityExchangeHours.AlwaysOpen(TimeZones.Utc);

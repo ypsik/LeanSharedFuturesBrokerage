@@ -22,7 +22,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
     {
         public BingxFuturesBrokerageFactory() : base(typeof(BingxFuturesBrokerage))
         {
-            Market.Add("hyperliquid", 904);
+            Market.Add("bingx", 904);
 
             var mhdb = MarketHoursDatabase.FromDataFolder();
             var alwaysOpen = SecurityExchangeHours.AlwaysOpen(TimeZones.Utc);
