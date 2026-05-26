@@ -279,7 +279,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             var lastUpdate = ticket?.UpdateRequests.LastOrDefault();
 
             decimal price = lastUpdate?.LimitPrice ?? order.Price;
-            decimal quantity = order.Quantity;
+            decimal? quantity = order.Quantity;
 
             var clientOrderId = GenerateClientId(order.Id);
 
@@ -287,15 +287,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             {
                 if (ExchangeModifiesOrdersInPlace)
                 {
-                    // 🔥 BYBIT-FIX: In-Place-Börsen erwarten immer das globale Gesamtziel!
-                    if (lastUpdate?.Quantity.HasValue == true)
-                    {
-                        quantity = lastUpdate.Quantity.Value;
-                    }
-                    else
-                    {
-                        quantity = order.Quantity;
-                    }
+                    quantity = null;
                 }
                 else
                 {
@@ -323,14 +315,14 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             }
 
             // Minimum notional check
-            if (MinimumOrderNotionalValue > 0m && price > 0m)
+            if (MinimumOrderNotionalValue > 0m && price > 0m && quantity.HasValue)
             {
-                decimal currentNotional = Math.Abs(quantity) * price;
+                decimal currentNotional = Math.Abs(quantity.Value) * price;
 
                 if (currentNotional < MinimumOrderNotionalValue)
                 {
                     Log.Trace($"{Name}.UpdateOrder: Rejecting update for {order.Symbol.Value}. " +
-                              $"Remaining quantity {Math.Abs(quantity)} (~{currentNotional:F2}$) " +
+                              $"Remaining quantity {quantity} (~{currentNotional:F2}$) " +
                               $"is below minimum ${MinimumOrderNotionalValue}. Returning false.");
 
                     OnMessage(new BrokerageMessageEvent(
@@ -396,7 +388,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         protected virtual Task<ExchangeWebResult<SharedId>> ExecutePlaceOrderAsync(PlaceFuturesOrderRequest request)
             => _orderClient.PlaceFuturesOrderAsync(request);
 
-        protected virtual Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(Order order, decimal price, decimal quantity)
+        protected virtual Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(Order order, decimal price, decimal? quantity)
             => Task.FromResult<ExchangeWebResult<SharedId>>(null);
 
         protected virtual ExchangeParameters CancelFuturesOrderExchangeParameters => new ExchangeParameters();

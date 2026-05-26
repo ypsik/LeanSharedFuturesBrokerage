@@ -2,6 +2,7 @@
 using CryptoExchange.Net.Authentication;
 using CryptoExchange.Net.Interfaces.Clients;
 using CryptoExchange.Net.Objects;
+using CryptoExchange.Net.Objects.Errors;
 using CryptoExchange.Net.Objects.Sockets;
 using CryptoExchange.Net.Requests;
 using CryptoExchange.Net.SharedApis;
@@ -369,9 +370,15 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                     res.As(new SharedId(res.Data.OrderId.ToString()))
                 );
         }
-        
-        protected override async Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(Order order, decimal price, decimal quantity)
+
+        protected override async Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(Order order, decimal price, decimal? quantity)
         {
+            if (!quantity.HasValue)
+            { 
+                Log.Error($"Hyperliquid update error: quantity not provided");
+                return new ExchangeWebResult<SharedId>(Name, ArgumentError.Missing("Quantity"));
+            }
+
             var ticker = NativeTicker(order.Symbol);
             OrderSide side = quantity > 0 ? OrderSide.Buy : OrderSide.Sell;
 
@@ -385,7 +392,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                           orderType: order.Type == QuantConnect.Orders.OrderType.Limit
                               ? HyperLiquid.Net.Enums.OrderType.Limit
                               : HyperLiquid.Net.Enums.OrderType.Market,
-                          quantity: Math.Abs(quantity),
+                          quantity: Math.Abs(quantity.Value),
                           price: price,
                           vaultAddress: _vaultAdress);
 
