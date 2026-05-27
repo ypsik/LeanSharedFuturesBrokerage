@@ -309,8 +309,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                           productType: Bitget.Net.Enums.BitgetProductTypeV2.UsdtFutures,
                           symbol: ticker,
                           orderId: order.BrokerId.Last(),
+                          clientOrderId: GenerateClientId(order.Id),
                           newPrice: price,
-                          newQuantity: quantity.HasValue ? Math.Abs(quantity.Value) : null);
+                          newQuantity: quantity.HasValue ? Math.Abs(quantity.Value) : Math.Abs(order.Quantity));
 
             if (!res.Success)
             {
