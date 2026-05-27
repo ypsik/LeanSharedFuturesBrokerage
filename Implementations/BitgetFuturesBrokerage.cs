@@ -303,6 +303,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         protected override async Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(Order order, decimal price, decimal? quantity)
         {
+            if (!quantity.HasValue)
+            {
+                Log.Error($"Update error: quantity not provided");
+                return new ExchangeWebResult<SharedId>(Name, ArgumentError.Missing("Quantity"));
+
+            }
             var ticker = NativeTicker(order.Symbol);
 
             var res = await _restClient.FuturesApiV2.Trading.EditOrderAsync(
@@ -311,7 +317,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                           orderId: order.BrokerId.Last(),
                           clientOrderId: GenerateClientId(order.Id),
                           newPrice: price,
-                          newQuantity: quantity.HasValue ? Math.Abs(quantity.Value) : Math.Abs(order.Quantity));
+                          newQuantity: Math.Abs(quantity.Value));
 
             if (!res.Success)
             {

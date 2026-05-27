@@ -375,7 +375,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         {
             if (!quantity.HasValue)
             { 
-                Log.Error($"Hyperliquid update error: quantity not provided");
+                Log.Error($"Update error: quantity not provided");
                 return new ExchangeWebResult<SharedId>(Name, ArgumentError.Missing("Quantity"));
             }
 
