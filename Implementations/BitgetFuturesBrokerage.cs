@@ -244,7 +244,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         #region Connect
 
         public override bool IsConnected => base.IsConnected && _fundingUpdateConnected;
-        public override bool ExchangeModifiesOrdersInPlace => true;
+        public override bool ExchangeModifiesOrdersInPlace => false;
 
         public override void Connect()
         {
