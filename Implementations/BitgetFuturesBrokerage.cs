@@ -10,6 +10,7 @@ using CryptoExchange.Net.Trackers.UserData;
 using NSec.Cryptography;
 using QuantConnect;
 using QuantConnect.Algorithm.Framework.Selection;
+using QuantConnect.Brokerages;
 using QuantConnect.Data;
 using QuantConnect.Interfaces;
 using QuantConnect.Logging;
@@ -288,10 +289,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 businessType: "contract_settle_fee",
                 idLessThan: null,
                 startTime: DateTime.UtcNow.AddMinutes(-30)
-            );
+            ).ConfigureAwait(false);
 
-            if (!result.Success || result.Data == null) return;
-
+            if (!result.Success || result.Data == null)
+            {
+                Log.Error($"Funding fee poll failed: {result.Error}");
+                return;
+            }
             foreach (var entry in result.Data.Entries)
             {
                 var amount = entry.Quantity;

@@ -38,7 +38,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             };
             var res = RunSync(() => _orderClient.GetPositionsAsync(request));
 
-            if (res.Success && res.Data != null)
+            if (!res.Success)
+            {
+                Log.Error($"Fetch positions failed: {res.Error}");
+            }
+            else if (res.Data != null)
             {
                 return res.Data.Select(p =>
                 {
