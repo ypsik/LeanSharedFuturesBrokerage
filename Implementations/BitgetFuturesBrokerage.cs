@@ -1,5 +1,6 @@
 ﻿using Bitget.Net;
 using Bitget.Net.Clients;
+using Bitget.Net.Enums;
 using Bybit.Net.Clients;
 using CryptoExchange.Net.Interfaces.Clients;
 using CryptoExchange.Net.Objects;
@@ -246,16 +247,64 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         public override bool IsConnected => base.IsConnected && _fundingUpdateConnected;
         public override bool ExchangeModifiesOrdersInPlace => false;
 
+        private CancellationTokenSource _fundingPollCts = new();
+
         public override void Connect()
         {
             _fundingUpdateConnected = true;
+            _fundingPollCts = new CancellationTokenSource();
+            Task.Run(() => FundingPollLoopAsync(_fundingPollCts.Token));
             base.Connect();
+        }
+
+        private async Task FundingPollLoopAsync(CancellationToken ct)
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                var nextPoll = GetNextFundingPollTime();
+                var delay = nextPoll - DateTime.UtcNow;
+                if (delay > TimeSpan.Zero)
+                    await Task.Delay(delay, ct).ContinueWith(_ => { }, ct);
+
+                if (ct.IsCancellationRequested) break;
+
+                await PollFundingFeesAsync().ConfigureAwait(false);
+            }
+        }
+
+        private DateTime GetNextFundingPollTime()
+        {
+            var now = DateTime.UtcNow;
+            var intervalHours = FundingRolloverHours; // 8
+            var hoursSinceMidnight = now.TimeOfDay.TotalHours;
+            var hoursUntilNext = intervalHours - (hoursSinceMidnight % intervalHours);
+            return now.AddHours(hoursUntilNext).AddMinutes(1);
+        }
+
+        private async Task PollFundingFeesAsync()
+        {
+            var result = await _restClient.FuturesApiV2.Account.GetLedgerAsync(
+                productType: BitgetProductTypeV2.UsdtFutures,
+                businessType: "contract_settle_fee",
+                idLessThan: null,
+                startTime: DateTime.UtcNow.AddMinutes(-30)
+            );
+
+            if (!result.Success || result.Data == null) return;
+
+            foreach (var entry in result.Data.Entries)
+            {
+                var amount = entry.Quantity;
+                _algorithm?.Portfolio?.CashBook[SettleAsset].AddAmount(amount);
+                OnMessage(new FundingBrokerageMessageEvent(SettleAsset, amount));
+            }
         }
 
         public override void Disconnect()
         {
             _fundingUpdateConnected = false;
             _socketClientExData?.Dispose();
+            _fundingPollCts.Cancel();
             base.Disconnect();
         }
         #endregion
