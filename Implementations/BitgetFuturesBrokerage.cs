@@ -142,6 +142,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             }
         }
 
+        public override decimal MinimumOrderNotionalValue => 5m;
+
         protected override ExchangeParameters PlaceFuturesOrderExchangeParameters
         {
             get

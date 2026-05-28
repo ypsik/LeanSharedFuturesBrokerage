@@ -81,7 +81,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             }
 
             // Fallback auf die lokale Funktion
-            return _getHoldingsFunc?.Invoke() ?? new List<Holding>();
+            return _getHoldingsFunc?.Invoke() ?? [];
         }
 
         protected void OnBalanceUpdated()
