@@ -71,7 +71,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         // --- SINGLE SOURCE OF TRUTH ---
         // Primary key: clientOrderId (permanent, never changes).
         // Exchange ID is indexed separately via _orderStateManager for O(1) socket lookups.
-        private readonly OrderStateManager _orderStateManager = new();
+        protected readonly OrderStateManager _orderStateManager = new();
 
 
         #region Order Management
@@ -519,6 +519,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         if (_orderStateManager.TryGetValue(trade.ClientOrderId, out state))
                         {
                             _orderStateManager.MapNewExchangeId(trade.ClientOrderId, trade.OrderId);
+
+                            // Alias-Cleanup falls neue clientOrderId (z.B. Bitget Edit)
+                            if (trade.ClientOrderId != state.ClientOrderId)
+                            {
+                                _orderStateManager.RemoveAlias(state.ClientOrderId);
+                                state.ClientOrderId = trade.ClientOrderId;
+                            }
                         }
                     }
                 }
@@ -717,7 +724,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                         // 1. State-Properties aktualisieren
                         existingState.LastUpdateUtc = DateTime.UtcNow;
-                        
+
                         // 2. Exchange-ID atomar tauschen:
                         //    - entfernt alte BrokerId aus _statesByExchangeId
                         //    - setzt state.BrokerId = o.OrderId
@@ -725,6 +732,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         //    - ergänzt Order.BrokerId
                         //    - _statesByClientId[o.ClientOrderId] bleibt unverändert
                         _orderStateManager.MapNewExchangeId(o.ClientOrderId, o.OrderId);
+
+                        // Bitget-Style: neue clientOrderId war temporärer Alias → alten Key entfernen und State updaten
+                        if (o.ClientOrderId != existingState.ClientOrderId)
+                        {
+                            _orderStateManager.RemoveAlias(existingState.ClientOrderId);
+                            existingState.ClientOrderId = o.ClientOrderId;
+                        }
                         existingState.IsUpdatePending = false;
 
                         var brokerid = existingState.Order.BrokerId;

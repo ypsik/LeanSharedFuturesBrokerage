@@ -6,7 +6,7 @@ using static SilverQuant.Lean.Brokerages.Futures.Shared.SharedFuturesBrokerage;
 
 namespace SilverQuant.Lean.Brokerages.Futures.Shared.Common
 {
-    internal class OrderStateManager
+    public class OrderStateManager
     {
         // 1. Dein Master-Dictionary (Außenwelt / LEAN / REST)
         private readonly ConcurrentDictionary<string, OrderState> _statesByClientId = new();
@@ -40,6 +40,17 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.Common
         public bool TryGetValue(string clientId, out OrderState? state)
         {
             return _statesByClientId.TryGetValue(clientId, out state);
+        }
+
+        /// <summary>
+        /// Entfernt einen sekundären clientOrderId-Key aus _statesByClientId.
+        /// Wird verwendet wenn eine Exchange eine neue clientOrderId für ein Edit vergibt
+        /// und der alte Key nach erfolgreichem Mapping nicht mehr benötigt wird.
+        /// Exchange-ID-Index wird NICHT angefasst.
+        /// </summary>
+        public void RemoveAlias(string clientId)
+        {
+            _statesByClientId.TryRemove(clientId, out _);
         }
 
         public bool TryRemove(string clientId, out OrderState? state)

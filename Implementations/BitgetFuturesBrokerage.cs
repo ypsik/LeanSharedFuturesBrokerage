@@ -18,6 +18,7 @@ using QuantConnect.Orders;
 using QuantConnect.Securities;
 using RestSharp;
 using SilverQuant.Lean.Brokerages.Futures.Shared;
+using SilverQuant.Lean.Brokerages.Futures.Shared.Common;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -356,35 +357,53 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             });
         }
 
-        protected override async Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(Order order, decimal price, decimal? quantity)
+        protected override async Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(
+            Order order, decimal price, decimal? quantity)
         {
             if (!quantity.HasValue)
             {
                 Log.Error($"Update error: quantity not provided");
                 return new ExchangeWebResult<SharedId>(Name, ArgumentError.Missing("Quantity"));
-
             }
+
             var ticker = NativeTicker(order.Symbol);
 
+            string newClientOrderId = null;
+            var brokerId = order.BrokerId.LastOrDefault();
+            if (_orderStateManager.TryGetByExchangeId(brokerId, out var state))
+            {
+                newClientOrderId = _restClient.FuturesApiV2.SharedClient.GenerateClientOrderId();
+                _orderStateManager.TryAdd(newClientOrderId, state);
+            }
+            else
+            {
+                Log.Error($"Update error: old state missing for brokerId {brokerId}");
+                return new ExchangeWebResult<SharedId>(Name, new InvalidOperationError("old state missing"));                
+            }
+
             var res = await _restClient.FuturesApiV2.Trading.EditOrderAsync(
-                          productType: Bitget.Net.Enums.BitgetProductTypeV2.UsdtFutures,
-                          symbol: ticker,
-                          orderId: order.BrokerId.Last(),
-                          clientOrderId: GenerateClientId(order.Id),
-                          newPrice: price,
-                          newQuantity: Math.Abs(quantity.Value));
+                productType: Bitget.Net.Enums.BitgetProductTypeV2.UsdtFutures,
+                symbol: ticker,
+                orderId: brokerId,
+                clientOrderId: newClientOrderId,
+                newPrice: price,
+                newQuantity: Math.Abs(quantity.Value));
 
             if (!res.Success)
             {
+                if (!string.IsNullOrEmpty(newClientOrderId))
+                    _orderStateManager.RemoveAlias(newClientOrderId);
+
                 Log.Error($"Bitget update error: {res.Error} | Ticker: {ticker} | Price: {price} | OriginalData: {res.OriginalData}");
                 return new ExchangeWebResult<SharedId>(Name, res.Error);
             }
 
             return new ExchangeWebResult<SharedId>(
-                    Name,
-                    TradingMode.PerpetualLinear,
-                    res.As(new SharedId(res.Data.OrderId.ToString()))
-                );
+                Name,
+                TradingMode.PerpetualLinear,
+                res.As(new SharedId(res.Data.OrderId.ToString()))
+            );
         }
+
     }
 }
