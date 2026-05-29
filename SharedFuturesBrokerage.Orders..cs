@@ -740,9 +740,21 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                             existingState.ClientOrderId = o.ClientOrderId;
                         }
                         existingState.IsUpdatePending = false;
+                        var prevState = existingState.State;
                         existingState.State = existingState.FilledQuantity != 0m
-                            ? OrderLifeCycleState.PartiallyFilled
+                            ? (Math.Abs(existingState.FilledQuantity) >= Math.Abs(existingState.OriginalQuantity)
+                                ? OrderLifeCycleState.Filled
+                                : OrderLifeCycleState.PartiallyFilled)
                             : OrderLifeCycleState.Open;
+
+                        if(existingState.State == OrderLifeCycleState.Open && prevState == OrderLifeCycleState.Submitted)
+                        {
+                            OnOrderEvent(new OrderEvent(existingState.Order, DateTime.UtcNow, OrderFee.Zero)
+                            {
+                                Status = OrderStatus.UpdateSubmitted,
+                                Message = "Order modified"
+                            });
+                        }
 
                         var brokerid = existingState.Order.BrokerId;
                         brokerid.Add(o.OrderId);
