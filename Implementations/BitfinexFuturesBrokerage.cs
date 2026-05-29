@@ -36,7 +36,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             BitfinexSocketClient socketClient,
             IDataAggregator aggregator,
             Func<List<Holding>>? getHoldingsFunc = null)
-            : base(algorithm, "bybit")
+            : base(algorithm, "bitfinex")
         {
             _restClient = restClient;
             _socketClient = socketClient;
