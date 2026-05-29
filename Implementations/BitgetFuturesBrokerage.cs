@@ -401,7 +401,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             return new ExchangeWebResult<SharedId>(
                 Name,
                 TradingMode.PerpetualLinear,
-                res.As(new SharedId(res.Data.OrderId.ToString()))
+                res.As(new SharedId(brokerId))
             );
         }
 
