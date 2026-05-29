@@ -134,12 +134,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         public override List<CashAmount> GetCashBalance()
         {
-            return new List<CashAmount> { new CashAmount(Balance.Value, SettleAsset) };
-        }
-
-        protected override async Task<CallResult<UpdateSubscription>> ExecuteBalanceSubscriptionAsync(Action<List<CashAmount>> onUpdate)
-        {
-            return null;
+            return new List<CashAmount> { new CashAmount(0m, SettleAsset) };
         }
 
         protected override async Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(Order order, decimal price, decimal? quantity)

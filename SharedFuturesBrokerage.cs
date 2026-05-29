@@ -46,7 +46,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         protected UpdateSubscription _orderSocketSub, _userTradeSocketSub;
         protected readonly object _connectLock = new();
         protected readonly object _balanceUpdatesConnectLock = new();
-        private bool _isConnectedOrder, _isConnectedUserTrade, _isConnectedBalance;
+        private bool _isConnectedOrder, _isConnectedUserTrade;
         protected CancellationTokenSource _reconcileCts;
         protected Task? _reconcileTask = null;
         protected readonly TimeSpan _reconciliationInterval = TimeSpan.FromSeconds(30);
@@ -120,7 +120,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         public override bool AccountInstantlyUpdated { get; } = true;
 
-        public override bool IsConnected => _isConnectedOrder && _isConnectedUserTrade && _isConnectedBalance;
+        public override bool IsConnected => _isConnectedOrder && _isConnectedUserTrade;
 
         protected virtual ExchangeParameters UserTradesExchangeParameters => new ExchangeParameters();
         protected virtual ExchangeParameters OrderUpdatesExchangeParameters => new ExchangeParameters();
@@ -172,18 +172,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         _orderSocketSub = sub.Data;
                     }
                 }
-
-                if (BalanceUpdateSupported)
-                {
-                    if (!_isConnectedBalance)
-                    {
-                        lock (_balanceUpdatesConnectLock)
-                            RunSync(() => SubscribeToBalanceUpdatesAsync());
-                    }
-                }
-                else
-                    _isConnectedBalance = true;
             }
+            _cashBalanceTimer ??= new Timer(_ => RefreshCashBalance(), null,
+                    GetNextCashRefreshDelay(), TimeSpan.FromMinutes(30));
         }
 
         protected void SetupSubscriptionEvents(bool isSuccess, dynamic subscriptionData, Action<bool> setConnectedState, string streamName, string errorMessage, string? errorDetails = null)
@@ -220,10 +211,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             _reconcileCts?.Cancel();
             if (_userTradeSocketSub != null) RunSync(() => _userTradeSocketSub.CloseAsync());
             if (_orderSocketSub != null) RunSync(() => _orderSocketSub.CloseAsync());
-            if (_balanceUpdatesSocketSub != null) RunSync(() => _balanceUpdatesSocketSub.CloseAsync());            
             _isConnectedUserTrade = false;
             _isConnectedOrder = false;
-            _isConnectedBalance = false;
+            _cashBalanceTimer?.Dispose();
+            _cashBalanceTimer = null;
         }
 
         public virtual void SetJob(LiveNodePacket job)

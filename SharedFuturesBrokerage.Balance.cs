@@ -14,17 +14,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 {
     public abstract partial class SharedFuturesBrokerage
     {
-        protected decimal? Balance { get; set; }
-        private UpdateSubscription _balanceUpdatesSocketSub;
-        private bool _balanceUpdated;
-
-        protected virtual bool BalanceUpdateSupported => true;
+        private Timer? _cashBalanceTimer;
 
         public override List<CashAmount> GetCashBalance()
         {
-            if(Balance.HasValue)
-                return new List<CashAmount> { new CashAmount(Balance.Value, SettleAsset) };
-
             var res = RunSync(() => _balanceClient.GetBalancesAsync(new GetBalancesRequest()));
             return res.Success && res.Data != null
                 ? res.Data.Select(x => new CashAmount(x.Total, x.Asset ?? SettleAsset)).ToList()
@@ -86,47 +79,28 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             return _getHoldingsFunc?.Invoke() ?? [];
         }
 
-        protected void OnBalanceUpdated()
+        private static TimeSpan GetNextCashRefreshDelay()
         {
-            _balanceUpdated = true;
+            var now = DateTime.UtcNow;
+            var next = now.Date.AddHours(now.Hour).AddMinutes(now.Minute < 23 ? 23 : now.Minute < 53 ? 53 : 83);
+            if (now.Minute >= 53) next = now.Date.AddHours(now.Hour + 1).AddMinutes(23);
+            return next - now;
         }
 
-        protected virtual async Task<CallResult<UpdateSubscription>> ExecuteBalanceSubscriptionAsync(Action<List<CashAmount>> onUpdate)
+        private void RefreshCashBalance()
         {
-            return await _balanceSocket.SubscribeToBalanceUpdatesAsync(new SubscribeBalancesRequest(), update =>
+            try
             {
-                onUpdate(update.Data.Select(x => new CashAmount(x.Total, x.Asset)).ToList());
-            });
-        }
-        
-        private async Task SubscribeToBalanceUpdatesAsync()
-        {
-            _subRateGate.WaitToProceed();
-
-            // Hier wird jetzt die überschreibbare Methode aufgerufen
-            var sub = await ExecuteBalanceSubscriptionAsync(update =>
+                var cashAmounts = GetCashBalance();
+                foreach (var cash in cashAmounts)
+                    OnAccountChanged(new AccountEvent(cash.Currency, cash.Amount));
+                Log.Trace($"{Name}: Cash balance refreshed: {string.Join(", ", cashAmounts)}");
+            }
+            catch (Exception ex)
             {
-                foreach (var balance in update)
-                {
-                    Balance = balance.Amount;
-                    if (_balanceUpdated)
-                    {
-                        OnAccountChanged(new AccountEvent(balance.Currency, balance.Amount));
-                        _balanceUpdated = false;
-                    }
-                }
-            });
-
-            SetupSubscriptionEvents(
-                sub.Success,
-                sub.Data,
-                (state) => _isConnectedBalance = state,
-                "Balance updates",
-                "Balance updates socket failed",
-                sub.Error?.ToString()
-            );
-            if (sub.Success)
-                _balanceUpdatesSocketSub = sub.Data;
+                Log.Error($"{Name}: RefreshCashBalance failed: {ex.Message}");
+            }
         }
-    }   
+
+    }
 }

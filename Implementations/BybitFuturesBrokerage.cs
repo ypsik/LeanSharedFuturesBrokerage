@@ -28,9 +28,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         private bool _fundingUpdateConnected = false;
         private UpdateSubscription _fundingUpdateSubscription;
 
-        protected override bool BalanceUpdateSupported => false;
-
-
         internal BybitFuturesBrokerage(
             IAlgorithm algorithm,
             BybitRestClient restClient,
@@ -195,30 +192,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         public override List<CashAmount> GetCashBalance()
         {
-            if (Balance.HasValue)
-                return new List<CashAmount> { new CashAmount(Balance.Value, SettleAsset) };
-
             var res = RunSync(() => _restClient.V5Api.Account.GetBalancesAsync(Bybit.Net.Enums.AccountType.Unified));
             var result = new List<CashAmount>
             {
                 new CashAmount((res?.Data?.List?.FirstOrDefault()?.TotalMarginBalance ?? 0) - (res?.Data?.List?.FirstOrDefault()?.TotalPerpUnrealizedPnl ?? 0), SettleAsset)
             };
             return result;
-        }
-
-        protected override async Task<CallResult<UpdateSubscription>> ExecuteBalanceSubscriptionAsync(Action<List<CashAmount>> onUpdate)
-        {
-            return await _socketClient.V5PrivateApi.SubscribeToWalletUpdatesAsync(update =>
-            {
-                var wallet = update.Data.FirstOrDefault();
-                if (wallet?.TotalMarginBalance.HasValue??false)
-                {
-                    onUpdate(
-                        [
-                            new CashAmount(wallet.TotalMarginBalance.Value, SettleAsset)
-                        ]);
-                }
-            });
         }
 
         protected override async Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(Order order, decimal price, decimal? quantity)

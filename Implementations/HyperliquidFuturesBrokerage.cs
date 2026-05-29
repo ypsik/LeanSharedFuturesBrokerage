@@ -56,8 +56,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         protected override string SettleAsset => "USDC";
 
-        protected override bool BalanceUpdateSupported => false;
-
         // 1. LEAN DataQueueHandler Konstruktor
         public HyperliquidFuturesBrokerage() : base("hyperliquid")
         {
@@ -214,7 +212,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 {
                     _subRateGate.WaitToProceed();
                     DateTime connectTime = StartTime;
-                    /*
+                    
                     var sub = RunSync(() =>
                             _socketClient.FuturesApi.Account.SubscribeToUserFundingUpdatesAsync(null,
                             update =>
@@ -253,7 +251,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                     {
                         _fundingUpdateSubscription = sub.Data;
                     }
-                    */
+                    
                 }
 
                 base.Connect();
@@ -270,9 +268,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         public override List<CashAmount> GetCashBalance()
         {
-            if (Balance.HasValue)
-                return new List<CashAmount> { new CashAmount(Balance.Value, SettleAsset) };
-
             var res = RunSync(() => _restClient.SpotApi.Account.GetBalancesAsync());
             var usdcvalue = res?.Data.FirstOrDefault(x => x.Asset == SettleAsset);
 

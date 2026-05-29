@@ -32,7 +32,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         private BitgetSocketClient _socketClient;
         private BitgetSocketClient _socketClientExData;
         private bool _fundingUpdateConnected = false;
-        protected override bool BalanceUpdateSupported => false;
 
 
         internal BitgetFuturesBrokerage(
@@ -335,9 +334,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         public override List<CashAmount> GetCashBalance()
         {
-            if (Balance.HasValue)
-                return new List<CashAmount> { new CashAmount(Balance.Value, SettleAsset) };
-
             var res = RunSync(() => _restClient.FuturesApiV2.Account.GetBalancesAsync(Bitget.Net.Enums.BitgetProductTypeV2.UsdtFutures));
             var data = res?.Data?.FirstOrDefault();
             var cashBalance = (data?.UsdtEquity ?? 0) - (data?.UnrealizedProfitAndLoss ?? 0);
@@ -347,19 +343,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 new CashAmount(cashBalance, SettleAsset)
             };
             return result;
-        }
-
-        protected override async Task<CallResult<UpdateSubscription>> ExecuteBalanceSubscriptionAsync(Action<List<CashAmount>> onUpdate)
-        {
-            return await _socketClient.FuturesApiV2.SubscribeToBalanceUpdatesAsync(Bitget.Net.Enums.BitgetProductTypeV2.UsdtFutures, update =>
-            {
-                var wallet = update.Data.FirstOrDefault();
-                if(wallet != null)
-                    onUpdate(
-                        [
-                            new CashAmount(wallet.UsdtEquity, SettleAsset)
-                        ]);
-            });
         }
 
         protected override async Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(
