@@ -20,12 +20,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
     {
         public BitfinexFuturesBrokerageFactory() : base(typeof(BitfinexFuturesBrokerage))
         {
-            Market.Add("bitfinex", 905);
-
-            var mhdb = MarketHoursDatabase.FromDataFolder();
-            var alwaysOpen = SecurityExchangeHours.AlwaysOpen(TimeZones.Utc);
-
-            mhdb.SetEntry("bitfinex", null, SecurityType.CryptoFuture, alwaysOpen, TimeZones.Utc);
         }
 
         public override Dictionary<string, string> BrokerageData => new Dictionary<string, string>
