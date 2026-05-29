@@ -214,6 +214,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 {
                     _subRateGate.WaitToProceed();
                     DateTime connectTime = StartTime;
+                    /*
                     var sub = RunSync(() =>
                             _socketClient.FuturesApi.Account.SubscribeToUserFundingUpdatesAsync(null,
                             update =>
@@ -252,6 +253,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                     {
                         _fundingUpdateSubscription = sub.Data;
                     }
+                    */
                 }
 
                 base.Connect();
