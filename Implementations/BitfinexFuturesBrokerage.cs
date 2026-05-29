@@ -105,36 +105,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         public override bool IsConnected => base.IsConnected && _fundingUpdateConnected;
         public override bool ExchangeModifiesOrdersInPlace => true;
 
-        protected override ExchangeParameters OpenOrdersExchangeParameters
-        {
-            get
-            {
-                var parameters = base.PlaceFuturesOrderExchangeParameters;
-                parameters.AddValue(new ExchangeParameter("Bybit", "SettleAsset", SettleAsset));
-                return parameters;
-            }
-        }
-        protected override ExchangeParameters AccountHoldingsExchangeParameters
-        {
-            get
-            {
-                var parameters = base.PlaceFuturesOrderExchangeParameters;
-                parameters.AddValue(new ExchangeParameter("Bybit", "category", "linear"));
-                parameters.AddValue(new ExchangeParameter("Bybit", "settleCoin", SettleAsset));
-                return parameters;
-            }
-        }
-
-        protected override ExchangeParameters GetFundingRateHistoryParameters
-        {
-            get
-            {
-                var parameters = base.PlaceFuturesOrderExchangeParameters;
-                parameters.AddValue(new ExchangeParameter("Bybit", "category", "linear"));
-                return parameters;
-            }
-        }
-
         public override void Connect()
         {
             lock (_fundingUpdateLock)
