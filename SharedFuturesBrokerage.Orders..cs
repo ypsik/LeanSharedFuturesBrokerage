@@ -547,8 +547,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                                 // Fall B: Schwebendes Update (IsUpdatePending ist aktiv)
                                 // JEDER Fill (egal wie groß) wird geschluckt, da Kontext eindeutig!
                                 (s.IsUpdatePending &&
-                                 (s.State == OrderLifeCycleState.Open || s.State == OrderLifeCycleState.PartiallyFilled))
-                            ));
+                                 (s.State == OrderLifeCycleState.Open || s.State == OrderLifeCycleState.PartiallyFilled || s.State == OrderLifeCycleState.Submitted)))
+                            );
 
                         if (state != null)
                         {
@@ -740,6 +740,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                             existingState.ClientOrderId = o.ClientOrderId;
                         }
                         existingState.IsUpdatePending = false;
+                        existingState.State = existingState.FilledQuantity != 0m
+                            ? OrderLifeCycleState.PartiallyFilled
+                            : OrderLifeCycleState.Open;
 
                         var brokerid = existingState.Order.BrokerId;
                         brokerid.Add(o.OrderId);
