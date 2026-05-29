@@ -94,7 +94,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 var cashAmounts = GetCashBalance();
                 foreach (var cash in cashAmounts)
                     OnAccountChanged(new AccountEvent(cash.Currency, cash.Amount));
-                Log.Trace($"{Name}: Cash balance refreshed: {string.Join(", ", cashAmounts)}");
             }
             catch (Exception ex)
             {

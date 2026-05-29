@@ -269,16 +269,16 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         public override List<CashAmount> GetCashBalance()
         {
             var res = RunSync(() => _restClient.SpotApi.Account.GetBalancesAsync());
-            var usdcvalue = res?.Data.FirstOrDefault(x => x.Asset == SettleAsset);
+            var usdcValue = res?.Data.FirstOrDefault(x => x.Asset == SettleAsset);
 
             var futuresAccountResult = RunSync(() => _restClient.FuturesApi.Account.GetAccountInfoAsync());
-            decimal totalUpnl = usdcvalue.Total;
+            decimal cashBalance = usdcValue.Total;
 
             if (futuresAccountResult.Success && futuresAccountResult.Data != null)
             {
                 foreach (var assetPosition in futuresAccountResult.Data.Positions)
                 {
-                    totalUpnl += assetPosition.Position?.UnrealizedPnl ?? 0m;
+                    cashBalance -= assetPosition.Position?.UnrealizedPnl ?? 0m;
                 }
             }
             else
@@ -287,13 +287,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 return new List<CashAmount> { new CashAmount(0m, SettleAsset) };
             }
 
-            var result = new List<CashAmount>
+            return new List<CashAmount>
             {
-                new CashAmount(totalUpnl, SettleAsset)
+                new CashAmount(cashBalance, SettleAsset)
             };
-            return result;
         }
-
 
         protected override async Task<CallResult<UpdateSubscription>> CreateFundingSubscriptionAsync(
             string nativeTicker, Symbol symbol, Func<DateTime, decimal?, bool> onFundingRate)
