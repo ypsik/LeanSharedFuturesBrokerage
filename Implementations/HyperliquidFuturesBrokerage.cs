@@ -56,7 +56,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         protected override string SettleAsset => "USDC";
 
-
+        protected bool BalanceUpdateSupported => false;
 
         // 1. LEAN DataQueueHandler Konstruktor
         public HyperliquidFuturesBrokerage() : base("hyperliquid")
@@ -273,9 +273,26 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
             var res = RunSync(() => _restClient.SpotApi.Account.GetBalancesAsync());
             var usdcvalue = res?.Data.FirstOrDefault(x => x.Asset == SettleAsset);
+
+            var futuresAccountResult = RunSync(() => _restClient.FuturesApi.Account.GetAccountInfoAsync());
+            decimal totalUpnl = usdcvalue.Total;
+
+            if (futuresAccountResult.Success && futuresAccountResult.Data != null)
+            {
+                foreach (var assetPosition in futuresAccountResult.Data.Positions)
+                {
+                    totalUpnl += assetPosition.Position?.UnrealizedPnl ?? 0m;
+                }
+            }
+            else
+            {
+                Log.Error($"Cash {futuresAccountResult.Error?.Message}");
+                return new List<CashAmount> { new CashAmount(0m, SettleAsset) };
+            }
+
             var result = new List<CashAmount>
             {
-                new CashAmount(usdcvalue?.Total ?? 0m, SettleAsset)
+                new CashAmount(totalUpnl, SettleAsset)
             };
             return result;
         }
@@ -331,7 +348,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
             Log.Trace($"{Name}: SPDB Fix for {symbol.Value} - TickSize: {tickSize} (Price: {oraclePrice})");
         }
-
+        /*
         protected override async Task<CallResult<UpdateSubscription>> ExecuteBalanceSubscriptionAsync(Action<List<CashAmount>> onUpdate)
         {
             return await _socketClient.FuturesApi.Account.SubscribeToUserUpdatesAsync(null, update =>
@@ -346,6 +363,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 }
             });
         }
+        */
         /*
         protected override ExchangeParameters PlaceFuturesOrderExchangeParameters
         {

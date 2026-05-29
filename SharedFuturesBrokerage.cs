@@ -173,11 +173,16 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     }
                 }
 
-                if (!_isConnectedBalance)
+                if (BalanceUpdateSupported)
                 {
-                    lock (_balanceUpdatesConnectLock)
-                        RunSync(() => SubscribeToBalanceUpdatesAsync());
+                    if (!_isConnectedBalance)
+                    {
+                        lock (_balanceUpdatesConnectLock)
+                            RunSync(() => SubscribeToBalanceUpdatesAsync());
+                    }
                 }
+                else
+                    _isConnectedBalance = true;
             }
         }
 

@@ -368,11 +368,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
             var ticker = NativeTicker(order.Symbol);
 
-            string newClientOrderId = null;
+            string newClientOrderId = _restClient.FuturesApiV2.SharedClient.GenerateClientOrderId();
             var brokerId = order.BrokerId.LastOrDefault();
-            if (_orderStateManager.TryGetByExchangeId(brokerId, out var state))
+            if (brokerId != null && _orderStateManager.TryGetByExchangeId(brokerId, out var state))
             {
-                newClientOrderId = _restClient.FuturesApiV2.SharedClient.GenerateClientOrderId();
                 _orderStateManager.TryAdd(newClientOrderId, state);
             }
             else
@@ -382,7 +381,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             }
 
             var res = await _restClient.FuturesApiV2.Trading.EditOrderAsync(
-                productType: Bitget.Net.Enums.BitgetProductTypeV2.UsdtFutures,
+                productType: BitgetProductTypeV2.UsdtFutures,
                 symbol: ticker,
                 orderId: brokerId,
                 newClientOrderId: newClientOrderId,
