@@ -18,7 +18,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         private UpdateSubscription _balanceUpdatesSocketSub;
         private bool _balanceUpdated;
 
-        protected bool BalanceUpdateSupported => true;
+        protected virtual bool BalanceUpdateSupported => true;
 
         public override List<CashAmount> GetCashBalance()
         {

@@ -32,6 +32,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         private BitgetSocketClient _socketClient;
         private BitgetSocketClient _socketClientExData;
         private bool _fundingUpdateConnected = false;
+        protected override bool BalanceUpdateSupported => false;
+
 
         internal BitgetFuturesBrokerage(
             IAlgorithm algorithm,
@@ -337,9 +339,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 return new List<CashAmount> { new CashAmount(Balance.Value, SettleAsset) };
 
             var res = RunSync(() => _restClient.FuturesApiV2.Account.GetBalancesAsync(Bitget.Net.Enums.BitgetProductTypeV2.UsdtFutures));
+            var data = res?.Data?.FirstOrDefault();
+            var cashBalance = (data?.UsdtEquity ?? 0) - (data?.UnrealizedProfitAndLoss ?? 0);
+
             var result = new List<CashAmount>
             {
-                new CashAmount(res?.Data?.FirstOrDefault()?.CrossMarginMaxAvailable ?? 0 + res?.Data?.FirstOrDefault()?.CrossMarginUsed ?? 0, SettleAsset)
+                new CashAmount(cashBalance, SettleAsset)
             };
             return result;
         }

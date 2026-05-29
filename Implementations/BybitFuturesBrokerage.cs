@@ -28,6 +28,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         private bool _fundingUpdateConnected = false;
         private UpdateSubscription _fundingUpdateSubscription;
 
+        protected override bool BalanceUpdateSupported => false;
+
+
         internal BybitFuturesBrokerage(
             IAlgorithm algorithm,
             BybitRestClient restClient,
@@ -198,7 +201,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             var res = RunSync(() => _restClient.V5Api.Account.GetBalancesAsync(Bybit.Net.Enums.AccountType.Unified));
             var result = new List<CashAmount>
             {
-                new CashAmount(res?.Data?.List?.FirstOrDefault()?.TotalMarginBalance ?? 0, SettleAsset)
+                new CashAmount((res?.Data?.List?.FirstOrDefault()?.TotalMarginBalance ?? 0) - (res?.Data?.List?.FirstOrDefault()?.TotalPerpUnrealizedPnl ?? 0), SettleAsset)
             };
             return result;
         }

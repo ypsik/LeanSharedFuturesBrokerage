@@ -56,7 +56,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         protected override string SettleAsset => "USDC";
 
-        protected bool BalanceUpdateSupported => false;
+        protected override bool BalanceUpdateSupported => false;
 
         // 1. LEAN DataQueueHandler Konstruktor
         public HyperliquidFuturesBrokerage() : base("hyperliquid")
