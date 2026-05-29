@@ -9,6 +9,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Bitfinex.Net" Version="10.12.0" />
     <PackageReference Include="Bybit.Net" Version="6.13.0" />
     <PackageReference Include="CryptoExchange.Net" Version="11.2.0" />
     <PackageReference Include="HyperLiquid.Net" Version="4.5.1" />
