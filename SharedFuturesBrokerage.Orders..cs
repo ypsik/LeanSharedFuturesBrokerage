@@ -820,6 +820,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                             Message = "Order socket update"
                         });
                     }
+                    else if (leanStatus == OrderStatus.Submitted) // SharedOrderStatus.Open ohne Fill
+                    {
+                        state.State = OrderLifeCycleState.Open;
+                    }
                 }
             }
         }
