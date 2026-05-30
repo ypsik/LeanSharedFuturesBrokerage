@@ -85,7 +85,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 socketClient.FuturesApi.SharedClient,
                 socketClient.FuturesApi.SharedClient,
                 socketClient.FuturesApi.SharedClient,
-                socketClient.FuturesApi.SharedClient,
                 restClient.FuturesApi.SharedClient,
                 restClient.FuturesApi.SharedClient,
                 aggregator,
@@ -135,7 +134,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             InitializeBase(
                 _restClient.FuturesApi.SharedClient,
                 _restClient.FuturesApi.SharedClient,
-                _socketClient.FuturesApi.SharedClient,
                 _socketClient.FuturesApi.SharedClient,
                 _socketClient.FuturesApi.SharedClient,
                 _socketClient.FuturesApi.SharedClient,
@@ -272,7 +270,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             var usdcValue = res?.Data.FirstOrDefault(x => x.Asset == SettleAsset);
 
             var futuresAccountResult = RunSync(() => _restClient.FuturesApi.Account.GetAccountInfoAsync());
-            decimal cashBalance = usdcValue.Total;
+            decimal cashBalance = usdcValue?.Total ?? 0m;
 
             if (futuresAccountResult.Success && futuresAccountResult.Data != null)
             {
