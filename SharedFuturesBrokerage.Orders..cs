@@ -542,7 +542,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                                 // JEDER erste Teil-Fill (kleiner oder gleich der Gesamtmenge) wird akzeptiert!
                                 ((s.State == OrderLifeCycleState.Placing || s.State == OrderLifeCycleState.Submitted) &&
                                  string.IsNullOrEmpty(s.BrokerId) &&
-                                 Math.Abs(trade.Quantity) <= Math.Abs(s.Order.Quantity))
+                                 Math.Abs(trade.Quantity) <= Math.Abs(s.Remaining)))
                                 ||
                                 // Fall B: Schwebendes Update (IsUpdatePending ist aktiv)
                                 // JEDER Fill (egal wie groß) wird geschluckt, da Kontext eindeutig!
