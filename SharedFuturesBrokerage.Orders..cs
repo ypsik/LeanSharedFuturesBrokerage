@@ -540,22 +540,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                             (
                                 // Fall A: Reguläre neue Order im Transit (BrokerId ist leer)
                                 // JEDER erste Teil-Fill (kleiner oder gleich der Gesamtmenge) wird akzeptiert!
-                                s.State == OrderLifeCycleState.Placing || s.State == OrderLifeCycleState.Submitted) &&
-                                 string.IsNullOrEmpty(s.BrokerId) &&
-                                 Math.Abs(trade.Quantity) <= Math.Abs(s.Remaining)
-                                ||
-                                // Fall B: Schwebendes Update (IsUpdatePending ist aktiv)
-                                // JEDER Fill (egal wie groß) wird geschluckt, da Kontext eindeutig!
-                                s.IsUpdatePending &&
-                                 (s.State == OrderLifeCycleState.Open || s.State == OrderLifeCycleState.PartiallyFilled || s.State == OrderLifeCycleState.Submitted)
-                            );
-
-                        state = _orderStateManager.GetAllStates().FirstOrDefault(s =>
-                            s.Order.Symbol.Value == trade.Symbol &&
-                            (s.Order.Direction == (trade.Side == SharedOrderSide.Buy ? OrderDirection.Buy : OrderDirection.Sell)) &&
-                            (
-                                // Fall A: Reguläre neue Order im Transit (BrokerId ist leer)
-                                // JEDER erste Teil-Fill (kleiner oder gleich der Gesamtmenge) wird akzeptiert!
                                 (
                                     (s.State == OrderLifeCycleState.Placing || s.State == OrderLifeCycleState.Submitted) &&
                                     string.IsNullOrEmpty(s.BrokerId) &&
