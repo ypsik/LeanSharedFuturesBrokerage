@@ -547,7 +547,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                                 // Fall B: Schwebendes Update (IsUpdatePending ist aktiv)
                                 // JEDER Fill (egal wie groß) wird geschluckt, da Kontext eindeutig!
                                 (s.IsUpdatePending &&
-                                 (s.State == OrderLifeCycleState.Open || s.State == OrderLifeCycleState.PartiallyFilled || s.State == OrderLifeCycleState.Submitted)))
+                                 (s.State == OrderLifeCycleState.Open || s.State == OrderLifeCycleState.PartiallyFilled || s.State == OrderLifeCycleState.Submitted))
                             );
 
                         if (state != null)
