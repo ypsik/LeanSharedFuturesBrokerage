@@ -575,7 +575,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         }
                         else
                         {
-                            Log.Trace($"{Name}.HandleUserTradeSocket: Ignoring trade {trade.OrderId}. Neither OrderId nor ClientOrderId {trade.ClientOrderId} found.");
+                            Log.Trace($"{Name}.HandleUserTradeSocket: Ignoring trade {trade.OrderId}. Neither OrderId nor ClientOrderId {trade.ClientOrderId} found. " +
+                                $"Active states: [{string.Join(", ", _orderStateManager.GetAllStates().Select(s => $"ClientId={s.ClientOrderId} Symbol={NativeTicker(s.Order.Symbol)} State={s.State} IsUpdatePending={s.IsUpdatePending} BrokerId={s.BrokerId}"))}]");
                             continue;
                         }
                     }
