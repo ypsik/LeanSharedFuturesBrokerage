@@ -535,7 +535,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     if (state == null)
                     {
                         state = _orderStateManager.GetAllStates().FirstOrDefault(s =>
-                            s.Order.Symbol.Value == trade.Symbol &&
+                            NativeTicker(s.Order.Symbol) == trade.Symbol &&
                             (s.Order.Direction == (trade.Side == SharedOrderSide.Buy ? OrderDirection.Buy : OrderDirection.Sell)) &&
                             (
                                 // Fall A: Reguläre neue Order im Transit (BrokerId ist leer)
