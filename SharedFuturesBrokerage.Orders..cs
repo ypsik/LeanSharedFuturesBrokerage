@@ -281,9 +281,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             decimal price = lastUpdate?.LimitPrice ?? order.Price;
             decimal? quantity = order.Quantity;
 
-            var clientOrderId = GenerateClientId(order.Id);
-
-            if (_orderStateManager.TryGetValue(clientOrderId, out var state))
+            // FIX: Suche via BrokerId statt GenerateClientId
+            // GenerateClientId funktioniert nicht mehr nach Bitget-Style Modify
+            // weil state.ClientOrderId auf Bitget-generierte ID umgebogen wurde.
+            var activeBrokerId = order.BrokerId.LastOrDefault();
+            if (!string.IsNullOrEmpty(activeBrokerId) &&
+                _orderStateManager.TryGetByExchangeId(activeBrokerId, out var state))
             {
                 if (ExchangeModifiesOrdersInPlace)
                 {
@@ -291,7 +294,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 }
                 else
                 {
-                    // 🔥 HYPERLIQUID-FIX: Cancel+Replace-Börsen verlangen die nackte Restmenge!
                     if (lastUpdate?.Quantity.HasValue == true)
                     {
                         var newTotal = lastUpdate.Quantity.Value;
@@ -304,7 +306,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     }
                 }
 
-                // FIX: LEAN BrokerId-Historie isolieren
                 if (!string.IsNullOrEmpty(state.BrokerId))
                 {
                     order.BrokerId.Clear();
@@ -330,20 +331,18 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                             "UpdateOrderInvalid",
                             $"Order remaining size too small ({currentNotional:F2}$). Update cancelled."));
 
-                    // Wir liefern hier das FALSE zurück, damit LEAN weiß: Update abgelehnt.
-                    // Die Order bleibt mit ihrem alten, gültigen State im System bestehen.
                     return false;
                 }
             }
 
-            // Call an die Börse mit der exakten Restmenge und isolierten ID
             var res = RunSync(() => ExecuteUpdateOrderAsync(order, price, quantity));
 
             if (res?.Success != true)
             {
-                if (_orderStateManager.TryGetValue(clientOrderId, out var errorState))
+                if (!string.IsNullOrEmpty(activeBrokerId) &&
+                    _orderStateManager.TryGetByExchangeId(activeBrokerId, out var errorState))
                 {
-                    errorState?.IsUpdatePending = false;
+                    errorState.IsUpdatePending = false;
                 }
 
                 var errorMsg = res?.Error?.ToString() ?? "Unknown exchange error";
@@ -371,13 +370,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 return false;
             }
 
-            if (_orderStateManager.TryGetValue(clientOrderId, out var activeState))
+            if (!string.IsNullOrEmpty(activeBrokerId) &&
+                _orderStateManager.TryGetByExchangeId(activeBrokerId, out var activeState))
             {
-                // OriginalQuantity im State ist IMMER das LEAN-Gesamtziel!
-                if (lastUpdate?.Quantity.HasValue == true)
-                {
-                    activeState.OriginalQuantity = lastUpdate.Quantity.Value;
-                }
                 activeState.LastUpdateUtc = DateTime.UtcNow;
             }
 
