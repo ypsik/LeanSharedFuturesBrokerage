@@ -32,6 +32,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         /// </summary>
         public virtual bool ExchangeModifiesOrdersInPlace => false;
 
+        /// <summary>
+        /// Gibt an, ob die Börse einen dedizierten User-Trade-Stream (Fills) unterstützt.
+        /// Wenn false, werden Fills direkt im Order-Stream verarbeitet.
+        /// </summary>
+        public virtual bool ExchangeSupportsUserTradeStream => true;
+
+
         #region State Machine Models
 
         public enum OrderLifeCycleState
@@ -774,7 +781,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 // -------------------------------------------------------
                 // Dies MUSS vor dem State-Lookup passieren, damit es auch greift, 
                 // wenn der Trade-Socket die Order bereits gelöscht hat!
-                if (o.Status == SharedOrderStatus.Filled)
+                if (o.Status == SharedOrderStatus.Filled && ExchangeSupportsUserTradeStream)
                 {
                     Log.Trace($"{Name}.HandleOrderSocket: Hard-ignoring {o.Status} for {o.OrderId} in Order-Stream. Trade-Stream owns this.");
 
@@ -786,6 +793,48 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     continue;
                 }
 
+                // Wenn kein Trade-Stream unterstützt wird, verarbeiten wir jegliche Fills hier direkt 1:1 mit echten Fee-Daten aus dem Order-Payload
+                if (!ExchangeSupportsUserTradeStream && _orderStateManager.TryGetByExchangeId(o.OrderId, out var fillState))
+                {
+                    var sign = fillState.OriginalQuantity > 0 ? 1m : -1m;
+                    var absFilled = o.QuantityFilled?.QuantityInBaseAsset ?? (o.Status == SharedOrderStatus.Filled ? Math.Abs(fillState.OriginalQuantity) : 0m);
+                    var targetSignedFilled = absFilled * sign;
+                    var signedFill = targetSignedFilled - fillState.FilledQuantity;
+
+                    if (Math.Abs(signedFill) > 0)
+                    {
+                        var fee = o.Fee ?? 0m;
+
+                        fillState.FilledQuantity += signedFill;
+                        fillState.CumulativeFeePaid += fee;
+                        fillState.LastUpdateUtc = DateTime.UtcNow;
+
+                        var leanStatus = Math.Abs(fillState.FilledQuantity) >= Math.Abs(fillState.OriginalQuantity) || o.Status == SharedOrderStatus.Filled
+                            ? OrderStatus.Filled
+                            : OrderStatus.PartiallyFilled;
+
+                        fillState.State = leanStatus == OrderStatus.Filled ? OrderLifeCycleState.Filled : OrderLifeCycleState.PartiallyFilled;
+
+                        if (fillState.IsClosed)
+                        {
+                            _orderStateManager.TryRemove(fillState.ClientOrderId, out _);
+                        }
+
+                        OnOrderEvent(new OrderEvent(fillState.Order, DateTime.UtcNow, new OrderFee(new CashAmount(fee, o.FeeAsset ?? SettleAsset)))
+                        {
+                            Status = leanStatus,
+                            FillPrice = o.OrderPrice ?? 0m,
+                            FillQuantity = signedFill,
+                            Message = "Order socket stream (Execution fallback)"
+                        });
+
+                        if (leanStatus == OrderStatus.Filled)
+                        {
+                            continue;
+                        }
+                    }
+                }
+                
                 // -------------------------------------------------------
                 // NORMAL STATUS UPDATE (Nur für Canceled / Open etc.)
                 // -------------------------------------------------------
