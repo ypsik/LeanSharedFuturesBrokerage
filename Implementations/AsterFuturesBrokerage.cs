@@ -24,6 +24,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         // Speichert die aktiven Subscriptions pro Symbol und TickType
         private readonly ConcurrentDictionary<string, UpdateSubscription> _subscriptions = new();
+        public override bool ExchangeSupportsUserTradeStream => false;
+
 
         // 1. LEAN DataQueueHandler Konstruktor (Bybit-Style)
         public AsterFuturesBrokerage() : base("aster")

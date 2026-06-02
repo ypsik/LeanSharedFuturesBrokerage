@@ -30,6 +30,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         private bool _fundingUpdateConnected = false;
         private UpdateSubscription _fundingUpdateSubscription;
 
+        public override bool ExchangeSupportsUserTradeStream => false;
+
         internal BingxFuturesBrokerage(
             IAlgorithm algorithm,
             BingXRestClient restClient,

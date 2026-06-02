@@ -134,25 +134,28 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     _reconcileTask = Task.Run(() => ReconcileLoop(_reconcileCts.Token));
                 }
 
-                if (!_isConnectedUserTrade)
+                if (ExchangeSupportsUserTradeStream)
                 {
-                    _subRateGate.WaitToProceed();
-
-                    var userTradeRequest = new CryptoExchange.Net.SharedApis.SubscribeUserTradeRequest
+                    if (!_isConnectedUserTrade)
                     {
-                        ExchangeParameters = UserTradesExchangeParameters // <--- Nutzt die spezifische Property für User Trades
-                    };
+                        _subRateGate.WaitToProceed();
 
-                    var sub = RunSync(() => _userTradeSocket.SubscribeToUserTradeUpdatesAsync(userTradeRequest, HandleUserTradeSocket));
-                    
-                    SetupSubscriptionEvents(sub.Success, sub.Data, state => _isConnectedUserTrade = state, "User trade", "User trade socket failed", sub.Error?.ToString());
-                    if (sub.Success)
-                    {
-                        _userTradeSocketSub = sub.Data;
+                        var userTradeRequest = new CryptoExchange.Net.SharedApis.SubscribeUserTradeRequest
+                        {
+                            ExchangeParameters = UserTradesExchangeParameters // <--- Nutzt die spezifische Property für User Trades
+                        };
+
+                        var sub = RunSync(() => _userTradeSocket.SubscribeToUserTradeUpdatesAsync(userTradeRequest, HandleUserTradeSocket));
+
+                        SetupSubscriptionEvents(sub.Success, sub.Data, state => _isConnectedUserTrade = state, "User trade", "User trade socket failed", sub.Error?.ToString());
+                        if (sub.Success)
+                        {
+                            _userTradeSocketSub = sub.Data;
+                        }
                     }
-
-                    
                 }
+                else
+                    _isConnectedUserTrade = true;
 
                 if (!_isConnectedOrder)
                 {
