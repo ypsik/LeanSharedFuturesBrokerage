@@ -126,7 +126,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         {
             lock (_connectLock)
             {
-                if (_balanceClient == null || _orderSocket == null || _userTradeSocket == null) throw new InvalidOperationException("Clients not configured");
+                if (_balanceClient == null || _orderSocket == null || _userTradeSocket == null && ExchangeSupportsUserTradeStream) throw new InvalidOperationException("Clients not configured");
 
                 if (_reconcileTask == null)
                 {
