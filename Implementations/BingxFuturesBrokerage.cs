@@ -73,7 +73,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
             foreach (var contract in result.Data.Where(c => c.Status == 1))
             {
-                var ticker = contract.Symbol;
+                var ticker = contract.Asset + contract.Currency;
 
                 var tickSize = (decimal)Math.Pow(10, -contract.PricePrecision);
 
@@ -85,7 +85,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                     contractMultiplier: 1m,
                     minimumPriceVariation: tickSize,
                     lotSize: lotSize,
-                    marketTicker: contract.Asset + contract.Currency
+                    marketTicker: contract.Symbol
                 );
 
                 _spdb.SetEntry("bingx", ticker, SecurityType.CryptoFuture, symbolProperties);
