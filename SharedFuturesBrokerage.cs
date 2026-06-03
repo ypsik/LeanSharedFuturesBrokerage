@@ -30,7 +30,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         protected IFuturesOrderRestClient _orderClient;
         protected IBalanceRestClient _balanceClient;
         protected IFuturesOrderSocketClient _orderSocket;
-        protected IUserTradeSocketClient _userTradeSocket;
+        protected IUserTradeSocketClient? _userTradeSocket;
         protected IKlineRestClient _klineClient;
         protected IFundingRateRestClient _fundingRateClient;
         protected Func<List<Holding>>? _getHoldingsFunc;
@@ -74,7 +74,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             IBookTickerSocketClient bookTickerSocket,
             IFuturesOrderSocketClient orderSocket,
             ITradeSocketClient tradeSocket,
-            IUserTradeSocketClient userTradeSocket,
+            IUserTradeSocketClient? userTradeSocket,
             IFundingRateRestClient fundingRateClient,
             IKlineRestClient klineClient,
             IDataAggregator aggregator, // <-- Der kommt jetzt an

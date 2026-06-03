@@ -30,8 +30,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         private BingXSocketClient _socketClientExData;
         private readonly object _fundingUpdateLock = new();
         private bool _fundingUpdateConnected = false;
-        private UpdateSubscription _fundingUpdateSubscription;
+        private UpdateSubscription? _fundingUpdateSubscription;
         private CancellationTokenSource _fundingCts;
+        private CancellationTokenSource? _userStreamCts;
+        
 
         public override bool ExchangeSupportsUserTradeStream => false;
 
@@ -53,7 +55,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 socketClient.PerpetualFuturesApi.SharedClient,
                 socketClient.PerpetualFuturesApi.SharedClient,
                 socketClient.PerpetualFuturesApi.SharedClient,
-                null,//socketClient.PerpetualFuturesApi.SharedClient,
+                null,// user trade stream wird von BingX nicht unterstützt, daher null
                 restClient.PerpetualFuturesApi.SharedClient,
                 restClient.PerpetualFuturesApi.SharedClient,
                 aggregator,
@@ -89,7 +91,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 _socketClient.PerpetualFuturesApi.SharedClient,
                 _socketClient.PerpetualFuturesApi.SharedClient,
                 _socketClient.PerpetualFuturesApi.SharedClient,
-                null,//socketClient.PerpetualFuturesApi.SharedClient,
+                null, // user trade stream wird von BingX nicht unterstützt, daher null
                 _restClient.PerpetualFuturesApi.SharedClient,
                 _restClient.PerpetualFuturesApi.SharedClient,
                 aggregator,
@@ -133,48 +135,152 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             _fundingCts = new CancellationTokenSource();
             lock (_fundingUpdateLock)
             {
-                /*
-                if (_fundingUpdateSubscription == null && _socketClient != null)
-                {
-                    _subRateGate.WaitToProceed();
-                    var sub = RunSync(() =>
-                        _socketClient.V5PrivateApi.SubscribeToUserTradeUpdatesAsync(update =>
+                // Start the isolated user stream setup
+                EstablishUserStreamSubscription();
+            }
+            base.Connect();
+        }
+
+        /// <summary>
+        /// Handles the isolated logic for fetching the ListenKey and subscribing to the WebSocket.
+        /// </summary>
+        private void EstablishUserStreamSubscription()
+        {
+            if (_fundingUpdateSubscription != null || _socketClient == null)
+            {
+                return;
+            }
+
+            _subRateGate.WaitToProceed();
+
+            // Isolated token source specifically for the ListenKey lifecycle and keep-alive loop
+            _userStreamCts = new CancellationTokenSource();
+
+            // 1. Request ListenKey via REST-API
+            var listenKeyResult = RunSync(() => _restClient.PerpetualFuturesApi.Account.StartUserStreamAsync(_userStreamCts.Token));
+
+            if (!listenKeyResult.Success)
+            {
+                Log.Error($"BingX: Failed to create UserStream: {listenKeyResult.Error}");
+                return;
+            }
+
+            string listenKey = listenKeyResult.Data;
+
+            // 2. Subscribe to WebSocket with the generated listenKey and handle expiration
+            var sub = RunSync(() =>
+                _socketClient.PerpetualFuturesApi.SubscribeToUserDataUpdatesAsync(
+                    listenKey,
+                    onAccountUpdate: update =>
+                    {
+                        if (update.Data?.Update?.Trigger == "FUNDING_FEE")
                         {
-                            foreach (var fundingsRecord in update.Data.Where(f => f?.TradeType != null && f.TradeType == Bybit.Net.Enums.TradeType.Funding))
+                            foreach (var fundingsRecord in update.Data.Update.Balances)
                             {
                                 if (_algorithm?.Portfolio?.CashBook != null)
                                 {
-                                    var fundings = -fundingsRecord.Fee ?? 0m;
-                                    _algorithm.Portfolio.CashBook[SettleAsset].AddAmount(fundings);
-                                    OnMessage(new FundingBrokerageMessageEvent(fundingsRecord.FeeAsset ?? SettleAsset, fundings));
+                                    _algorithm.Portfolio.CashBook[SettleAsset].AddAmount(fundingsRecord.BalanceChange);
+                                    OnMessage(new FundingBrokerageMessageEvent(fundingsRecord.Asset ?? SettleAsset, fundingsRecord.BalanceChange));
                                 }
                             }
-                        }));
-
-
-                    SetupSubscriptionEvents(
-                                    sub.Success,
-                                    sub.Data,
-                                    (state) => _fundingUpdateConnected = state,
-                                    "Wallet updates",
-                                    "Wallet updates subscription failed",
-                                    sub.Error?.ToString()
-                                );
-
-                    if (sub.Success)
+                        }
+                    },
+                    onOrderUpdate: null,
+                    onConfigurationUpdate: null,
+                    onListenKeyExpiredUpdate: expiredEvent =>
                     {
-                        _fundingUpdateSubscription = sub.Data;
+                        Log.Trace("BingX: ListenKey expired! Initiating reconnect...");
+
+                        // Trigger reconnect logic asynchronously outside the lock to prevent deadlocks
+                        Task.Run(() => ReconnectUserStream());
+                    },
+                    ct: _userStreamCts.Token));
+
+            SetupSubscriptionEvents(
+                sub.Success,
+                sub.Data,
+                (state) => _fundingUpdateConnected = state,
+                "Wallet updates",
+                "Wallet updates subscription failed",
+                sub.Error?.ToString()
+            );
+
+            if (sub.Success)
+            {
+                _fundingUpdateSubscription = sub.Data;
+
+                // 3. Start background keep-alive loop using the dedicated token
+                StartListenKeyKeepAliveLoop(listenKey, _userStreamCts.Token);
+            }
+        }
+
+        /// <summary>
+        /// Safely terminates the old subscription and rebuilds ONLY the user stream.
+        /// </summary>
+        private void ReconnectUserStream()
+        {
+            lock (_fundingUpdateLock)
+            {
+                try
+                {
+                    // Cancel old token (safely stops the previous keep-alive loop only)
+                    _userStreamCts?.Cancel();
+                    _userStreamCts?.Dispose();
+                    _userStreamCts = null;
+
+                    // Unsubscribe old session if exists
+                    if (_fundingUpdateSubscription != null && _socketClient != null)
+                    {
+                        RunSync(() => _socketClient.UnsubscribeAsync(_fundingUpdateSubscription));
+                        _fundingUpdateSubscription = null;
                     }
                 }
-                */
-                base.Connect();
+                catch (Exception ex)
+                {
+                    Log.Error($"BingX: Error during unsubscribe while reconnecting: {ex.Message}");
+                }
+
+                // ONLY rebuild the specific user stream, leaving other Connect() logic completely alone
+                EstablishUserStreamSubscription();
             }
+        }
+
+        private void StartListenKeyKeepAliveLoop(string listenKey, CancellationToken ct)
+        {
+            Task.Run(async () =>
+            {
+                while (!ct.IsCancellationRequested)
+                {
+                    try
+                    {
+                        await Task.Delay(TimeSpan.FromMinutes(45), ct);
+
+                        if (ct.IsCancellationRequested) break;
+
+                        var pingResult = await _restClient.PerpetualFuturesApi.Account.KeepAliveUserStreamAsync(listenKey, ct);
+                        if (!pingResult.Success)
+                        {
+                            Log.Error($"BingX: Keep-alive for ListenKey failed: {pingResult.Error}");
+                        }
+                    }
+                    catch (TaskCanceledException)
+                    {
+                        break;
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Error($"BingX: Error in ListenKey keep-alive loop: {ex.Message}");
+                    }
+                }
+            }, ct);
         }
 
         public override void Disconnect()
         {
             _fundingCts?.Cancel();
             _fundingCts?.Dispose();
+            _userStreamCts?.Cancel();
+            _userStreamCts?.Dispose();
             RunSync(() => _fundingUpdateSubscription?.CloseAsync() ?? Task.CompletedTask);
             _socketClientExData?.Dispose();
             base.Disconnect();
@@ -275,35 +381,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             }, _fundingCts.Token);
 
             return true;
-        }
-
-
-        protected override async Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(Order order, decimal price, decimal? quantity)
-        {
-            var ticker = NativeTicker(order.Symbol);
-            /*
-            var res = await _restClient.PerpetualFuturesApi.Trading.(
-                          symbol: ticker,
-                          orderId: order.BrokerId.Last(),
-                          price: price,
-                          quantity: Math.Abs(quantity));
-
-            if (!res.Success)
-            {
-                Log.Error($"Bingx update error: {res.Error} | Ticker: {ticker} | Price: {price} | OriginalData: {res.OriginalData}");
-                return new ExchangeWebResult<SharedId>(Name, res.Error);
-            }
-
-            // KORREKTUR: Bybit verändert die OrderId bei einem Modify NICHT. 
-            // Daher wird hier die echte, bestätigte OrderId durchgereicht.
-            return new ExchangeWebResult<SharedId>(
-                    Name,
-                    TradingMode.PerpetualLinear,
-                    res.As(new SharedId(res.Data.OrderId.ToString()))
-                );
-            */
-            throw new NotImplementedException();
-
         }
     }
 }
