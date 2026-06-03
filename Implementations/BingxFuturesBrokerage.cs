@@ -81,11 +81,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
                 var symbolProperties = new SymbolProperties(
                     description: $"BingX {contract.Asset} Perpetual",
-                    quoteCurrency: SettleAsset,
+                    quoteCurrency: contract.Currency,
                     contractMultiplier: 1m,
                     minimumPriceVariation: tickSize,
                     lotSize: lotSize,
-                    marketTicker: contract.Symbol
+                    marketTicker: contract.Asset + contract.Currency
                 );
 
                 _spdb.SetEntry("bingx", ticker, SecurityType.CryptoFuture, symbolProperties);
