@@ -62,7 +62,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         public override IEnumerable<BaseData> GetHistory(QuantConnect.Data.HistoryRequest request)
         {
             var sharedSymbol = GetSharedSymbol(request.Symbol);
-            Log.Trace($"GetHistory called: Symbol={sharedSymbol.SymbolName}, DataType={request.DataType.Name}, Resolution={request.Resolution}, StartUtc={request.StartTimeUtc}, EndUtc={request.EndTimeUtc}");
+            Log.Trace($"GetHistory called: Symbol={sharedSymbol.BaseAsset+sharedSymbol.QuoteAsset}, DataType={request.DataType.Name}, Resolution={request.Resolution}, StartUtc={request.StartTimeUtc}, EndUtc={request.EndTimeUtc}");
 
             var minStartTimeUtc = request.EndTimeUtc.AddMinutes(-MaxHistoryLookbackMinutes);
             var startTimeUtc = request.StartTimeUtc < minStartTimeUtc ? minStartTimeUtc : request.StartTimeUtc;
