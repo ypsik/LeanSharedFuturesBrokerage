@@ -383,8 +383,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 var sub = RunSync(() => CreateFundingSubscriptionAsync(nativeTicker, symbol, onFundingRate));
 
                 SetupSubscriptionEvents(sub.Success, sub.Data, _ => { },
-                  $"Funding {nativeTicker}",
-                  $"SubscribeFunding failed for {symbol}: {sub.Error?.Message}",
+                  $"MarginInterestRate {nativeTicker}",
+                  $"SubscribeMarginInterestRate failed for {symbol}: {sub.Error?.Message}",
                   sub.Error?.ToString());
 
                 if (sub.Success)
