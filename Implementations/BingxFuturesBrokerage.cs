@@ -46,7 +46,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             BingXSocketClient socketClient,
             IDataAggregator aggregator,
             Func<List<Holding>>? getHoldingsFunc = null)
-            : base(algorithm, "bybit")
+            : base(algorithm, "bingx")
         {
             _restClient = restClient;
             _socketClient = socketClient;
@@ -107,11 +107,21 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         public override bool IsConnected => base.IsConnected && _fundingUpdateConnected;
         public override bool ExchangeModifiesOrdersInPlace => true;
 
+        protected override ExchangeParameters OrderUpdatesExchangeParameters
+        {
+            get
+            {
+                var parameters = base.OrderUpdatesExchangeParameters;
+                parameters.AddValue(new ExchangeParameter("BingX", "ListenKey", _listenKey));
+                return parameters;
+            }
+        }
+
         protected override ExchangeParameters OpenOrdersExchangeParameters
         {
             get
             {
-                var parameters = base.PlaceFuturesOrderExchangeParameters;
+                var parameters = base.OpenOrdersExchangeParameters;
                 return parameters;
             }
         }
@@ -119,7 +129,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         {
             get
             {
-                var parameters = base.PlaceFuturesOrderExchangeParameters;
+                var parameters = base.AccountHoldingsExchangeParameters;
                 return parameters;
             }
         }
@@ -128,7 +138,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         {
             get
             {
-                var parameters = base.PlaceFuturesOrderExchangeParameters;
+                var parameters = base.GetFundingRateHistoryParameters;
                 return parameters;
             }
         }
@@ -385,16 +395,5 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
             return true;
         }
-
-        protected override ExchangeParameters OrderUpdatesExchangeParameters
-        {
-            get
-            {
-                var parameters = base.OrderUpdatesExchangeParameters;
-                parameters.AddValue(new ExchangeParameter("BingX", "ListenKey", _listenKey));
-                return parameters;
-            }
-        }
-
     }
 }
