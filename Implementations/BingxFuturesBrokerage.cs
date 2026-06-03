@@ -391,7 +391,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             get
             {
                 var parameters = base.OrderUpdatesExchangeParameters;
-                parameters.AddValue(new ExchangeParameter("Bingx", "ListenKey", _listenKey));
+                parameters.AddValue(new ExchangeParameter("BingX", "ListenKey", _listenKey));
                 return parameters;
             }
         }
