@@ -33,7 +33,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         private UpdateSubscription? _fundingUpdateSubscription;
         private CancellationTokenSource _fundingCts;
         private CancellationTokenSource? _userStreamCts;
-        
+
+        private string _listenKey;
+
+
 
         public override bool ExchangeSupportsUserTradeStream => false;
 
@@ -165,12 +168,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 return;
             }
 
-            string listenKey = listenKeyResult.Data;
+            _listenKey = listenKeyResult.Data;
 
             // 2. Subscribe to WebSocket with the generated listenKey and handle expiration
             var sub = RunSync(() =>
                 _socketClient.PerpetualFuturesApi.SubscribeToUserDataUpdatesAsync(
-                    listenKey,
+                    _listenKey,
                     onAccountUpdate: update =>
                     {
                         if (update.Data?.Update?.Trigger == "FUNDING_FEE")
@@ -210,7 +213,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 _fundingUpdateSubscription = sub.Data;
 
                 // 3. Start background keep-alive loop using the dedicated token
-                StartListenKeyKeepAliveLoop(listenKey, _userStreamCts.Token);
+                StartListenKeyKeepAliveLoop(_listenKey, _userStreamCts.Token);
             }
         }
 
@@ -382,5 +385,16 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
             return true;
         }
+
+        protected override ExchangeParameters OrderUpdatesExchangeParameters
+        {
+            get
+            {
+                var parameters = base.OrderUpdatesExchangeParameters;
+                parameters.AddValue(new ExchangeParameter("Bingx", "ListenKey", _listenKey));
+                return parameters;
+            }
+        }
+
     }
 }
