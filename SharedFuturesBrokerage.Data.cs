@@ -61,7 +61,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         public override IEnumerable<BaseData> GetHistory(QuantConnect.Data.HistoryRequest request)
         {
-            Log.Trace($"GetHistory called: Symbol={request.Symbol}, DataType={request.DataType.Name}, Resolution={request.Resolution}, StartUtc={request.StartTimeUtc}, EndUtc={request.EndTimeUtc}");
+            var sharedSymbol = GetSharedSymbol(request.Symbol);
+            Log.Trace($"GetHistory called: Symbol={sharedSymbol.SymbolName}, DataType={request.DataType.Name}, Resolution={request.Resolution}, StartUtc={request.StartTimeUtc}, EndUtc={request.EndTimeUtc}");
 
             var minStartTimeUtc = request.EndTimeUtc.AddMinutes(-MaxHistoryLookbackMinutes);
             var startTimeUtc = request.StartTimeUtc < minStartTimeUtc ? minStartTimeUtc : request.StartTimeUtc;
@@ -70,7 +71,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             {
                 if (_fundingRateClient == null) yield break;
 
-                var fundingReq = new GetFundingRateHistoryRequest(GetSharedSymbol(request.Symbol))
+                var fundingReq = new GetFundingRateHistoryRequest(sharedSymbol)
                 {
                     StartTime = startTimeUtc,
                     EndTime = request.EndTimeUtc,
@@ -103,7 +104,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         {
                             retryCount++;
                             int delay = 1200 * retryCount;
-                            Log.Error($"Rate Limit hit for {request.Symbol} (MarginInterestRate). Retry {retryCount}/{maxRetries} after {delay}ms...");
+                            Log.Error($"Rate Limit hit for {sharedSymbol.SymbolName} (MarginInterestRate). Retry {retryCount}/{maxRetries} after {delay}ms...");
                             System.Threading.Thread.Sleep(delay);
                             continue;
                         }
@@ -114,14 +115,14 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     {
                         if (pagesLoaded > 0)
                         {
-                            Log.Trace($"GetHistory (MarginInterestRate) for {request.Symbol} stopped paging at page {pagesLoaded + 1} (No more data or end of timeline). Total loaded: {totalRatesLoaded}");
+                            Log.Trace($"GetHistory (MarginInterestRate) for {sharedSymbol.SymbolName} stopped paging at page {pagesLoaded + 1} (No more data or end of timeline). Total loaded: {totalRatesLoaded}");
                             break;
                         }
 
                         string diag = res == null
                             ? "Result object is completely NULL (RunSync failed)."
                             : $"Success={res.Success}, DataIsNull={res.Data == null}, ErrorMsg='{res.Error?.Message}', Code='{res.Error?.Code}'";
-                        Log.Error($"GetHistory Error (MarginInterestRate) for {request.Symbol}: {diag}");
+                        Log.Error($"GetHistory Error (MarginInterestRate) for {sharedSymbol.SymbolName}: {diag}");
                         yield break;
                     }
 
@@ -140,7 +141,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             else
             {
                 if (_klineClient == null) yield break;
-                var shared = GetSharedSymbol(request.Symbol);
                 var interval = request.Resolution switch
                 {
                     Resolution.Minute => (SharedKlineInterval?)SharedKlineInterval.OneMinute,
@@ -150,7 +150,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 };
                 if (interval == null) yield break;
 
-                var klineReq = new GetKlinesRequest(shared, interval.Value) { StartTime = startTimeUtc, EndTime = request.EndTimeUtc, ExchangeParameters = GetKlinesHistoryParameters };
+                var klineReq = new GetKlinesRequest(sharedSymbol, interval.Value) { StartTime = startTimeUtc, EndTime = request.EndTimeUtc, ExchangeParameters = GetKlinesHistoryParameters };
 
                 int totalCandlesLoaded = 0;
                 int pagesLoaded = 0;
@@ -178,7 +178,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         {
                             retryCount++;
                             int delay = 1200 * retryCount;
-                            Log.Error($"Rate Limit hit for {request.Symbol} (Klines). Retry {retryCount}/{maxRetries} after {delay}ms...");
+                            Log.Error($"Rate Limit hit for {sharedSymbol.SymbolName} (Klines). Retry {retryCount}/{maxRetries} after {delay}ms...");
                             System.Threading.Thread.Sleep(delay);
                             continue;
                         }
@@ -189,14 +189,14 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     {
                         if (pagesLoaded > 0)
                         {
-                            Log.Trace($"GetHistory (Klines) for {request.Symbol} stopped paging at page {pagesLoaded + 1} (No more data or end of timeline). Total loaded: {totalCandlesLoaded}");
+                            Log.Trace($"GetHistory (Klines) for {sharedSymbol.SymbolName} stopped paging at page {pagesLoaded + 1} (No more data or end of timeline). Total loaded: {totalCandlesLoaded}");
                             break;
                         }
 
                         string diag = res == null
                             ? "Result object is completely NULL (RunSync failed)."
                             : $"Success={res.Success}, DataIsNull={res.Data == null}, ErrorMsg='{res.Error?.Message}', Code='{res.Error?.Code}'";
-                        Log.Error($"GetHistory Error (Klines) for {request.Symbol}: {diag}");
+                        Log.Error($"GetHistory Error (Klines) for {sharedSymbol.SymbolName}: {diag}");
                         yield break;
                     }
 
