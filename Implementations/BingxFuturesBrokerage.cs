@@ -129,6 +129,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             );
         }
 
+        protected override string NormalizeSymbol(string rawSymbol)
+                => rawSymbol.Replace("-", "");
+
         #region Connect
 
         public override bool IsConnected => base.IsConnected && _fundingUpdateConnected;
