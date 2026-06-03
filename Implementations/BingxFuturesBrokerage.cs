@@ -48,6 +48,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             _socketClient = socketClient;
             _socketClientExData = new BingXSocketClient();
 
+            PopulateSPDB();
+
             InitializeBase(
                 restClient.PerpetualFuturesApi.SharedClient,
                 restClient.PerpetualFuturesApi.SharedClient,
@@ -59,6 +61,35 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 restClient.PerpetualFuturesApi.SharedClient,
                 aggregator,
                 getHoldingsFunc);
+        }
+
+        private void PopulateSPDB()
+        {
+            var result = RunSync(() => _restClient.PerpetualFuturesApi.ExchangeData
+                .GetContractsAsync());
+
+            if (!result.Success)
+                throw new Exception($"Failed to load BingX assets: {result.Error}");
+
+            foreach (var contract in result.Data.Where(c => c.Status == 1))
+            {
+                var ticker = contract.Symbol;
+
+                var tickSize = (decimal)Math.Pow(10, -contract.PricePrecision);
+
+                var lotSize = contract.MinOrderQuantity;
+
+                var symbolProperties = new SymbolProperties(
+                    description: $"BingX {contract.Asset} Perpetual",
+                    quoteCurrency: SettleAsset,
+                    contractMultiplier: 1m,
+                    minimumPriceVariation: tickSize,
+                    lotSize: lotSize,
+                    marketTicker: contract.Symbol
+                );
+
+                _spdb.SetEntry("bingx", ticker, SecurityType.CryptoFuture, symbolProperties);
+            }
         }
 
         protected override void InitializeFromJob(QuantConnect.Packets.LiveNodePacket job, IDataAggregator aggregator)
