@@ -279,7 +279,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         public override bool UpdateOrder(Order order)
         {
-            if (!order.BrokerId.Any() || ExecuteUpdateOrderAsync == null)
+            if (!order.BrokerId.Any())
                 return false;
 
             var ticket = _orderManager.GetOrderTicket(order.Id);
@@ -391,7 +391,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             => _orderClient.PlaceFuturesOrderAsync(request);
 
         protected virtual Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(Order order, decimal price, decimal? quantity)
-            => Task.FromResult<ExchangeWebResult<SharedId>>(null);
+            => Task.FromResult<ExchangeWebResult<SharedId>>(new ExchangeWebResult<SharedId>(Name, new InvalidOperationError("Update order not supported by this exchange")));
 
         protected virtual ExchangeParameters CancelFuturesOrderExchangeParameters => new ExchangeParameters();
         protected virtual Task<ExchangeWebResult<SharedId>> ExecuteCancelOrderAsync(CxCancelOrderRequest request)
