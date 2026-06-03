@@ -13,6 +13,7 @@ using QuantConnect.Interfaces;
 using QuantConnect.Logging;
 using QuantConnect.Orders;
 using QuantConnect.Securities;
+using QuantConnect.Util;
 using RestSharp;
 using SilverQuant.Lean.Brokerages.Futures.Shared;
 using System;
@@ -131,6 +132,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         protected override string NormalizeSymbol(string rawSymbol)
                 => rawSymbol.Replace("-", "");
+
+        protected override string NativeTicker(Symbol symbol)
+        {
+            CurrencyPairUtil.DecomposeCurrencyPair(symbol, out var baseAsset, out var quoteAsset);
+            return $"{baseAsset}-{quoteAsset}";
+        }
+
 
         #region Connect
 
