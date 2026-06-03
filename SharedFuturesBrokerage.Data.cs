@@ -405,8 +405,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             return true;
         }
 
-        protected abstract Task<CallResult<UpdateSubscription>> CreateFundingSubscriptionAsync(
-            string nativeTicker, Symbol symbol, Func<DateTime, decimal?, bool> onFundingRate);
+        protected virtual Task<CallResult<UpdateSubscription>> CreateFundingSubscriptionAsync(
+            string nativeTicker, Symbol symbol, Func<DateTime, decimal?, bool> onFundingRate)
+            => Task.FromResult(new CallResult<UpdateSubscription>(new InvalidOperationError("Funding subscription not supported by this exchange")));
 
         protected void EmitTick(Tick tick) => _aggregator?.Update(tick);
     }

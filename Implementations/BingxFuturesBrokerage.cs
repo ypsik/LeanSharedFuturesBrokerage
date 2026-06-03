@@ -6,7 +6,9 @@ using CryptoExchange.Net.Objects.Sockets;
 using CryptoExchange.Net.SharedApis;
 using CryptoExchange.Net.Trackers.UserData;
 using QuantConnect;
+using QuantConnect.Brokerages;
 using QuantConnect.Data;
+using QuantConnect.Data.Market;
 using QuantConnect.Interfaces;
 using QuantConnect.Logging;
 using QuantConnect.Orders;
@@ -29,6 +31,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         private readonly object _fundingUpdateLock = new();
         private bool _fundingUpdateConnected = false;
         private UpdateSubscription _fundingUpdateSubscription;
+        private CancellationTokenSource _fundingCts;
 
         public override bool ExchangeSupportsUserTradeStream => false;
 
@@ -127,7 +130,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         public override void Connect()
         {
-            
+            _fundingCts = new CancellationTokenSource();
             lock (_fundingUpdateLock)
             {
                 /*
@@ -170,26 +173,14 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         public override void Disconnect()
         {
+            _fundingCts?.Cancel();
+            _fundingCts?.Dispose();
             RunSync(() => _fundingUpdateSubscription?.CloseAsync() ?? Task.CompletedTask);
             _socketClientExData?.Dispose();
             base.Disconnect();
         }
         #endregion
 
-        protected override async Task<CallResult<UpdateSubscription>> CreateFundingSubscriptionAsync(
-           string nativeTicker, Symbol symbol, Func<DateTime, decimal?, bool> onFundingRate)
-        {
-            return null;
-                /*await _socketClientExData.PerpetualFuturesApi.SubscribeToTickerUpdatesAsync(
-                nativeTicker, data =>
-                {
-                    var now = data.DataTime ?? data.ReceiveTime;
-                    var tickerData = data.Data;
-
-                    // Wir reichen die FundingRate direkt durch, auch wenn sie null ist.
-                    onFundingRate(now, tickerData.);
-                }); */
-        }
 
         public override List<CashAmount> GetCashBalance()
         {
@@ -201,6 +192,91 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             };
             return result;
         }
+
+        protected override bool SubscribeFunding(Symbol symbol)
+        {
+            var nativeTicker = NativeTicker(symbol);
+
+            _ = Task.Run(async () =>
+            {
+                DateTime? nextFundingTime = null;
+
+                while (!_fundingCts.Token.IsCancellationRequested)
+                {
+                    try
+                    {
+                        // 1. Initialer Abruf der NextFundingTime außerhalb oder falls der State verloren ging
+                        if (nextFundingTime == null)
+                        {
+                            var initResult = await _restClient.PerpetualFuturesApi.ExchangeData
+                                .GetFundingRateAsync(nativeTicker, _fundingCts.Token);
+
+                            if (!initResult.Success)
+                            {
+                                Log.Error($"{Name} SubscribeFunding initial fetch failed for {nativeTicker}: {initResult.Error}");
+                                await Task.Delay(TimeSpan.FromMinutes(1), _fundingCts.Token);
+                                continue;
+                            }
+
+                            nextFundingTime = initResult.Data.NextFundingTime;
+                        }
+
+                        // 2. Berechnen und Warten bis zum Settlement
+                        var delay = nextFundingTime.Value - DateTime.UtcNow;
+
+                        if (delay > TimeSpan.Zero)
+                        {
+                            await Task.Delay(delay.Add(TimeSpan.FromTicks(100)), _fundingCts.Token);
+                        }
+                        else
+                        {
+                            // Fallback falls die Zeit in der Vergangenheit liegt / System-Uhr-Abweichungen
+                            await Task.Delay(TimeSpan.FromTicks(100), _fundingCts.Token);
+                        }
+
+                        // 3. Nach dem Settlement: Einzigen Call ausführen, um die neue Rate + die NÄCHSTE FundingTime zu holen
+                        var rateResult = await _restClient.PerpetualFuturesApi.ExchangeData
+                            .GetFundingRateAsync(nativeTicker, _fundingCts.Token);
+
+                        if (rateResult.Success)
+                        {
+                            var roundedTime = new DateTime(
+                                nextFundingTime.Value.Year, nextFundingTime.Value.Month, nextFundingTime.Value.Day,
+                                nextFundingTime.Value.Hour, 0, 0, DateTimeKind.Utc);
+
+                            _aggregator.Update(new MarginInterestRate
+                            {
+                                Symbol = symbol,
+                                Time = roundedTime,
+                                InterestRate = rateResult.Data.LastFundingRate
+                            });
+
+                            Log.Trace($"{Name} Funding Update: {symbol.Value} -> Rate: {rateResult.Data.LastFundingRate} @ {roundedTime}");
+
+                            // Target für die nächste Iteration direkt auf den neuen Wert der Exchange setzen
+                            nextFundingTime = rateResult.Data.NextFundingTime;
+                        }
+                        else
+                        {
+                            Log.Error($"{Name} SubscribeFunding rate fetch failed for {nativeTicker}: {rateResult.Error}");
+                            // Bei Fehler Target zurücksetzen, um im nächsten Loop neu zu initialisieren
+                            nextFundingTime = null;
+                            await Task.Delay(TimeSpan.FromMinutes(1), _fundingCts.Token);
+                        }
+                    }
+                    catch (OperationCanceledException) { break; }
+                    catch (Exception ex)
+                    {
+                        Log.Error($"{Name} SubscribeFunding exception for {nativeTicker}: {ex.Message}");
+                        nextFundingTime = null; // Sicherhaltshalber zurücksetzen
+                        await Task.Delay(TimeSpan.FromMinutes(1), _fundingCts.Token);
+                    }
+                }
+            }, _fundingCts.Token);
+
+            return true;
+        }
+
 
         protected override async Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(Order order, decimal price, decimal? quantity)
         {
