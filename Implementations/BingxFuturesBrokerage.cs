@@ -359,6 +359,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
                 while (!_fundingCts.Token.IsCancellationRequested)
                 {
+                    Log.Trace($"{Name} Funding poll initialization for {nativeTicker}");
                     try
                     {
                         // 1. Initialer Abruf der NextFundingTime außerhalb oder falls der State verloren ging
