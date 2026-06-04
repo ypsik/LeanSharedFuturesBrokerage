@@ -251,9 +251,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                     }
                     
                 }
-
-                base.Connect();
             }
+            base.Connect();
         }
 
         public override void Disconnect()

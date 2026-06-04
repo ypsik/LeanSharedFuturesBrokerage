@@ -1,4 +1,5 @@
 ﻿using Aster.Net.Clients;
+using Aster.Net.Enums;
 using BingX.Net.Clients;
 using CryptoExchange.Net.Interfaces.Clients;
 using CryptoExchange.Net.Objects;
@@ -24,11 +25,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         private AsterSocketClient _socketClient;
         private AsterSocketClient _socketClientExData;
 
-
-        // Speichert die aktiven Subscriptions pro Symbol und TickType
-        private readonly ConcurrentDictionary<string, UpdateSubscription> _subscriptions = new();
         public override bool ExchangeSupportsUserTradeStream => false;
 
+        private readonly object _fundingUpdateLock = new();
+        private bool _fundingUpdateConnected = false;
+        private UpdateSubscription _fundingUpdateSubscription;
+        public override bool IsConnected => base.IsConnected && _fundingUpdateConnected;
 
         // 1. LEAN DataQueueHandler Konstruktor (Bybit-Style)
         public AsterFuturesBrokerage() : base("aster")
@@ -123,7 +125,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             return result;
         }
 
-
         protected override async Task<CallResult<UpdateSubscription>> CreateFundingSubscriptionAsync(
             string nativeTicker, Symbol symbol, Func<DateTime, decimal?, bool> onFundingRate)
         {
@@ -136,5 +137,63 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 });
         }
 
+        public override void Connect()
+        {
+            lock (_fundingUpdateLock)
+            {
+                if (_fundingUpdateSubscription == null && _socketClient != null)
+                {
+                    _subRateGate.WaitToProceed();
+                    DateTime connectTime = StartTime;
+
+                    var listenKey = RunSync(() => _restClient.FuturesApi.Account.StartUserStreamAsync());
+                    if (!listenKey.Success)
+                        throw new Exception($"Failed to start Aster user stream: {listenKey.Error}");
+
+                    var sub = RunSync(() =>
+                        _socketClient.FuturesApi.SubscribeToUserDataUpdatesAsync(
+                            listenKey.Data,
+                            onAccountUpdate: update =>
+                            {
+                                if (update?.Data == null) return;
+                                if (update.Data.UpdateData.Reason != AccountUpdateReason.FundingFee) return;
+
+                                foreach (var balance in update.Data.UpdateData.Balances
+                                    .Where(b => b != null && b.BalanceChange != 0))
+                                {
+                                    if (_algorithm?.Portfolio?.CashBook != null)
+                                    {
+                                        _algorithm.Portfolio.CashBook[SettleAsset].AddAmount(balance.BalanceChange);
+                                        OnMessage(new FundingBrokerageMessageEvent(SettleAsset, balance.BalanceChange));
+                                    }
+                                }
+
+                                var eventTime = update.Data.TransactionTime;
+                                if (eventTime > connectTime)
+                                    connectTime = eventTime;
+                            }));
+
+                    SetupSubscriptionEvents(
+                        sub.Success,
+                        sub.Data,
+                        (state) => { _fundingUpdateConnected = state; },
+                        "Funding updates",
+                        "Funding updates subscription failed",
+                        sub.Error?.ToString()
+                    );
+
+                    if (sub.Success)
+                        _fundingUpdateSubscription = sub.Data;
+                }
+
+            }
+            base.Connect();
+        }
+        public override void Disconnect()
+        {
+            RunSync(() => _fundingUpdateSubscription?.CloseAsync() ?? Task.CompletedTask);
+            _socketClientExData?.Dispose();
+            base.Disconnect();
+        }
     }
 }
