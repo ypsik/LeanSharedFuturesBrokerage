@@ -21,6 +21,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
     {
         private AsterRestClient _restClient;
         private AsterSocketClient _socketClient;
+        private AsterSocketClient _socketClientExData;
+
 
         // Speichert die aktiven Subscriptions pro Symbol und TickType
         private readonly ConcurrentDictionary<string, UpdateSubscription> _subscriptions = new();
@@ -109,9 +111,15 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         }
 
         protected override async Task<CallResult<UpdateSubscription>> CreateFundingSubscriptionAsync(
-               string nativeTicker, Symbol symbol, Func<DateTime, decimal?, bool> onFundingRate)
+            string nativeTicker, Symbol symbol, Func<DateTime, decimal?, bool> onFundingRate)
         {
-            return null;
+            return await _socketClientExData.FuturesV3Api.SubscribeToMarkPriceUpdatesAsync(
+                nativeTicker, null, data =>
+                {
+                    var now = data.DataTime ?? data.ReceiveTime;
+
+                    onFundingRate(now, data.Data.FundingRate);
+                });
         }
 
         // ── Symbol-Mapping ───────────────────────────────────────────────
@@ -128,16 +136,5 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             var brokerageSymbol = symbol.Value;
             return true;
         }
-
-        protected override bool UnsubscribeFunding(Symbol symbol)
-        {
-            if (_subscriptions.TryRemove($"{symbol.Value}_FUNDING", out var sub))
-            {
-                RunSync(() => sub.CloseAsync());
-            }
-            return true;
-        }
-
-
     }
 }
