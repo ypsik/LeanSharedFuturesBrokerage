@@ -1,4 +1,5 @@
 ﻿using Aster.Net.Clients;
+using BingX.Net.Clients;
 using CryptoExchange.Net.Interfaces.Clients;
 using CryptoExchange.Net.Objects;
 using CryptoExchange.Net.Objects.Sockets;
@@ -44,6 +45,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         {
             _restClient = restClient;
             _socketClient = socketClient;
+            _socketClientExData = new AsterSocketClient();
 
             PopulateSPDB();
 
@@ -96,6 +98,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
             _restClient = new AsterRestClient(); // Hier ggf. Credentials setzen
             _socketClient = new AsterSocketClient();
+            _socketClientExData = new AsterSocketClient();
 
             InitializeBase(
                 _restClient.FuturesApi.SharedClient,
@@ -110,6 +113,17 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             );
         }
 
+        public override List<CashAmount> GetCashBalance()
+        {
+            var res = RunSync(() => _restClient.FuturesV3Api.Account.GetAccountInfoAsync());
+            var result = new List<CashAmount>
+            {
+                new((res?.Data?.TotalMarginBalance ?? 0) - (res?.Data?.TotalCrossUnrealizedPnl ?? 0), SettleAsset)
+            };
+            return result;
+        }
+
+
         protected override async Task<CallResult<UpdateSubscription>> CreateFundingSubscriptionAsync(
             string nativeTicker, Symbol symbol, Func<DateTime, decimal?, bool> onFundingRate)
         {
@@ -122,19 +136,5 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 });
         }
 
-        // ── Symbol-Mapping ───────────────────────────────────────────────
-
-        protected override string NormalizeSymbol(string rawSymbol)
-        {
-            var upper = rawSymbol.ToUpperInvariant();
-            return upper.EndsWith(SettleAsset) ? upper : upper + SettleAsset;
-        }
-
-        
-        protected override bool SubscribeFunding(Symbol symbol)
-        {
-            var brokerageSymbol = symbol.Value;
-            return true;
-        }
     }
 }
