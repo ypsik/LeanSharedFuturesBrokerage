@@ -1,6 +1,5 @@
 ﻿using Aster.Net.Clients;
 using Aster.Net.Enums;
-using BingX.Net.Clients;
 using CryptoExchange.Net.Interfaces.Clients;
 using CryptoExchange.Net.Objects;
 using CryptoExchange.Net.Objects.Sockets;
