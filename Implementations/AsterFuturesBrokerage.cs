@@ -43,6 +43,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             _restClient = restClient;
             _socketClient = socketClient;
 
+            PopulateSPDB();
+
             InitializeBase(
                 restClient.FuturesApi.SharedClient,
                 restClient.FuturesApi.SharedClient,
@@ -55,6 +57,35 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 aggregator,
                 getHoldingsFunc);
         }
+
+        private void PopulateSPDB()
+        {
+            var result = RunSync(() => _restClient.FuturesApi.ExchangeData.GetExchangeInfoAsync());
+
+            if (!result.Success)
+                throw new Exception($"Failed to load Aster assets: {result.Error}");
+
+            foreach (var symbol in result.Data.Symbols.Where(s => s.Status == Aster.Net.Enums.SymbolStatus.Trading))
+            {
+                var tickSize = symbol.PriceFilter?.TickSize
+                    ?? (decimal)Math.Pow(10, -symbol.PricePrecision);
+
+                var lotSize = symbol.LotSizeFilter?.MinQuantity
+                    ?? (decimal)Math.Pow(10, -symbol.QuantityPrecision);
+
+                var symbolProperties = new SymbolProperties(
+                    description: $"Aster {symbol.BaseAsset} Perpetual",
+                    quoteCurrency: symbol.QuoteAsset,
+                    contractMultiplier: 1m,
+                    minimumPriceVariation: tickSize,
+                    lotSize: lotSize,
+                    marketTicker: symbol.Name
+                );
+
+                _spdb.SetEntry("aster", symbol.BaseAsset + symbol.QuoteAsset, SecurityType.CryptoFuture, symbolProperties);
+            }
+        }
+
 
         protected override void InitializeFromJob(QuantConnect.Packets.LiveNodePacket job, IDataAggregator aggregator)
         {
@@ -76,7 +107,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 aggregator
             );
         }
-
 
         protected override async Task<CallResult<UpdateSubscription>> CreateFundingSubscriptionAsync(
                string nativeTicker, Symbol symbol, Func<DateTime, decimal?, bool> onFundingRate)

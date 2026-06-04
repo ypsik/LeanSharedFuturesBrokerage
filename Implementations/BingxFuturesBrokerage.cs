@@ -344,7 +344,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             var balance = res?.Data?.FirstOrDefault();
             var result = new List<CashAmount>
             {
-                new CashAmount(balance?.Balance ?? 0, SettleAsset)
+                new(balance?.Balance ?? 0, balance?.Asset ?? SettleAsset)
             };
             return result;
         }
