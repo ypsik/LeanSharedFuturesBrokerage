@@ -33,6 +33,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         private readonly object _fundingUpdateLock = new();
         private bool _fundingUpdateConnected = false;
         private UpdateSubscription _fundingUpdateSubscription;
+        private CancellationTokenSource _fundingCts;
+        private CancellationTokenSource? _userStreamCts;
+
         public override bool IsConnected => base.IsConnected && _fundingUpdateConnected;
 
         // 1. LEAN DataQueueHandler Konstruktor (Bybit-Style)
@@ -97,10 +100,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         protected override void InitializeFromJob(QuantConnect.Packets.LiveNodePacket job, IDataAggregator aggregator)
         {
-            // 1. Instanzen schützen: Nur erstellen, wenn sie null sind
             if (_restClient == null)
             {
-                // Falls wir im Live-Modus sind, brauchen wir die Keys aus dem Job
                 var publicAddress = job.BrokerageData.GetValueOrDefault("aster-public-address", "");
                 var key = job.BrokerageData.GetValueOrDefault("aster-api-key", "");
                 var secret = job.BrokerageData.GetValueOrDefault("aster-api-secret", "");
@@ -128,8 +129,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 _socketClientExData = new AsterSocketClient();
             }
 
-            // 2. Basisklasse synchronisieren
-            // Wir nutzen die bestehenden (oder gerade erstellten) Instanzen
             InitializeBase(
                 _restClient.FuturesV3Api.SharedClient,
                 _restClient.FuturesV3Api.SharedClient,
@@ -160,68 +159,152 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 nativeTicker, null, data =>
                 {
                     var now = data.DataTime ?? data.ReceiveTime;
-
                     onFundingRate(now, data.Data.FundingRate);
                 });
         }
 
+        #region Connect
+
         public override void Connect()
         {
+            _fundingCts = new CancellationTokenSource();
             lock (_fundingUpdateLock)
             {
-                if (_fundingUpdateSubscription == null && _socketClient != null)
-                {
-                    _subRateGate.WaitToProceed();
-                    DateTime connectTime = StartTime;
-
-                    var listenKey = RunSync(() => _restClient.FuturesV3Api.Account.StartUserStreamAsync());
-                    if (!listenKey.Success)
-                        throw new Exception($"Failed to start Aster user stream: {listenKey.Error}");
-
-                    var sub = RunSync(() =>
-                        _socketClient.FuturesV3Api.SubscribeToUserDataUpdatesAsync(
-                            listenKey.Data,
-                            onAccountUpdate: update =>
-                            {
-                                if (update?.Data == null) return;
-                                if (update.Data.UpdateData.Reason != AccountUpdateReason.FundingFee) return;
-
-                                foreach (var balance in update.Data.UpdateData.Balances
-                                    .Where(b => b != null && b.BalanceChange != 0))
-                                {
-                                    if (_algorithm?.Portfolio?.CashBook != null)
-                                    {
-                                        _algorithm.Portfolio.CashBook[SettleAsset].AddAmount(balance.BalanceChange);
-                                        OnMessage(new FundingBrokerageMessageEvent(SettleAsset, balance.BalanceChange));
-                                    }
-                                }
-
-                                var eventTime = update.Data.TransactionTime;
-                                if (eventTime > connectTime)
-                                    connectTime = eventTime;
-                            }));
-
-                    SetupSubscriptionEvents(
-                        sub.Success,
-                        sub.Data,
-                        (state) => { _fundingUpdateConnected = state; },
-                        "Funding updates",
-                        "Funding updates subscription failed",
-                        sub.Error?.ToString()
-                    );
-
-                    if (sub.Success)
-                        _fundingUpdateSubscription = sub.Data;
-                }
-
+                EstablishUserStreamSubscription();
             }
             base.Connect();
         }
+
+        private void EstablishUserStreamSubscription()
+        {
+            if (_fundingUpdateSubscription != null || _socketClient == null)
+                return;
+
+            _subRateGate.WaitToProceed();
+
+            _userStreamCts = new CancellationTokenSource();
+
+            // 1. ListenKey via REST holen
+            var listenKeyResult = RunSync(() => _restClient.FuturesV3Api.Account.StartUserStreamAsync(_userStreamCts.Token));
+
+            if (!listenKeyResult.Success)
+            {
+                Log.Error($"Aster: Failed to create UserStream: {listenKeyResult.Error}");
+                return;
+            }
+
+            ListenKey = listenKeyResult.Data;
+
+            // 2. WebSocket mit ListenKey subscriben
+            DateTime connectTime = StartTime;
+            var sub = RunSync(() =>
+                _socketClient.FuturesV3Api.SubscribeToUserDataUpdatesAsync(
+                    ListenKey,
+                    onAccountUpdate: update =>
+                    {
+                        if (update?.Data == null) return;
+                        if (update.Data.UpdateData.Reason != AccountUpdateReason.FundingFee) return;
+
+                        foreach (var balance in update.Data.UpdateData.Balances
+                            .Where(b => b != null && b.BalanceChange != 0))
+                        {
+                            if (_algorithm?.Portfolio?.CashBook != null)
+                            {
+                                _algorithm.Portfolio.CashBook[SettleAsset].AddAmount(balance.BalanceChange);
+                                OnMessage(new FundingBrokerageMessageEvent(SettleAsset, balance.BalanceChange));
+                            }
+                        }
+
+                        var eventTime = update.Data.TransactionTime;
+                        if (eventTime > connectTime)
+                            connectTime = eventTime;
+                    },
+                    onListenKeyExpired: _ =>
+                    {
+                        Log.Trace("Aster: ListenKey expired! Initiating reconnect...");
+                        Task.Run(() => ReconnectUserStream());
+                    },
+                    ct: _userStreamCts.Token));
+
+            SetupSubscriptionEvents(
+                sub.Success,
+                sub.Data,
+                (state) => _fundingUpdateConnected = state,
+                "Wallet updates",
+                "Wallet updates subscription failed",
+                sub.Error?.ToString()
+            );
+
+            if (sub.Success)
+            {
+                _fundingUpdateSubscription = sub.Data;
+
+                // 3. Keep-alive Loop starten
+                StartListenKeyKeepAliveLoop(ListenKey, _userStreamCts.Token);
+            }
+        }
+
+        private void ReconnectUserStream()
+        {
+            lock (_fundingUpdateLock)
+            {
+                try
+                {
+                    _userStreamCts?.Cancel();
+                    _userStreamCts?.Dispose();
+                    _userStreamCts = null;
+
+                    if (_fundingUpdateSubscription != null && _socketClient != null)
+                    {
+                        RunSync(() => _socketClient.UnsubscribeAsync(_fundingUpdateSubscription));
+                        _fundingUpdateSubscription = null;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log.Error($"Aster: Error during unsubscribe while reconnecting: {ex.Message}");
+                }
+
+                EstablishUserStreamSubscription();
+            }
+        }
+
+        private void StartListenKeyKeepAliveLoop(string listenKey, CancellationToken ct)
+        {
+            Task.Run(async () =>
+            {
+                while (!ct.IsCancellationRequested)
+                {
+                    try
+                    {
+                        await Task.Delay(TimeSpan.FromMinutes(45), ct);
+
+                        if (ct.IsCancellationRequested) break;
+
+                        var pingResult = await _restClient.FuturesV3Api.Account.KeepAliveUserStreamAsync(listenKey, ct);
+                        if (!pingResult.Success)
+                            Log.Error($"Aster: Keep-alive for ListenKey failed: {pingResult.Error}");
+                    }
+                    catch (TaskCanceledException) { break; }
+                    catch (Exception ex)
+                    {
+                        Log.Error($"Aster: Error in ListenKey keep-alive loop: {ex.Message}");
+                    }
+                }
+            }, ct);
+        }
+
         public override void Disconnect()
         {
+            _fundingCts?.Cancel();
+            _fundingCts?.Dispose();
+            _userStreamCts?.Cancel();
+            _userStreamCts?.Dispose();
             RunSync(() => _fundingUpdateSubscription?.CloseAsync() ?? Task.CompletedTask);
             _socketClientExData?.Dispose();
             base.Disconnect();
         }
+
+        #endregion
     }
 }
