@@ -51,21 +51,21 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             PopulateSPDB();
 
             InitializeBase(
-                restClient.FuturesApi.SharedClient,
-                restClient.FuturesApi.SharedClient,
-                socketClient.FuturesApi.SharedClient,
-                socketClient.FuturesApi.SharedClient,
-                _socketClient.FuturesApi.SharedClient,
+                restClient.FuturesV3Api.SharedClient,
+                restClient.FuturesV3Api.SharedClient,
+                socketClient.FuturesV3Api.SharedClient,
+                socketClient.FuturesV3Api.SharedClient,
+                _socketClient.FuturesV3Api.SharedClient,
                 null,
-                restClient.FuturesApi.SharedClient,
-                restClient.FuturesApi.SharedClient,
+                restClient.FuturesV3Api.SharedClient,
+                restClient.FuturesV3Api.SharedClient,
                 aggregator,
                 getHoldingsFunc);
         }
 
         private void PopulateSPDB()
         {
-            var result = RunSync(() => _restClient.FuturesApi.ExchangeData.GetExchangeInfoAsync());
+            var result = RunSync(() => _restClient.FuturesV3Api.ExchangeData.GetExchangeInfoAsync());
 
             if (!result.Success)
                 throw new Exception($"Failed to load Aster assets: {result.Error}");
@@ -102,14 +102,14 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             _socketClientExData = new AsterSocketClient();
 
             InitializeBase(
-                _restClient.FuturesApi.SharedClient,
-                _restClient.FuturesApi.SharedClient,
-                _socketClient.FuturesApi.SharedClient,
-                _socketClient.FuturesApi.SharedClient,
-                _socketClient.FuturesApi.SharedClient,
+                _restClient.FuturesV3Api.SharedClient,
+                _restClient.FuturesV3Api.SharedClient,
+                _socketClient.FuturesV3Api.SharedClient,
+                _socketClient.FuturesV3Api.SharedClient,
+                _socketClient.FuturesV3Api.SharedClient,
                 null,
-                _restClient.FuturesApi.SharedClient,
-                _restClient.FuturesApi.SharedClient,
+                _restClient.FuturesV3Api.SharedClient,
+                _restClient.FuturesV3Api.SharedClient,
                 aggregator
             );
         }
@@ -145,12 +145,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                     _subRateGate.WaitToProceed();
                     DateTime connectTime = StartTime;
 
-                    var listenKey = RunSync(() => _restClient.FuturesApi.Account.StartUserStreamAsync());
+                    var listenKey = RunSync(() => _restClient.FuturesV3Api.Account.StartUserStreamAsync());
                     if (!listenKey.Success)
                         throw new Exception($"Failed to start Aster user stream: {listenKey.Error}");
 
                     var sub = RunSync(() =>
-                        _socketClient.FuturesApi.SubscribeToUserDataUpdatesAsync(
+                        _socketClient.FuturesV3Api.SubscribeToUserDataUpdatesAsync(
                             listenKey.Data,
                             onAccountUpdate: update =>
                             {
