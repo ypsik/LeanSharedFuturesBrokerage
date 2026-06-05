@@ -145,6 +145,16 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         public override bool IsConnected => base.IsConnected && _fundingUpdateConnected;
         public override bool ExchangeModifiesOrdersInPlace => true;
 
+
+        protected override ExchangeParameters PlaceFuturesOrderExchangeParameters
+        {
+            get
+            {
+                var parameters = base.PlaceFuturesOrderExchangeParameters;
+                parameters.AddValue(new ExchangeParameter("BingX", "positionSide", "LONG"));
+                return parameters;
+            }
+        }
         protected override ExchangeParameters OrderUpdatesExchangeParameters
         {
             get
