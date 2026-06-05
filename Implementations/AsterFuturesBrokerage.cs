@@ -1,5 +1,7 @@
-﻿using Aster.Net.Clients;
+﻿using Aster.Net;
+using Aster.Net.Clients;
 using Aster.Net.Enums;
+using Aster.Net.Objects;
 using CryptoExchange.Net.Interfaces.Clients;
 using CryptoExchange.Net.Objects;
 using CryptoExchange.Net.Objects.Sockets;
@@ -15,6 +17,8 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net;
+using static System.Runtime.InteropServices.JavaScript.JSType;
 
 namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 {
@@ -91,16 +95,41 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             }
         }
 
-
         protected override void InitializeFromJob(QuantConnect.Packets.LiveNodePacket job, IDataAggregator aggregator)
         {
-            var apiKey = job.BrokerageData.GetValueOrDefault("aster-api-key", "");
-            var apiSecret = job.BrokerageData.GetValueOrDefault("aster-api-secret", "");
+            // 1. Instanzen schützen: Nur erstellen, wenn sie null sind
+            if (_restClient == null)
+            {
+                // Falls wir im Live-Modus sind, brauchen wir die Keys aus dem Job
+                var publicAddress = job.BrokerageData.GetValueOrDefault("aster-public-address", "");
+                var key = job.BrokerageData.GetValueOrDefault("aster-api-key", "");
+                var secret = job.BrokerageData.GetValueOrDefault("aster-api-secret", "");
 
-            _restClient = new AsterRestClient(); // Hier ggf. Credentials setzen
-            _socketClient = new AsterSocketClient();
-            _socketClientExData = new AsterSocketClient();
+                _restClient = new AsterRestClient(options => {
+                    if (!string.IsNullOrEmpty(key) && !string.IsNullOrEmpty(secret))
+                        options.ApiCredentials = new AsterCredentials(new AsterV3Credential(publicAddress, key, secret));
+                });
+            }
 
+            if (_socketClient == null)
+            {
+                var publicAddress = job.BrokerageData.GetValueOrDefault("aster-public-address", "");
+                var key = job.BrokerageData.GetValueOrDefault("aster-api-key", "");
+                var secret = job.BrokerageData.GetValueOrDefault("aster-api-secret", "");
+
+                _socketClient = new AsterSocketClient(options => {
+                    if (!string.IsNullOrEmpty(key) && !string.IsNullOrEmpty(secret))
+                        options.ApiCredentials = new AsterCredentials(new AsterV3Credential(publicAddress, key, secret));
+                });
+            }
+
+            if (_socketClientExData == null)
+            {
+                _socketClientExData = new AsterSocketClient();
+            }
+
+            // 2. Basisklasse synchronisieren
+            // Wir nutzen die bestehenden (oder gerade erstellten) Instanzen
             InitializeBase(
                 _restClient.FuturesV3Api.SharedClient,
                 _restClient.FuturesV3Api.SharedClient,
