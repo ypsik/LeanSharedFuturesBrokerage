@@ -39,7 +39,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             }
             else if (res.Data != null)
             {
-                return res.Data.Select(p =>
+                return res.Data.Where(f=>f.PositionSize != 0).Select(p =>
                 {
                     var symbol = Symbol.Create(NormalizeSymbol(p.Symbol), SecurityType.CryptoFuture, Name);
 
