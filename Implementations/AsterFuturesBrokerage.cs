@@ -50,7 +50,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             AsterRestClient restClient,
             AsterSocketClient socketClient,
             IDataAggregator aggregator,
-            Func<List<Holding>> getHoldingsFunc = null)
+            Func<List<Holding>>? getHoldingsFunc = null)
             : base(algorithm, "aster")
         {
             _restClient = restClient;
