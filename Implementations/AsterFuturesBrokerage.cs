@@ -37,6 +37,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         private CancellationTokenSource? _userStreamCts;
 
         public override bool IsConnected => base.IsConnected && _fundingUpdateConnected;
+        protected override SharedPositionSide? SharedPositionSide => CryptoExchange.Net.SharedApis.SharedPositionSide.Long;
+
 
         // 1. LEAN DataQueueHandler Konstruktor (Bybit-Style)
         public AsterFuturesBrokerage() : base("aster")
