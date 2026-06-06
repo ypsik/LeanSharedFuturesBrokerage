@@ -341,22 +341,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             Log.Trace($"{Name}: SPDB Fix for {symbol.Value} - TickSize: {tickSize} (Price: {oraclePrice})");
         }
         /*
-        protected override async Task<CallResult<UpdateSubscription>> ExecuteBalanceSubscriptionAsync(Action<List<CashAmount>> onUpdate)
-        {
-            return await _socketClient.FuturesApi.Account.SubscribeToUserUpdatesAsync(null, update =>
-            {
-                var balance = update?.Data?.SpotBalances?.Balances?.Where(b => b.Asset == SettleAsset).FirstOrDefault();
-                if (balance != null)
-                {
-                    onUpdate(
-                        [
-                            new CashAmount(balance.Total, SettleAsset)
-                        ]);
-                }
-            });
-        }
-        */
-        /*
         protected override ExchangeParameters PlaceFuturesOrderExchangeParameters
         {
             get
