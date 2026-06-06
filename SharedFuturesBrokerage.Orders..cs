@@ -141,6 +141,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             }).ToList();
         }
 
+        protected virtual SharedPositionSide? SharedPositionSide => null;
+
         public override bool PlaceOrder(Order order)
         {
             decimal executionQuantity = order.Quantity;
@@ -185,7 +187,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             {
                 Price = (order as LimitOrder)?.LimitPrice,
                 ClientOrderId = clientOrderId,
-                ExchangeParameters = PlaceFuturesOrderExchangeParameters
+                ExchangeParameters = PlaceFuturesOrderExchangeParameters,
+                PositionSide = SharedPositionSide
             };
 
             // State Machine: Order mit Placing-State registrieren bevor API-Call rausgeht.

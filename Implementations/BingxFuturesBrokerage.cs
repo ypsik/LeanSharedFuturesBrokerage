@@ -144,6 +144,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         public override bool IsConnected => base.IsConnected && _fundingUpdateConnected;
         public override bool ExchangeModifiesOrdersInPlace => true;
+        protected override SharedPositionSide? SharedPositionSide => CryptoExchange.Net.SharedApis.SharedPositionSide.Long;
 
 
         protected override ExchangeParameters PlaceFuturesOrderExchangeParameters
@@ -151,7 +152,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             get
             {
                 var parameters = base.PlaceFuturesOrderExchangeParameters;
-                parameters.AddValue(new ExchangeParameter("BingX", "positionSide", "LONG"));
                 return parameters;
             }
         }
@@ -367,9 +367,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             {
                 DateTime? nextFundingTime = null;
 
+                Log.Trace($"{Name} Funding poll initialization for {nativeTicker}");
                 while (!_fundingCts.Token.IsCancellationRequested)
                 {
-                    Log.Trace($"{Name} Funding poll initialization for {nativeTicker}");
                     try
                     {
                         // 1. Initialer Abruf der NextFundingTime außerhalb oder falls der State verloren ging

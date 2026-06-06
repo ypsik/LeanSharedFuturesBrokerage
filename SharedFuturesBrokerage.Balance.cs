@@ -44,7 +44,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     var symbol = Symbol.Create(NormalizeSymbol(p.Symbol), SecurityType.CryptoFuture, Name);
 
                     var quantity = p.PositionSize;
-                    if (p.PositionSide == SharedPositionSide.Short)
+                    if (p.PositionSide == CryptoExchange.Net.SharedApis.SharedPositionSide.Short)
                     {
                         quantity *= -1;
                     }
