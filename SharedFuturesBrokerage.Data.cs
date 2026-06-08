@@ -338,13 +338,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 _subRateGate.WaitToProceed();
 
                 // Signatur auf decimal? geändert
-                Func<DateTime, decimal?, bool> onFundingRate = (now, fundingRate) =>
+                Func<DateTime, decimal?, DateTime?, bool> onFundingRate = (now, fundingRate, nextFundingTime) =>
                 {
                     bool isFirstTick = false;
                     bool isHourRollover = false;
                     decimal rateToReport = 0m;
 
-                    var currentHour = (now.Hour / FundingRolloverHours) * FundingRolloverHours;
+                    var currentHour = nextFundingTime?.Hour ?? ((now.Hour / FundingRolloverHours) * FundingRolloverHours);
 
                     // _lastFundingState ist ein ConcurrentDictionary<Symbol, (int Hour, decimal Rate)>
                     _lastFundingState.AddOrUpdate(
@@ -406,7 +406,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         }
 
         protected virtual Task<CallResult<UpdateSubscription>> CreateFundingSubscriptionAsync(
-            string nativeTicker, Symbol symbol, Func<DateTime, decimal?, bool> onFundingRate)
+            string nativeTicker, Symbol symbol, Func<DateTime, decimal?, DateTime?, bool> onFundingRate)
             => Task.FromResult(new CallResult<UpdateSubscription>(new InvalidOperationError("Funding subscription not supported by this exchange")));
 
         protected void EmitTick(Tick tick) => _aggregator?.Update(tick);

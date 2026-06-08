@@ -155,13 +155,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         }
 
         protected override async Task<CallResult<UpdateSubscription>> CreateFundingSubscriptionAsync(
-            string nativeTicker, Symbol symbol, Func<DateTime, decimal?, bool> onFundingRate)
+            string nativeTicker, Symbol symbol, Func<DateTime, decimal?, DateTime?, bool> onFundingRate)
         {
             return await _socketClientExData.FuturesV3Api.SubscribeToMarkPriceUpdatesAsync(
                 nativeTicker, null, data =>
                 {
                     var now = data.DataTime ?? data.ReceiveTime;
-                    onFundingRate(now, data.Data.FundingRate);
+                    onFundingRate(now, data.Data.FundingRate, data.Data.NextFundingTime);
                 });
         }
 

@@ -317,7 +317,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
 
         protected override async Task<CallResult<UpdateSubscription>> CreateFundingSubscriptionAsync(
-           string nativeTicker, Symbol symbol, Func<DateTime, decimal?, bool> onFundingRate)
+           string nativeTicker, Symbol symbol, Func<DateTime, decimal?, DateTime?, bool> onFundingRate)
         {
             return await _socketClientExData.FuturesApiV2.SubscribeToTickerUpdatesAsync(Bitget.Net.Enums.BitgetProductTypeV2.UsdtFutures,
                 nativeTicker, data =>
@@ -326,7 +326,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                     var tickerData = data.Data;
 
                     // Wir reichen die FundingRate direkt durch, auch wenn sie null ist.
-                    onFundingRate(now, tickerData.FirstOrDefault()?.FundingRate);
+                    onFundingRate(now, tickerData.FirstOrDefault()?.FundingRate, null);
                 });
         }
 

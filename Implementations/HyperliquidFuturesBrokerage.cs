@@ -291,7 +291,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         }
 
         protected override async Task<CallResult<UpdateSubscription>> CreateFundingSubscriptionAsync(
-            string nativeTicker, Symbol symbol, Func<DateTime, decimal?, bool> onFundingRate)
+            string nativeTicker, Symbol symbol, Func<DateTime, decimal?, DateTime?, bool> onFundingRate)
         {
             return await _socketClientExData.FuturesApi.ExchangeData.SubscribeToSymbolUpdatesAsync(
                 nativeTicker, data =>
@@ -299,7 +299,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                     var now = data.DataTime ?? data.ReceiveTime;
                     var tickerData = data.Data;
 
-                    if (!onFundingRate(now, tickerData.FundingRate ?? 0)) return;
+                    if (!onFundingRate(now, tickerData.FundingRate ?? 0, null)) return;
 
                     var oraclePrice = tickerData.OraclePrice ?? tickerData.MarkPrice;
                     if (oraclePrice > 0)
