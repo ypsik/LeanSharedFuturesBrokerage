@@ -148,9 +148,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         private void PopulateSPDB()
         {
             // --- Populate SPDB with all live HL assets ---
-            var result = _restClient.FuturesApi.ExchangeData
-                 .GetExchangeInfoAsync()
-                 .GetAwaiter().GetResult();
+            var result = RunSync(() => _restClient.FuturesApi.ExchangeData.GetExchangeInfoAsync());
 
             if (!result.Success)
                 throw new Exception($"Failed to load Hyperliquid assets: {result.Error}");
