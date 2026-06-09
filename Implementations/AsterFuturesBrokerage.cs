@@ -41,6 +41,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         private bool _isHedgeMode = true;
 
         public override bool IsConnected => base.IsConnected && _fundingUpdateConnected;
+        public override bool ExchangeModifiesOrdersInPlace => true;
+
         protected override SharedPositionSide? SharedPositionSide => _isHedgeMode ? CryptoExchange.Net.SharedApis.SharedPositionSide.Long : null;
 
 
@@ -316,32 +318,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         protected override async Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(
         Order order, decimal price, decimal? quantity)
         {
-            if (!quantity.HasValue)
-            {
-                Log.Error($"Update error: quantity not provided");
-                return new ExchangeWebResult<SharedId>(Name, ArgumentError.Missing("Quantity"));
-            }
-
             var ticker = NativeTicker(order.Symbol);
 
-            var brokerId = order.BrokerId.LastOrDefault();
-            if (!long.TryParse(brokerId, out var exchangeOrderId))
-            {
-                Log.Error($"Update error: invalid brokerId '{brokerId}'");
-                return new ExchangeWebResult<SharedId>(Name, new InvalidOperationError("invalid brokerId"));
-            }
-
-            if (!_orderStateManager.TryGetByExchangeId(brokerId, out var state))
-            {
-                Log.Error($"Update error: old state missing for brokerId {brokerId}");
-                return new ExchangeWebResult<SharedId>(Name, new InvalidOperationError("old state missing"));
-            }
-
             var res = await _restClient.FuturesV3Api.Trading.EditOrderAsync(
-                orderId: exchangeOrderId,
+                orderId: long.Parse(order.BrokerId.Last()),
                 clientOrderId: null,
                 symbol: ticker,
-                quantity: Math.Abs(quantity.Value),
+                quantity: quantity.HasValue ? Math.Abs(quantity.Value) : null,
                 price: price);
 
             if (!res.Success)
