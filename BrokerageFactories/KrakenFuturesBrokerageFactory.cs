@@ -20,6 +20,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
     {
         public KrakenFuturesBrokerageFactory() : base(typeof(KrakenFuturesBrokerage))
         {
+            var mhdb = MarketHoursDatabase.FromDataFolder();
+            var alwaysOpen = SecurityExchangeHours.AlwaysOpen(TimeZones.Utc);
+
+            mhdb.SetEntry(Market.Kraken, null, SecurityType.CryptoFuture, alwaysOpen, TimeZones.Utc);
+
         }
 
         public override Dictionary<string, string> BrokerageData => new Dictionary<string, string>
