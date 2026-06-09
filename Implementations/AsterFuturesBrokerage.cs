@@ -46,11 +46,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         protected override SharedPositionSide? SharedPositionSide => _isHedgeMode ? CryptoExchange.Net.SharedApis.SharedPositionSide.Long : null;
 
 
-        // 1. LEAN DataQueueHandler Konstruktor (Bybit-Style)
-        public AsterFuturesBrokerage() : base("aster")
-        {
-        }
-
         // 2. Trading-Instanz Konstruktor (für die Factory)
         internal AsterFuturesBrokerage(IAlgorithm algorithm,
             AsterRestClient restClient,

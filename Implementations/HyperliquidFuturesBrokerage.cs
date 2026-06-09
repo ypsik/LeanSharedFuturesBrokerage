@@ -56,11 +56,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         protected override string SettleAsset => "USDC";
 
-        // 1. LEAN DataQueueHandler Konstruktor
-        public HyperliquidFuturesBrokerage() : base("hyperliquid")
-        {
-        }
-
         // 2. Trading-Instanz Konstruktor (Optionaler Parameter fix)
         internal HyperliquidFuturesBrokerage(
             IAlgorithm algorithm,

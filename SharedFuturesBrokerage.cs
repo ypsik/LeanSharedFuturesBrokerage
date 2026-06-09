@@ -58,10 +58,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         protected virtual string SettleAsset => "USDT";
 
-        protected SharedFuturesBrokerage(string exchangeName) : base(exchangeName)
-        {
-            _spdb = SymbolPropertiesDatabase.FromDataFolder();
-        }
         protected SharedFuturesBrokerage(IAlgorithm algorithm, string exchangeName) : base(exchangeName)
         {
             _algorithm = algorithm;
