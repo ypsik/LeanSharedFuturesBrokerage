@@ -474,7 +474,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
             var side = order.Quantity > 0 ? BingX.Net.Enums.OrderSide.Buy : BingX.Net.Enums.OrderSide.Sell;
             var positionSide = _isHedgeMode
-                ? (order.Quantity > 0 ? BingX.Net.Enums.PositionSide.Long : BingX.Net.Enums.PositionSide.Short)
+                ? (SharedPositionSide ==  CryptoExchange.Net.SharedApis.SharedPositionSide.Long ? BingX.Net.Enums.PositionSide.Long : BingX.Net.Enums.PositionSide.Short)
                 : BingX.Net.Enums.PositionSide.Both;
 
             string newClientOrderId = _restClient.PerpetualFuturesApi.SharedClient.GenerateClientOrderId();
