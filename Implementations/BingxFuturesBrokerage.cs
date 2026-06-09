@@ -1,5 +1,7 @@
 ﻿using BingX.Net.Clients;
+using BingX.Net.Enums;
 using BingX.Net.Interfaces.Clients;
+using BingX.Net.Objects.Models;
 using CryptoExchange.Net.Interfaces.Clients;
 using CryptoExchange.Net.Objects;
 using CryptoExchange.Net.Objects.Sockets;
@@ -34,6 +36,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         private UpdateSubscription? _fundingUpdateSubscription;
         private CancellationTokenSource _fundingCts;
         private CancellationTokenSource? _userStreamCts;
+
+        private bool _isHedgeMode = true;
 
         public override bool ExchangeSupportsUserTradeStream => false;
 
@@ -144,7 +148,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         public override bool IsConnected => base.IsConnected && _fundingUpdateConnected;
         public override bool ExchangeModifiesOrdersInPlace => true;
-        protected override SharedPositionSide? SharedPositionSide => CryptoExchange.Net.SharedApis.SharedPositionSide.Long;
+        protected override SharedPositionSide? SharedPositionSide => _isHedgeMode ? CryptoExchange.Net.SharedApis.SharedPositionSide.Long : null;
 
 
         protected override ExchangeParameters PlaceFuturesOrderExchangeParameters
@@ -443,5 +447,66 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
             return true;
         }
+
+        protected override async Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(
+                Order order, decimal price, decimal? quantity)
+        {
+            if (!quantity.HasValue)
+            {
+                Log.Error($"Update error: quantity not provided");
+                return new ExchangeWebResult<SharedId>(Name, ArgumentError.Missing("Quantity"));
+            }
+
+            var ticker = NativeTicker(order.Symbol);
+
+            var brokerId = order.BrokerId.LastOrDefault();
+            if (!long.TryParse(brokerId, out var exchangeOrderId))
+            {
+                Log.Error($"Update error: invalid brokerId '{brokerId}'");
+                return new ExchangeWebResult<SharedId>(Name, new InvalidOperationError("invalid brokerId"));
+            }
+
+            if (!_orderStateManager.TryGetByExchangeId(brokerId, out var state))
+            {
+                Log.Error($"Update error: old state missing for brokerId {brokerId}");
+                return new ExchangeWebResult<SharedId>(Name, new InvalidOperationError("old state missing"));
+            }
+
+            var side = order.Quantity > 0 ? BingX.Net.Enums.OrderSide.Buy : BingX.Net.Enums.OrderSide.Sell;
+            var positionSide = _isHedgeMode
+                ? (order.Quantity > 0 ? BingX.Net.Enums.PositionSide.Long : BingX.Net.Enums.PositionSide.Short)
+                : BingX.Net.Enums.PositionSide.Both;
+
+            string newClientOrderId = _restClient.PerpetualFuturesApi.SharedClient.GenerateClientOrderId();
+            _orderStateManager.TryAdd(newClientOrderId, state);
+
+            var res = await _restClient.PerpetualFuturesApi.Trading.CancelReplaceOrderAsync(
+                orderId: exchangeOrderId,
+                clientOrderId: null,
+                mode: CancelReplaceMode.StopOnFailure,
+                symbol: ticker,
+                side: side,
+                type: FuturesOrderType.Limit,
+                positionSide: positionSide,
+                quantity: Math.Abs(quantity.Value),
+                price: price,
+                newClientOrderId: newClientOrderId);
+
+            if (!res.Success)
+            {
+                _orderStateManager.RemoveAlias(newClientOrderId);
+                Log.Error($"Update error: {res.Error} | Ticker: {ticker} | Price: {price} | OriginalData: {res.OriginalData}");
+                return new ExchangeWebResult<SharedId>(Name, res.Error);
+            }
+
+            // Cancel-replace produces a new exchange order → return new ID (unlike Bitget EditOrder)
+            var newExchangeId = res.Data?.NewOrder?.OrderId.ToString();   
+            return new ExchangeWebResult<SharedId>(
+                Name,
+                TradingMode.PerpetualLinear,
+                res.As(new SharedId(newExchangeId))
+            );
+        }
+
     }
 }
