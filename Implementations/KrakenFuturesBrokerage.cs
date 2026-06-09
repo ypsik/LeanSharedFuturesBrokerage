@@ -169,6 +169,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         #endregion
 
+        protected override string SettleAsset => "USD";
+
         #region Symbol Mapping
 
         // Lean symbol.Value is e.g. "XBTUSD" — Kraken Futures needs "PF_XBTUSD".
