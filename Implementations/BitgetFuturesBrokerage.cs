@@ -139,6 +139,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 );
 
                 _spdb.SetEntry("bitget", ticker, SecurityType.CryptoFuture, symbolProperties);
+                _spdb.SetEntry("bitget", ticker, SecurityType.Crypto, symbolProperties);
             }
         }
 

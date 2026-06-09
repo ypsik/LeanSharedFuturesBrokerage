@@ -94,6 +94,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 );
 
                 _spdb.SetEntry("bingx", ticker, SecurityType.CryptoFuture, symbolProperties);
+                _spdb.SetEntry("bingx", ticker, SecurityType.Crypto, symbolProperties);
+
             }
         }
 
