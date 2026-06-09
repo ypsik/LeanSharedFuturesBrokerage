@@ -2,6 +2,7 @@
 using Aster.Net.Clients;
 using Aster.Net.Enums;
 using Aster.Net.Objects;
+using BingX.Net.Enums;
 using CryptoExchange.Net.Interfaces.Clients;
 using CryptoExchange.Net.Objects;
 using CryptoExchange.Net.Objects.Sockets;
@@ -11,6 +12,7 @@ using QuantConnect.Data;
 using QuantConnect.Data.Market;
 using QuantConnect.Interfaces;
 using QuantConnect.Logging;
+using QuantConnect.Orders;
 using QuantConnect.Securities;
 using SilverQuant.Lean.Brokerages.Futures.Shared;
 using System;
@@ -36,8 +38,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         private CancellationTokenSource _fundingCts;
         private CancellationTokenSource? _userStreamCts;
 
+        private bool _isHedgeMode = true;
+
         public override bool IsConnected => base.IsConnected && _fundingUpdateConnected;
-        protected override SharedPositionSide? SharedPositionSide => CryptoExchange.Net.SharedApis.SharedPositionSide.Long;
+        protected override SharedPositionSide? SharedPositionSide => _isHedgeMode ? CryptoExchange.Net.SharedApis.SharedPositionSide.Long : null;
 
 
         // 1. LEAN DataQueueHandler Konstruktor (Bybit-Style)
@@ -308,5 +312,51 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         }
 
         #endregion
+
+        protected override async Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(
+        Order order, decimal price, decimal? quantity)
+        {
+            if (!quantity.HasValue)
+            {
+                Log.Error($"Update error: quantity not provided");
+                return new ExchangeWebResult<SharedId>(Name, ArgumentError.Missing("Quantity"));
+            }
+
+            var ticker = NativeTicker(order.Symbol);
+
+            var brokerId = order.BrokerId.LastOrDefault();
+            if (!long.TryParse(brokerId, out var exchangeOrderId))
+            {
+                Log.Error($"Update error: invalid brokerId '{brokerId}'");
+                return new ExchangeWebResult<SharedId>(Name, new InvalidOperationError("invalid brokerId"));
+            }
+
+            if (!_orderStateManager.TryGetByExchangeId(brokerId, out var state))
+            {
+                Log.Error($"Update error: old state missing for brokerId {brokerId}");
+                return new ExchangeWebResult<SharedId>(Name, new InvalidOperationError("old state missing"));
+            }
+
+            var res = await _restClient.FuturesV3Api.Trading.EditOrderAsync(
+                orderId: exchangeOrderId,
+                clientOrderId: null,
+                symbol: ticker,
+                quantity: Math.Abs(quantity.Value),
+                price: price);
+
+            if (!res.Success)
+            {
+                Log.Error($"Update error: {res.Error} | Ticker: {ticker} | Price: {price} | OriginalData: {res.OriginalData}");
+                return new ExchangeWebResult<SharedId>(Name, res.Error);
+            }
+
+            // Cancel-replace produces a new exchange order → return new ID (unlike Bitget EditOrder)
+            var newExchangeId = res.Data?.Id ?? 0;
+            return new ExchangeWebResult<SharedId>(
+                Name,
+                TradingMode.PerpetualLinear,
+                res.As(new SharedId(newExchangeId.ToString()))
+            );
+        }
     }
 }
