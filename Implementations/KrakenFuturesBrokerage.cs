@@ -10,9 +10,11 @@ using QuantConnect.Interfaces;
 using QuantConnect.Logging;
 using QuantConnect.Orders;
 using QuantConnect.Securities;
+using QuantConnect.Util;
 using SilverQuant.Lean.Brokerages.Futures.Shared;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.Contracts;
 using System.Linq;
 using System.Threading.Tasks;
 
@@ -179,8 +181,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 throw new Exception($"Failed to load Kraken symbols: {result.Error}");
 
             foreach (var symbol in result.Data.Where(s => s.Tradeable && s.Type == Kraken.Net.Enums.SymbolType.FlexibleFutures))
-            {
-                // NormalizeSymbol strips "PF_" → e.g. "PF_XBTUSD" → "XBTUSD"
+            {                
                 var ticker = NormalizeSymbol(symbol.Symbol);
 
                 var tickSize = symbol.TickSize ?? 0.01m;
@@ -192,7 +193,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
                 var symbolProperties = new SymbolProperties(
                     description: $"Kraken {symbol.BaseAsset} Perpetual",
-                    quoteCurrency: SettleAsset,
+                    quoteCurrency: symbol.QuoteAsset,  
                     contractMultiplier: 1m,
                     minimumPriceVariation: tickSize,
                     lotSize: lotSize,
@@ -209,14 +210,14 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         #region Symbol Mapping
 
-        // Lean symbol.Value is e.g. "XBTUSD" — Kraken Futures needs "PF_XBTUSD".
-        protected override string NativeTicker(Symbol symbol) => "PF_" + symbol.Value;
+        protected override string NormalizeSymbol(string rawSymbol)
+                => rawSymbol.Replace("PF_", "");
 
-        // Exchange returns "PF_XBTUSD" — strip the prefix to get the Lean-side symbol "XBTUSD".
-        protected override string NormalizeSymbol(string rawSymbol) =>
-            rawSymbol.StartsWith("PF_", StringComparison.OrdinalIgnoreCase)
-                ? rawSymbol[3..].ToUpperInvariant()
-                : rawSymbol.ToUpperInvariant();
+        protected override string NativeTicker(Symbol symbol)
+        {
+            CurrencyPairUtil.DecomposeCurrencyPair(symbol, out var baseAsset, out var quoteAsset);
+            return $"PF_{baseAsset}{quoteAsset}";
+        }
 
         #endregion
 
