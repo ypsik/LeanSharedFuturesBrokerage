@@ -169,6 +169,19 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         #endregion
 
+        #region Symbol Mapping
+
+        // Lean symbol.Value is e.g. "XBTUSD" — Kraken Futures needs "PF_XBTUSD".
+        protected override string NativeTicker(Symbol symbol) => "PF_" + symbol.Value;
+
+        // Exchange returns "PF_XBTUSD" — strip the prefix to get the Lean-side symbol "XBTUSD".
+        protected override string NormalizeSymbol(string rawSymbol) =>
+            rawSymbol.StartsWith("PF_", StringComparison.OrdinalIgnoreCase)
+                ? rawSymbol[3..].ToUpperInvariant()
+                : rawSymbol.ToUpperInvariant();
+
+        #endregion
+
         // Public ticker feed for funding rate polling, via the unauthenticated extra client.
         protected override async Task<CallResult<UpdateSubscription>> CreateFundingSubscriptionAsync(
             string nativeTicker, Symbol symbol, Func<DateTime, decimal?, DateTime?, bool> onFundingRate)
