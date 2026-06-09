@@ -110,7 +110,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
             if (_socketClient == null)
             {
-                _socketClient = new HyperLiquidSocketClient();
+                job.BrokerageData.TryGetValue("hyperliquid-address", out var key);
+                job.BrokerageData.TryGetValue("hyperliquid-secret", out var secret);
+                _socketClient = new HyperLiquidSocketClient(options => {
+                    if (!string.IsNullOrEmpty(key) && !string.IsNullOrEmpty(secret))
+                        options.ApiCredentials = new HyperLiquidCredentials(key, secret);
+                });
             }
 
             if (_socketClientExData == null)

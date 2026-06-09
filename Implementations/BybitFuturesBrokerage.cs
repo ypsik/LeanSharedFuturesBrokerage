@@ -68,7 +68,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
             if (_socketClient == null)
             {
-                _socketClient = new BybitSocketClient();
+                job.BrokerageData.TryGetValue("bybit-api-key", out var key);
+                job.BrokerageData.TryGetValue("bybit-api-secret", out var secret);
+                _socketClient = new BybitSocketClient(options =>
+                {
+                    if (!string.IsNullOrEmpty(key) && !string.IsNullOrEmpty(secret))
+                        options.ApiCredentials = new Bybit.Net.BybitCredentials(key, secret);
+                });
             }
 
             if (_socketClientExData == null)

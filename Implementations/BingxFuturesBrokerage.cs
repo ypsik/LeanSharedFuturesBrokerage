@@ -112,7 +112,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
             if (_socketClient == null)
             {
-                _socketClient = new BingXSocketClient();
+                job.BrokerageData.TryGetValue("bingx-api-key", out var key);
+                job.BrokerageData.TryGetValue("bingx-api-secret", out var secret);
+                _socketClient = new BingXSocketClient(options => {
+                    if (!string.IsNullOrEmpty(key) && !string.IsNullOrEmpty(secret))
+                        options.ApiCredentials = new BingX.Net.BingXCredentials(key, secret);
+                });
             }
 
             if (_socketClientExData == null)
