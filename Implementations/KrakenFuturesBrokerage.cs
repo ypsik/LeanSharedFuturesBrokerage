@@ -4,12 +4,15 @@ using CryptoExchange.Net.Objects.Sockets;
 using CryptoExchange.Net.SharedApis;
 using Kraken.Net;
 using Kraken.Net.Clients;
+using Microsoft.Win32;
+using QLNet;
 using QuantConnect;
 using QuantConnect.Data;
 using QuantConnect.Interfaces;
 using QuantConnect.Logging;
 using QuantConnect.Orders;
 using QuantConnect.Securities;
+using QuantConnect.Securities.Crypto;
 using QuantConnect.Util;
 using SilverQuant.Lean.Brokerages.Futures.Shared;
 using System;
@@ -201,6 +204,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 );
 
                 _spdb.SetEntry("kraken", ticker, SecurityType.CryptoFuture, symbolProperties);
+
+                // Register as Crypto only if LEAN's built-in Kraken spot market does not already have this pair,
+                // so that EnsureCurrencyDataFeed can resolve the base currency conversion rate.
+                if (!_spdb.ContainsKey("kraken", ticker, SecurityType.Crypto))
+                {
+                    _spdb.SetEntry("kraken", ticker, SecurityType.Crypto, symbolProperties);
+                }
             }
         }
 
