@@ -185,8 +185,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
                 var tickSize = symbol.TickSize ?? 0.01m;
 
-                // ContractValueTradePrecision is the minimum order size (lot size).
-                var lotSize = symbol.ContractValueTradePrecision ?? 1m;
+                // ContractSize is the actual minimum lot size (e.g. 1 for BTC, 10 for TRX).
+                // ContractValueTradePrecision is decimal precision, not a quantity.
+                var lotSize = symbol.ContractSize ?? 1m;
+                if (lotSize <= 0m) lotSize = 1m;
 
                 var symbolProperties = new SymbolProperties(
                     description: $"Kraken {symbol.BaseAsset} Perpetual",
