@@ -106,8 +106,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         public override bool IsConnected => base.IsConnected && _fundingUpdateConnected;
 
-        // Kraken does NOT keep the same order ID on edit (cancel + re-place).
-        public override bool ExchangeModifiesOrdersInPlace => false;
+        // Kraken edit keeps the same order ID (status: "edited", no cancel+replace).
+        public override bool ExchangeModifiesOrdersInPlace => true;
 
         public override void Connect()
         {
@@ -118,7 +118,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                     _subRateGate.WaitToProceed();
 
                     // account_log feed: snapshot on connect, then one new_entry per event.
-                    // Funding payments have Info == "futures funding rate" and carry RealizedFunding.
+                    // Funding payments have Info == "funding rate change" and carry RealizedFunding.
                     // We ignore the snapshot (historical entries already settled) and only act
                     // on live update entries.
                     var sub = RunSync(() =>
@@ -135,7 +135,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
                                 if (_algorithm?.Portfolio?.CashBook != null)
                                 {
-                                    // RealizedFunding is negative when paid out, positive when received.
+                                    // RealizedFunding is negative when paid, positive when received.
                                     _algorithm.Portfolio.CashBook[SettleAsset].AddAmount(entry.RealizedFunding.Value);
                                     OnMessage(new FundingBrokerageMessageEvent(
                                         entry.Asset ?? SettleAsset,
@@ -197,7 +197,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             };
         }
 
-        // Kraken edit = cancel + re-place, so a new order ID is returned and must be forwarded.
+        // Kraken edit is true in-place: same order ID is kept, status returns "edited".
+        // No cancel+replace, no new ID — same pattern as Bybit.
         protected override async Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(
             Order order, decimal price, decimal? quantity)
         {
@@ -212,6 +213,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 return new ExchangeWebResult<SharedId>(Name, res.Error);
             }
 
+            // The order ID is unchanged after an in-place edit.
             return new ExchangeWebResult<SharedId>(
                 Name,
                 TradingMode.PerpetualLinear,
