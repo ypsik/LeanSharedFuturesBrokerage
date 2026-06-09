@@ -41,6 +41,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             // Dedicated unauthenticated socket client for public ticker/funding subscriptions.
             _socketClientExData = new KrakenSocketClient();
 
+            PopulateSPDB();
+
             InitializeBase(
                 _restClient.FuturesApi.SharedClient,
                 _restClient.FuturesApi.SharedClient,
@@ -168,6 +170,38 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         }
 
         #endregion
+
+        private void PopulateSPDB()
+        {
+            var result = RunSync(() => _restClient.FuturesApi.ExchangeData.GetSymbolsAsync());
+
+            if (!result.Success)
+                throw new Exception($"Failed to load Kraken symbols: {result.Error}");
+
+            foreach (var symbol in result.Data.Where(s => s.Tradeable && s.Type == Kraken.Net.Enums.SymbolType.FlexibleFutures))
+            {
+                // NormalizeSymbol strips "PF_" → e.g. "PF_XBTUSD" → "XBTUSD"
+                var ticker = NormalizeSymbol(symbol.Symbol);
+
+                var tickSize = symbol.TickSize ?? 0.01m;
+
+                // ContractValueTradePrecision is the minimum order size (lot size).
+                var lotSize = symbol.ContractValueTradePrecision ?? 1m;
+
+                var symbolProperties = new SymbolProperties(
+                    description: $"Kraken {symbol.BaseAsset} Perpetual",
+                    quoteCurrency: SettleAsset,
+                    contractMultiplier: 1m,
+                    minimumPriceVariation: tickSize,
+                    lotSize: lotSize,
+                    marketTicker: symbol.Symbol
+                );
+
+                _spdb.SetEntry("kraken", ticker, SecurityType.CryptoFuture, symbolProperties);
+            }
+        }
+
+
 
         protected override string SettleAsset => "USD";
 
