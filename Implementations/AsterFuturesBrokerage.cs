@@ -98,6 +98,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 );
 
                 _spdb.SetEntry("aster", symbol.BaseAsset + symbol.QuoteAsset, SecurityType.CryptoFuture, symbolProperties);
+                _spdb.SetEntry("aster", symbol.BaseAsset + symbol.QuoteAsset, SecurityType.Crypto, symbolProperties);
             }
         }
 

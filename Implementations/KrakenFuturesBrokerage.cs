@@ -251,7 +251,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             var res = RunSync(() => _restClient.FuturesApi.Account.GetBalancesAsync());
 
             var flex = res?.Data?.MultiCollateralMarginAccount;
-            var balance = (flex?.BalanceValue ?? 0m) - (flex?.ProfitAndLoss ?? 0m);
+            var balance = flex?.BalanceValue ?? 0m;
 
             return new List<CashAmount>
             {
