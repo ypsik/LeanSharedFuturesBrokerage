@@ -21,6 +21,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
     {
         public OkxFuturesBrokerageFactory() : base(typeof(OkxFuturesBrokerage))
         {
+            Market.Add("okx", 905);
+
             var mhdb = MarketHoursDatabase.FromDataFolder();
             var alwaysOpen = SecurityExchangeHours.AlwaysOpen(TimeZones.Utc);
 
