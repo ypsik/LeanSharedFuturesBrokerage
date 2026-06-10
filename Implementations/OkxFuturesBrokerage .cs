@@ -36,6 +36,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         // null on Global accounts (SWAP — no ruleType filter needed).
         private readonly SymbolRuleType? _ruleTypeFilter;
 
+        public override bool ExchangeSupportsUserTradeStream => false;
+
         internal OkxFuturesBrokerage(
             IAlgorithm algorithm,
             OKXRestClient restClient,
