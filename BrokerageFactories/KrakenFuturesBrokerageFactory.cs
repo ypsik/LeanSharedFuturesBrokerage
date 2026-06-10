@@ -35,8 +35,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
 
         public override IBrokerageModel GetBrokerageModel(IOrderProvider orderProvider)
         {
-            // TODO: replace with a dedicated KrakenFuturesBrokerageModel once available
-            return new DefaultBrokerageModel(AccountType.Margin);
+            return new BrokerageModels.KrakenBrokerageModel(AccountType.Margin);
         }
 
         public override IBrokerage CreateBrokerage(LiveNodePacket job, IAlgorithm algorithm)
