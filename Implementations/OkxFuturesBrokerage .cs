@@ -36,8 +36,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         // null on Global accounts (SWAP — no ruleType filter needed).
         private readonly SymbolRuleType? _ruleTypeFilter;
 
-        public override bool ExchangeSupportsUserTradeStream => false;
-
         internal OkxFuturesBrokerage(
             IAlgorithm algorithm,
             OKXRestClient restClient,
@@ -138,10 +136,20 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             };
         }
 
+        // JKorf OKXApiAddresses.Europe sets WSS to wss://wseea.okx.com:8443.
+        // This endpoint currently returns HTTP 404 — the correct EU WebSocket address is unknown.
+        // mywspri.okx.com (found in OKX frontend JS) is a dangling CNAME, not a valid endpoint.
+        // TODO: find the correct EEA WebSocket endpoint (via OKX API support or official docs)
+        //       and override options.Environment.UnifiedSocketAddress here if needed.
+
         #region Connect / Disconnect
 
         // OKX AmendOrder keeps the same order ID — identical in-place semantics to Kraken.
         public override bool ExchangeModifiesOrdersInPlace => true;
+
+        // OKX fills channel (ws "fills") requires VIP5+ account.
+        // Fills are available via the "orders" channel which includes fillSz, fillPx, fee etc.
+        public override bool ExchangeSupportsUserTradeStream => false;
 
         public override void Connect()
         {
@@ -166,33 +174,38 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
             foreach (var symbol in result.Data)
             {
-                // Workaround: JKorf OKX.Net does not map "xperp" in SymbolRuleType enum (only "perp" exists).
-                // OKX returns ruleType="xperp" for X-Perp FUTURES, which deserializes as null.
-                // Until the upstream fix lands, filter: EU mode = accept only null RuleType on FUTURES
-                // (normal FUTURES have RuleType=Normal, X-Perps have RuleType=null due to missing mapping).
-                // Global SWAP mode: _ruleTypeFilter is null → no filter, accept all.
-                // TODO: replace null-check with SymbolRuleType.XPerp once JKorf adds [Map("xperp")] XPerp.
-                if (_ruleTypeFilter.HasValue && symbol.RuleType != null)
+                // EU accounts: filter to X-Perp contracts only (JSON "xperp" → SymbolRuleType.Perp).
+                // Global accounts: _ruleTypeFilter is null → accept all SWAPs.
+                if (_ruleTypeFilter.HasValue && symbol.RuleType != _ruleTypeFilter.Value)
                     continue;
 
                 // Only live/tradeable instruments.
                 if (symbol.State != InstrumentState.Live)
                     continue;
 
-                // For FUTURES/SWAP, baseCcy and quoteCcy are empty — parse from instFamily (e.g. "BTC-USD")
-                // or fall back to splitting instId ("BTC-USD-310404" → base=BTC, quote=USD).
+                // For FUTURES/SWAP, baseCcy and quoteCcy are empty.
+                // Use uly (underlying) which is always "BASE-QUOTE" (e.g. "BTC-USD").
+                // Fall back to instFamily or instId split if uly is missing.
                 string baseAsset, quoteAsset;
-                if (!string.IsNullOrEmpty(symbol.InstrumentFamily))
+                var underlying = symbol.Underlying; // "BTC-USD"
+                if (!string.IsNullOrEmpty(underlying))
                 {
-                    var familyParts = symbol.InstrumentFamily.Split('-');
-                    baseAsset = familyParts.Length > 0 ? familyParts[0] : string.Empty;
-                    quoteAsset = familyParts.Length > 1 ? familyParts[1] : SettleAsset;
+                    var parts = underlying.Split('-');
+                    baseAsset = parts.Length > 0 ? parts[0] : string.Empty;
+                    quoteAsset = parts.Length > 1 ? parts[1] : SettleAsset;
+                }
+                else if (!string.IsNullOrEmpty(symbol.InstrumentFamily))
+                {
+                    // instFamily = "BTC-USD_UM_XPERP" → take up to first '-' then up to '_'
+                    var parts = symbol.InstrumentFamily.Split('-');
+                    baseAsset = parts.Length > 0 ? parts[0] : string.Empty;
+                    quoteAsset = parts.Length > 1 ? parts[1].Split('_')[0] : SettleAsset;
                 }
                 else
                 {
-                    var idParts = symbol.Symbol.Split('-');
-                    baseAsset = idParts.Length > 0 ? idParts[0] : string.Empty;
-                    quoteAsset = idParts.Length > 1 ? idParts[1] : SettleAsset;
+                    var parts = symbol.Symbol.Split('-');
+                    baseAsset = parts.Length > 0 ? parts[0] : string.Empty;
+                    quoteAsset = parts.Length > 1 ? parts[1].Split('_')[0] : SettleAsset;
                 }
 
                 if (string.IsNullOrEmpty(baseAsset))
@@ -236,16 +249,17 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         #region Symbol Mapping
 
-        // OKX native: "BTC-USD-310404" or "BTC-USD-SWAP"
-        // LEAN ticker:  "BTCUSD"
+        // Converts OKX native instId to LEAN ticker.
+        // SWAP:    "BTC-USDT-SWAP"          → "BTCUSDT"
+        // FUTURES: "BTC-USD_UM_XPERP-310404" → not used (ticker built from uly in PopulateSPDB)
         protected override string NormalizeSymbol(string rawSymbol)
         {
-            // Strip the third segment (expiry date or "SWAP").
-            // "BTC-USD-310404" → "BTCUSD"
-            // "BTC-USDT-SWAP"  → "BTCUSDT"
+            // Take first two dash-separated segments, strip anything after '_' in segment 2.
+            // "BTC-USDT-SWAP"          → "BTC" + "USDT" → "BTCUSDT"
+            // "BTC-USD_UM_XPERP-310404"→ "BTC" + "USD"  → "BTCUSD"
             var parts = rawSymbol.Split('-');
             if (parts.Length >= 2)
-                return parts[0] + parts[1];
+                return parts[0] + parts[1].Split('_')[0];
 
             return rawSymbol;
         }
