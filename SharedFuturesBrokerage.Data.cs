@@ -336,18 +336,17 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                 _subRateGate.WaitToProceed();
 
-
-                var sub = RunSync(() => CreateFundingSubscriptionAsync(nativeTicker, symbol, (now, fundingRate, nextFundingTime) =>
+                bool onFundingRate(DateTime now, decimal? fundingRate, DateTime? nextFundingTime)
                 {
                     bool isFirstTick = false;
                     bool isRollover = false;
                     decimal rateToReport = 0m;
 
-                    // Fixed cycle (e.g. HL 1h): derive nextFundingTime from now
+                    // Fixed cycle (e.g. HL 1h): next funding = current hour + interval
                     // Exchange-driven (e.g. Bybit): use nextFundingTime directly from socket
                     DateTime? currentNextFundingTime = FundingRolloverHours.HasValue
-                        ? now.AddHours(FundingRolloverHours.Value - (now.Hour % FundingRolloverHours.Value))
-                              .Date.AddHours(now.AddHours(FundingRolloverHours.Value - (now.Hour % FundingRolloverHours.Value)).Hour)
+                        ? new DateTime(now.Year, now.Month, now.Day, now.Hour, 0, 0, DateTimeKind.Utc)
+                              .AddHours(FundingRolloverHours.Value)
                         : nextFundingTime;
 
                     _lastFundingState.AddOrUpdate(
@@ -360,19 +359,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         },
                         updateValueFactory: (_, state) =>
                         {
-                            if (!currentNextFundingTime.HasValue)
-                            {
-                                // No nextFundingTime: update rate only, cannot determine rollover yet
-                                return (state.NextFundingTime, fundingRate ?? state.Rate);
-                            }
-
                             if (state.NextFundingTime == null)
                             {
                                 // First tick with real nextFundingTime: set it, no rollover
                                 return (currentNextFundingTime, fundingRate ?? state.Rate);
                             }
 
-                            if (currentNextFundingTime > state.NextFundingTime)
+                            if ((currentNextFundingTime ?? now) > state.NextFundingTime)
                             {
                                 isRollover = true;
                                 rateToReport = state.Rate;
@@ -389,7 +382,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     Log.Trace($"{Name} Funding Update: {symbol.Value} -> Rate: {rateToReport} (Rollover)");
 
                     return true;
-                }));
+                }
+
+                var sub = RunSync(() => CreateFundingSubscriptionAsync(nativeTicker, symbol, onFundingRate));
 
                 SetupSubscriptionEvents(sub.Success, sub.Data, _ => { },
                   $"MarginInterestRate {nativeTicker}",
