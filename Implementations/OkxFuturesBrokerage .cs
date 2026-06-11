@@ -35,6 +35,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         // SymbolRuleType.Perp on EU accounts (X-Perp FUTURES, JSON "xperp").
         // null on Global accounts (SWAP — no ruleType filter needed).
         private readonly SymbolRuleType? _ruleTypeFilter;
+        protected override int? FundingRolloverHours => null;
 
         internal OkxFuturesBrokerage(
             IAlgorithm algorithm,

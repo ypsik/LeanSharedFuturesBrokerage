@@ -22,7 +22,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         private readonly ConcurrentDictionary<Symbol, int> _lastFundingHour = new();
         private readonly ConcurrentDictionary<Symbol, (int Hour, decimal Rate)> _lastFundingState = new();
 
-        protected virtual int FundingRolloverHours => 8;
+        protected virtual int? FundingRolloverHours => 8;
 
         protected virtual int MaxHistoryLookbackMinutes => 7200;
 
@@ -344,38 +344,43 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     bool isHourRollover = false;
                     decimal rateToReport = 0m;
 
-                    var currentHour = nextFundingTime?.Hour ?? ((now.Hour / FundingRolloverHours) * FundingRolloverHours);
-
-                    // _lastFundingState ist ein ConcurrentDictionary<Symbol, (int Hour, decimal Rate)>
-                    _lastFundingState.AddOrUpdate(
-                      symbol,
-                      addValueFactory: _ =>
-                      {
-                          isFirstTick = true;
-                          return (currentHour, fundingRate ?? 0m);
-                      },
-                      updateValueFactory: (_, state) =>
-                      {
-                          if (state.Hour != currentHour)
-                          {
-                              isHourRollover = true;
-                              rateToReport = state.Rate;
-                              return (currentHour, fundingRate ?? state.Rate);
-                          }
-
-                          // Innerhalb der Stunde: Nur aktualisieren, wenn ein Wert vorhanden ist
-                          return (state.Hour, fundingRate ?? state.Rate);
-                      });
-
-                    if (!isFirstTick && !isHourRollover) return false;
-
-                    if (isHourRollover)
+                    int currentHour;
+                    if (FundingRolloverHours.HasValue)
                     {
-                        var roundedTime = new DateTime(now.Year, now.Month, now.Day, currentHour, 0, 0, DateTimeKind.Utc);
-                        // Nutzt die ermittelte rateToReport (entweder neu vom Exchange oder aus dem Cache)
-                        _aggregator.Update(new MarginInterestRate { Symbol = symbol, Time = roundedTime, InterestRate = rateToReport });
-                        Log.Trace($"{Name} Funding Update: {symbol.Value} -> Rate: {rateToReport} (Rollover)");
+                        // HL und exchanges mit festem Zyklus: aus now berechnen
+                        currentHour = (now.Hour / FundingRolloverHours.Value) * FundingRolloverHours.Value;
                     }
+                    else
+                    {
+                        // Exchange liefert nextFundingTime via Socket
+                        if (!nextFundingTime.HasValue) return false; // kein nextFundingTime → skippen
+                        currentHour = nextFundingTime.Value.Hour;
+                    }
+
+                    _lastFundingState.AddOrUpdate(
+                        symbol,
+                        addValueFactory: _ =>
+                        {
+                            isFirstTick = true;
+                            return (currentHour, fundingRate ?? 0m);
+                        },
+                        updateValueFactory: (_, state) =>
+                        {
+                            if (state.Hour != currentHour)
+                            {
+                                isHourRollover = true;
+                                rateToReport = state.Rate;
+                                return (currentHour, fundingRate ?? state.Rate);
+                            }
+                            return (state.Hour, fundingRate ?? state.Rate);
+                        });
+
+                    if (isFirstTick) return false;
+                    if (!isHourRollover) return false;
+
+                    var roundedTime = new DateTime(now.Year, now.Month, now.Day, currentHour, 0, 0, DateTimeKind.Utc);
+                    _aggregator.Update(new MarginInterestRate { Symbol = symbol, Time = roundedTime, InterestRate = rateToReport });
+                    Log.Trace($"{Name} Funding Update: {symbol.Value} -> Rate: {rateToReport} (Rollover)");
 
                     return true;
                 };

@@ -32,6 +32,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         private readonly object _fundingUpdateLock = new();
         private bool _fundingUpdateConnected = false;
         private UpdateSubscription _fundingUpdateSubscription;
+        protected override int? FundingRolloverHours => null;
 
         internal KrakenFuturesBrokerage(
             IAlgorithm algorithm,

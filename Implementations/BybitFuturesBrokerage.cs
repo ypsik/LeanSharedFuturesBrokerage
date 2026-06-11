@@ -101,6 +101,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         public override bool IsConnected => base.IsConnected && _fundingUpdateConnected;
         public override bool ExchangeModifiesOrdersInPlace => true;
 
+        protected override int? FundingRolloverHours => null;
+
+
         protected override ExchangeParameters OpenOrdersExchangeParameters
         {
             get

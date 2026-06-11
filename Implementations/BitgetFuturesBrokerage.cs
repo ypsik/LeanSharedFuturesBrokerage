@@ -77,19 +77,16 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
             if (_socketClient == null)
             {
-
                 job.BrokerageData.TryGetValue("bitget-api-key", out var key);
                 job.BrokerageData.TryGetValue("bitget-api-secret", out var secret);
                 job.BrokerageData.TryGetValue("bitget-api-pass", out var pass);
 
-                var socketClient = new BitgetSocketClient(options =>
+                _socketClient = new BitgetSocketClient(options =>
                 {
                     options.ApiCredentials = new BitgetCredentials(key: key, secret: secret, pass: pass);
                     options.DelayAfterConnect = TimeSpan.FromMilliseconds(500);
                     options.SocketIndividualSubscriptionCombineTarget = 50;
                 });
-
-                _socketClient = new BitgetSocketClient();
             }
 
             if (_socketClientExData == null)
@@ -123,16 +120,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             {
                 var ticker = contract.Symbol;
 
-                // Mindestschrittweite des Preises aus den echten PriceDecimals berechnen
                 var tickSize = (decimal)Math.Pow(10, -contract.PriceDecimals);
-
-                // LotSize ist laut deiner Klasse MinOrderQuantity
                 var lotSize = contract.MinOrderQuantity;
 
                 var symbolProperties = new SymbolProperties(
                     description: $"Bitget {contract.BaseAsset} Perpetual",
                     quoteCurrency: SettleAsset,
-                    contractMultiplier: 1m, // Bitget USDT-Futures rechnen standardmäßig in Base-Asset Units (1)
+                    contractMultiplier: 1m,
                     minimumPriceVariation: tickSize,
                     lotSize: lotSize,
                     marketTicker: contract.Symbol
@@ -144,6 +138,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         }
 
         public override decimal MinimumOrderNotionalValue => 5m;
+        protected override int? FundingRolloverHours => null;
+
 
         protected override ExchangeParameters PlaceFuturesOrderExchangeParameters
         {
@@ -174,7 +170,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 return parameters;
             }
         }
-        
+
         protected override ExchangeParameters AccountHoldingsExchangeParameters
         {
             get
@@ -185,7 +181,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 return parameters;
             }
         }
-        
+
         protected override ExchangeParameters OrderUpdatesExchangeParameters
         {
             get
@@ -251,67 +247,16 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         public override bool IsConnected => base.IsConnected && _fundingUpdateConnected;
         public override bool ExchangeModifiesOrdersInPlace => false;
 
-        private CancellationTokenSource _fundingPollCts = new();
-
         public override void Connect()
         {
             _fundingUpdateConnected = true;
-            _fundingPollCts = new CancellationTokenSource();
-            Task.Run(() => FundingPollLoopAsync(_fundingPollCts.Token));
             base.Connect();
-        }
-
-        private async Task FundingPollLoopAsync(CancellationToken ct)
-        {
-            while (!ct.IsCancellationRequested)
-            {
-                var nextPoll = GetNextFundingPollTime();
-                var delay = nextPoll - DateTime.UtcNow;
-                if (delay > TimeSpan.Zero)
-                    await Task.Delay(delay, ct).ContinueWith(_ => { }, ct);
-
-                if (ct.IsCancellationRequested) break;
-
-                await PollFundingFeesAsync().ConfigureAwait(false);
-            }
-        }
-
-        private DateTime GetNextFundingPollTime()
-        {
-            var now = DateTime.UtcNow;
-            var intervalHours = FundingRolloverHours; // 8
-            var hoursSinceMidnight = now.TimeOfDay.TotalHours;
-            var hoursUntilNext = intervalHours - (hoursSinceMidnight % intervalHours);
-            return now.AddHours(hoursUntilNext).AddMinutes(1);
-        }
-
-        private async Task PollFundingFeesAsync()
-        {
-            var result = await _restClient.FuturesApiV2.Account.GetLedgerAsync(
-                productType: BitgetProductTypeV2.UsdtFutures,
-                businessType: "contract_settle_fee",
-                idLessThan: null,
-                startTime: DateTime.UtcNow.AddMinutes(-30)
-            ).ConfigureAwait(false);
-
-            if (!result.Success || result.Data == null)
-            {
-                Log.Error($"Funding fee poll failed: {result.Error}");
-                return;
-            }
-            foreach (var entry in result.Data.Entries)
-            {
-                var amount = entry.Quantity;
-                _algorithm?.Portfolio?.CashBook[SettleAsset].AddAmount(amount);
-                OnMessage(new FundingBrokerageMessageEvent(SettleAsset, amount));
-            }
         }
 
         public override void Disconnect()
         {
             _fundingUpdateConnected = false;
             _socketClientExData?.Dispose();
-            _fundingPollCts.Cancel();
             base.Disconnect();
         }
         #endregion
@@ -320,15 +265,57 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         protected override async Task<CallResult<UpdateSubscription>> CreateFundingSubscriptionAsync(
            string nativeTicker, Symbol symbol, Func<DateTime, decimal?, DateTime?, bool> onFundingRate)
         {
-            return await _socketClientExData.FuturesApiV2.SubscribeToTickerUpdatesAsync(Bitget.Net.Enums.BitgetProductTypeV2.UsdtFutures,
-                nativeTicker, data =>
+            return await _socketClientExData.FuturesApiV2.SubscribeToTickerUpdatesAsync(
+                BitgetProductTypeV2.UsdtFutures, nativeTicker, data =>
                 {
                     var now = data.DataTime ?? data.ReceiveTime;
-                    var tickerData = data.Data;
+                    var ticker = data.Data.FirstOrDefault();
 
-                    // Wir reichen die FundingRate direkt durch, auch wenn sie null ist.
-                    onFundingRate(now, tickerData.FirstOrDefault()?.FundingRate, null);
+                    if (onFundingRate(now, ticker?.FundingRate, ticker?.NextFundingTime))
+                    {
+                        // Rollover detected via Socket → poll ledger for actual funding fees
+                        Task.Run(() => PollFundingFeesAsync());
+                    }
                 });
+        }
+
+        private long _lastLedgerIdProcessed = 0;
+        private int _fundingPollRunning = 0;
+
+        private async Task PollFundingFeesAsync()
+        {
+            // Only one poll at a time — multiple symbols may trigger simultaneously
+            if (Interlocked.CompareExchange(ref _fundingPollRunning, 1, 0) != 0)
+                return;
+
+            try
+            {
+                var result = await _restClient.FuturesApiV2.Account.GetLedgerAsync(
+                    productType: BitgetProductTypeV2.UsdtFutures,
+                    businessType: "contract_settle_fee",
+                    idLessThan: null,
+                    startTime: DateTime.UtcNow.AddMinutes(-1)
+                ).ConfigureAwait(false);
+
+                if (!result.Success || result.Data == null)
+                {
+                    Log.Error($"Funding fee poll failed: {result.Error}");
+                    return;
+                }
+
+                foreach (var entry in result.Data.Entries
+                    .Where(e => e.Id > _lastLedgerIdProcessed)
+                    .OrderBy(e => e.Id))
+                {
+                    _algorithm?.Portfolio?.CashBook[SettleAsset].AddAmount(entry.Quantity);
+                    OnMessage(new FundingBrokerageMessageEvent(SettleAsset, entry.Quantity));
+                    Interlocked.Exchange(ref _lastLedgerIdProcessed, entry.Id);
+                }
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _fundingPollRunning, 0);
+            }
         }
 
         public override List<CashAmount> GetCashBalance()
@@ -337,11 +324,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             var data = res?.Data?.FirstOrDefault();
             var cashBalance = (data?.UsdtEquity ?? 0) - (data?.UnrealizedProfitAndLoss ?? 0);
 
-            var result = new List<CashAmount>
+            return new List<CashAmount>
             {
                 new CashAmount(cashBalance, SettleAsset)
             };
-            return result;
         }
 
         protected override async Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(
@@ -364,7 +350,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             else
             {
                 Log.Error($"Update error: old state missing for brokerId {brokerId}");
-                return new ExchangeWebResult<SharedId>(Name, new InvalidOperationError("old state missing"));                
+                return new ExchangeWebResult<SharedId>(Name, new InvalidOperationError("old state missing"));
             }
 
             var res = await _restClient.FuturesApiV2.Trading.EditOrderAsync(
@@ -390,6 +376,5 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 res.As(new SharedId(brokerId))
             );
         }
-
     }
 }

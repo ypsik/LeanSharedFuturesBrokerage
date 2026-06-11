@@ -44,7 +44,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         public override bool ExchangeModifiesOrdersInPlace => true;
 
         protected override SharedPositionSide? SharedPositionSide => _isHedgeMode ? CryptoExchange.Net.SharedApis.SharedPositionSide.Long : null;
-
+        protected override int? FundingRolloverHours => null;
 
         // 2. Trading-Instanz Konstruktor (für die Factory)
         internal AsterFuturesBrokerage(IAlgorithm algorithm,

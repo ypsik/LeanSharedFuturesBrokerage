@@ -88,7 +88,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         }
 
         public override bool IsConnected => base.IsConnected && _fundingUpdateConnected;
-        protected override int FundingRolloverHours => 1;
+        protected override int? FundingRolloverHours => 1;
 
         protected override bool IsTerminalUpdateError(string errorMsg)
                 => errorMsg.Contains("canceled or filled", StringComparison.OrdinalIgnoreCase);
