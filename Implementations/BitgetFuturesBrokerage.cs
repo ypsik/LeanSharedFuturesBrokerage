@@ -274,7 +274,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                     if (onFundingRate(now, ticker?.FundingRate, ticker?.NextFundingTime))
                     {
                         // Rollover detected via Socket → poll ledger for actual funding fees
-                        Task.Run(() => PollFundingFeesAsync());
+                        Task.Run(async () =>
+                        {
+                            await Task.Delay(5000); // wait 5s for ledger entry to appear
+                            await PollFundingFeesAsync();
+                        });
                     }
                 });
         }
