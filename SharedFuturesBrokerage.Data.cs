@@ -19,8 +19,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
     {
         private readonly ConcurrentDictionary<string, UpdateSubscription> _subscriptions = new();
         private readonly object _fundingLock = new();
-        private readonly ConcurrentDictionary<Symbol, int> _lastFundingHour = new();
-        private readonly ConcurrentDictionary<Symbol, (int Hour, decimal Rate)> _lastFundingState = new();
+        private readonly ConcurrentDictionary<Symbol, (DateTime? NextFundingTime, decimal Rate)> _lastFundingState = new();
 
         protected virtual int? FundingRolloverHours => 8;
 
@@ -62,7 +61,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         public override IEnumerable<BaseData> GetHistory(QuantConnect.Data.HistoryRequest request)
         {
             var sharedSymbol = GetSharedSymbol(request.Symbol);
-            Log.Trace($"GetHistory called: Symbol={sharedSymbol.BaseAsset+sharedSymbol.QuoteAsset}, DataType={request.DataType.Name}, Resolution={request.Resolution}, StartUtc={request.StartTimeUtc}, EndUtc={request.EndTimeUtc}");
+            Log.Trace($"GetHistory called: Symbol={sharedSymbol.BaseAsset + sharedSymbol.QuoteAsset}, DataType={request.DataType.Name}, Resolution={request.Resolution}, StartUtc={request.StartTimeUtc}, EndUtc={request.EndTimeUtc}");
 
             var minStartTimeUtc = request.EndTimeUtc.AddMinutes(-MaxHistoryLookbackMinutes);
             var startTimeUtc = request.StartTimeUtc < minStartTimeUtc ? minStartTimeUtc : request.StartTimeUtc;
@@ -337,55 +336,60 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                 _subRateGate.WaitToProceed();
 
-                // Signatur auf decimal? geändert
-                Func<DateTime, decimal?, DateTime?, bool> onFundingRate = (now, fundingRate, nextFundingTime) =>
+
+                var sub = RunSync(() => CreateFundingSubscriptionAsync(nativeTicker, symbol, (now, fundingRate, nextFundingTime) =>
                 {
                     bool isFirstTick = false;
-                    bool isHourRollover = false;
+                    bool isRollover = false;
                     decimal rateToReport = 0m;
 
-                    int currentHour;
-                    if (FundingRolloverHours.HasValue)
-                    {
-                        // HL und exchanges mit festem Zyklus: aus now berechnen
-                        currentHour = (now.Hour / FundingRolloverHours.Value) * FundingRolloverHours.Value;
-                    }
-                    else
-                    {
-                        // Exchange liefert nextFundingTime via Socket
-                        if (!nextFundingTime.HasValue) return false; // kein nextFundingTime → skippen
-                        currentHour = nextFundingTime.Value.Hour;
-                    }
+                    // Fixed cycle (e.g. HL 1h): derive nextFundingTime from now
+                    // Exchange-driven (e.g. Bybit): use nextFundingTime directly from socket
+                    DateTime? currentNextFundingTime = FundingRolloverHours.HasValue
+                        ? now.AddHours(FundingRolloverHours.Value - (now.Hour % FundingRolloverHours.Value))
+                              .Date.AddHours(now.AddHours(FundingRolloverHours.Value - (now.Hour % FundingRolloverHours.Value)).Hour)
+                        : nextFundingTime;
 
                     _lastFundingState.AddOrUpdate(
                         symbol,
                         addValueFactory: _ =>
                         {
                             isFirstTick = true;
-                            return (currentHour, fundingRate ?? 0m);
+                            // Store null if we don't know nextFundingTime yet — will be set on next tick
+                            return (currentNextFundingTime, fundingRate ?? 0m);
                         },
                         updateValueFactory: (_, state) =>
                         {
-                            if (state.Hour != currentHour)
+                            if (!currentNextFundingTime.HasValue)
                             {
-                                isHourRollover = true;
-                                rateToReport = state.Rate;
-                                return (currentHour, fundingRate ?? state.Rate);
+                                // No nextFundingTime: update rate only, cannot determine rollover yet
+                                return (state.NextFundingTime, fundingRate ?? state.Rate);
                             }
-                            return (state.Hour, fundingRate ?? state.Rate);
+
+                            if (state.NextFundingTime == null)
+                            {
+                                // First tick with real nextFundingTime: set it, no rollover
+                                return (currentNextFundingTime, fundingRate ?? state.Rate);
+                            }
+
+                            if (currentNextFundingTime > state.NextFundingTime)
+                            {
+                                isRollover = true;
+                                rateToReport = state.Rate;
+                                return (currentNextFundingTime, fundingRate ?? state.Rate);
+                            }
+
+                            return (state.NextFundingTime, fundingRate ?? state.Rate);
                         });
 
                     if (isFirstTick) return false;
-                    if (!isHourRollover) return false;
+                    if (!isRollover) return false;
 
-                    var roundedTime = new DateTime(now.Year, now.Month, now.Day, currentHour, 0, 0, DateTimeKind.Utc);
-                    _aggregator.Update(new MarginInterestRate { Symbol = symbol, Time = roundedTime, InterestRate = rateToReport });
+                    _aggregator.Update(new MarginInterestRate { Symbol = symbol, Time = now, InterestRate = rateToReport });
                     Log.Trace($"{Name} Funding Update: {symbol.Value} -> Rate: {rateToReport} (Rollover)");
 
                     return true;
-                };
-
-                var sub = RunSync(() => CreateFundingSubscriptionAsync(nativeTicker, symbol, onFundingRate));
+                }));
 
                 SetupSubscriptionEvents(sub.Success, sub.Data, _ => { },
                   $"MarginInterestRate {nativeTicker}",
