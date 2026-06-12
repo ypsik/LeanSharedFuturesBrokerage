@@ -38,7 +38,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         private CancellationTokenSource _fundingCts;
         private CancellationTokenSource? _userStreamCts;
 
-        private bool _isHedgeMode = true;
+        private bool _isHedgeMode = false;
 
         public override bool IsConnected => base.IsConnected && _fundingUpdateConnected;
         public override bool ExchangeModifiesOrdersInPlace => true;
@@ -51,12 +51,14 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             AsterRestClient restClient,
             AsterSocketClient socketClient,
             IDataAggregator aggregator,
+            bool isHedgeMode = false,
             Func<List<Holding>>? getHoldingsFunc = null)
             : base(algorithm, "aster")
         {
             _restClient = restClient;
             _socketClient = socketClient;
             _socketClientExData = new AsterSocketClient();
+            _isHedgeMode = isHedgeMode;
 
             PopulateSPDB();
 

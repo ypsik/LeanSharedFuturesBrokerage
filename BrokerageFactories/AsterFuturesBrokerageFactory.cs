@@ -36,7 +36,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
         {
             { "aster-public-address", Config.Get("aster-public-address") },
             { "aster-address", Config.Get("aster-address") },
-            { "aster-secret", Config.Get("aster-secret") }
+            { "aster-secret", Config.Get("aster-secret") },
+            { "aster-hedge-mode", Config.Get("aster-hedge-mode", "false") }  
         };
 
         public override IBrokerageModel GetBrokerageModel(IOrderProvider orderProvider)
@@ -51,6 +52,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
             var publicAddress = Read<string>(job.BrokerageData, "aster-public-address", errors);
             var address = Read<string>(job.BrokerageData, "aster-address", errors);
             var secret = Read<string>(job.BrokerageData, "aster-secret", errors);
+
+            var isHedgeMode = job.BrokerageData.TryGetValue("aster-hedge-mode", out var hm)
+                && bool.TryParse(hm, out var parsed) && parsed;
 
             if (errors.Any())
             {
@@ -79,7 +83,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
             };
 
             // --- Fix: Konstruktor mit Aggregator aufrufen ---
-            var brokerage = new AsterFuturesBrokerage(algorithm, asterRestClient, asterSocketClient, aggregator, getHoldingsFunc);
+            var brokerage = new AsterFuturesBrokerage(algorithm, asterRestClient, asterSocketClient, aggregator, isHedgeMode, getHoldingsFunc);
 
             // Register with MEF Composer so Lean reuses this instance when
             // resolving IDataQueueHandler instead of trying to construct a new one
