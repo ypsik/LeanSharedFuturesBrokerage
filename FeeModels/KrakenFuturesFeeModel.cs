@@ -19,8 +19,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.FeeModels
             decimal tradeValue = parameters.Security.Price * Math.Abs(parameters.Order.Quantity);
             decimal feeAmount = tradeValue * feeRate;
 
+            var currency = parameters.Security.QuoteCurrency?.Symbol
+               ?? "USD";
+
             // Aster rechnet Gebühren in USDT ab
-            return new OrderFee(new CashAmount(feeAmount, "USD"));
+            return new OrderFee(new CashAmount(feeAmount, currency));
         }
     }
 }

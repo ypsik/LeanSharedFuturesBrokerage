@@ -15,8 +15,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.FeeModels
 
             decimal tradeValue = parameters.Security.Price * Math.Abs(parameters.Order.Quantity);
             decimal feeAmount = tradeValue * feeRate;
+            var currency = parameters.Security.QuoteCurrency?.Symbol
+               ?? "USDT";
 
-            return new OrderFee(new CashAmount(feeAmount, "USDT"));
+            return new OrderFee(new CashAmount(feeAmount, currency));
         }
     }
 }
