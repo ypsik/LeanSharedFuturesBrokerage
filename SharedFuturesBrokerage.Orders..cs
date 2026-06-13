@@ -681,8 +681,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                           $"Symbol='{o.Symbol}', " +
                           $"Status='{o.Status}', " +
                           $"Qty='{o.OrderQuantity?.QuantityInBaseAsset}', " +
-                          $"Price='{o.OrderPrice}'");
-
+                          $"Price='{o.OrderPrice}'" +
+                          (!ExchangeSupportsUserTradeStream
+                              ? $", Fee='{o.Fee}', FeeAsset='{o.FeeAsset}', AvgPrice='{o.AveragePrice}', LastTradeFee='{o.LastTrade?.Fee}'"
+                              : ""));
 
                 if (string.IsNullOrEmpty(o.OrderId)) continue;
 
