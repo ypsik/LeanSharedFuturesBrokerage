@@ -322,7 +322,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 orderId: long.Parse(order.BrokerId.Last()),
                 clientOrderId: null,
                 symbol: ticker,
-                quantity: quantity.HasValue ? Math.Abs(quantity.Value) : null,
+                quantity: quantity.HasValue ? Math.Abs(quantity.Value) : Math.Abs(order.Quantity),
                 price: price);
 
             if (!res.Success)
