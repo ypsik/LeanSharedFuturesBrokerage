@@ -318,11 +318,24 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         {
             var ticker = NativeTicker(order.Symbol);
 
+            var brokerId = order.BrokerId.LastOrDefault();
+            if (!long.TryParse(brokerId, out var exchangeOrderId))
+            {
+                Log.Error($"Update error: invalid brokerId '{brokerId}'");
+                return new ExchangeWebResult<SharedId>(Name, new InvalidOperationError("invalid brokerId"));
+            }
+
+            if (!_orderStateManager.TryGetByExchangeId(brokerId, out var state))
+            {
+                Log.Error($"Update error: old state missing for brokerId {brokerId}");
+                return new ExchangeWebResult<SharedId>(Name, new InvalidOperationError("old state missing"));
+            }
+
             var res = await _restClient.FuturesV3Api.Trading.EditOrderAsync(
-                orderId: long.Parse(order.BrokerId.Last()),
+                orderId: exchangeOrderId,
                 clientOrderId: null,
                 symbol: ticker,
-                quantity: quantity.HasValue ? Math.Abs(quantity.Value) : Math.Abs(order.Quantity),
+                quantity: quantity.HasValue ? Math.Abs(quantity.Value) : Math.Abs(state.OriginalQuantity),
                 price: price);
 
             if (!res.Success)
