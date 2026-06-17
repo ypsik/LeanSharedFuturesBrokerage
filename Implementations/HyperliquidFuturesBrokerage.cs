@@ -354,7 +354,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         protected override async Task<ExchangeWebResult<SharedId>> ExecutePlaceOrderAsync(PlaceFuturesOrderRequest request)
         {
-            var res = await _restClient.FuturesApi.Trading.PlaceOrderAsync(
+            var res = await _socketClient.FuturesApi.Trading.PlaceOrderAsync(
                 symbol: request.Symbol.BaseAsset,
                 side: request.Side == SharedOrderSide.Buy ? OrderSide.Buy : OrderSide.Sell,
                 orderType: request.OrderType == SharedOrderType.Limit ? HyperLiquid.Net.Enums.OrderType.Limit : HyperLiquid.Net.Enums.OrderType.Market,
@@ -373,11 +373,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 return new ExchangeWebResult<SharedId>(Name, res.Error);
             }
 
-            return new ExchangeWebResult<SharedId>(
-                    Name,
-                    TradingMode.PerpetualLinear,
-                    res.As(new SharedId(res.Data.OrderId.ToString()))
-                );
+            var sharedResult = res.Success
+                ? new WebCallResult<SharedId>(null, null, null, null, null, null, null, null, null, null, null, ResultDataSource.Server, new SharedId(res.Data.OrderId.ToString()), null)
+                : new WebCallResult<SharedId>(null, null, null, null, null, null, null, null, null, null, null, ResultDataSource.Server, default, res.Error);
+
+            return new ExchangeWebResult<SharedId>(Name, TradingMode.PerpetualLinear, sharedResult);
         }
 
         protected override async Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(Order order, decimal price, decimal? quantity)
@@ -393,7 +393,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
             var activeExchangeId = order.BrokerId.Last();
 
-            var res = await _restClient.FuturesApi.Trading.EditOrderAsync(
+            var res = await _socketClient.FuturesApi.Trading.EditOrderAsync(
                           symbol: ticker,
                           orderId: long.Parse(activeExchangeId),
                           clientOrderId: null,
@@ -408,17 +408,17 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
             if (!res.Success)
             {
-                Log.Error($"Hyperliquid update error: {res.Error} | Ticker: {ticker} | Price: {price} | OriginalData: {res.OriginalData}");
+                Log.Error($"Hyperliquid update error: {res.Error} | Ticker: {ticker} | Price: {price}");
                 return new ExchangeWebResult<SharedId>(Name, res.Error);
             }
 
             // Nutzt die LEAN OrderId als temporären Platzhalter.
             // Die Basisklasse ordnet sie temporär zu, bis der Socket über die ClientOrderId die neue BrokerId meldet.
-            return new ExchangeWebResult<SharedId>(
-                    Name,
-                    TradingMode.PerpetualLinear,
-                    res.As(new SharedId(activeExchangeId.ToString()))
-                );
+            var sharedResult = res.Success
+                ? new WebCallResult<SharedId>(null, null, null, null, null, null, null, null, null, null, null, ResultDataSource.Server, new SharedId(activeExchangeId.ToString()), null)
+                : new WebCallResult<SharedId>(null, null, null, null, null, null, null, null, null, null, null, ResultDataSource.Server, default, res.Error);
+
+            return new ExchangeWebResult<SharedId>(Name, TradingMode.PerpetualLinear, sharedResult);
         }
 
 
