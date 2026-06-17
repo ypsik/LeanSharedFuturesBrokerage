@@ -348,13 +348,25 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
             if (res?.Success != true)
             {
+                var errorMsg = res?.Error?.ToString() ?? "Unknown exchange error";
+
+                // Reject-Check ZUERST: IsUpdatePending darf hier NICHT zurückgesetzt werden,
+                // sonst greift der Cancel-Schutz in HandleOrderSocket nicht mehr und LEAN
+                // bekommt fälschlich ein Cancel-Event für die (durch den Workaround ersetzte) Order.
+                // ExecuteReplaceWorkaround verwaltet IsUpdatePending selbst bis zum Abschluss.
+                if (IsRejectedUpdateError(errorMsg) && quantity.HasValue)
+                {
+                    Log.Trace($"{Name}.UpdateOrder: Exchange rejected in-place modify (would have matched immediately). " +
+                              $"Falling back to Cancel+Replace workaround for {order.Symbol.Value}.");
+
+                    return ExecuteReplaceWorkaround(order, price, quantity.Value, activeBrokerId);
+                }
+
                 if (!string.IsNullOrEmpty(activeBrokerId) &&
                     _orderStateManager.TryGetByExchangeId(activeBrokerId, out var errorState))
                 {
                     errorState.IsUpdatePending = false;
                 }
-
-                var errorMsg = res?.Error?.ToString() ?? "Unknown exchange error";
 
                 if (errorMsg.Contains("canceled or filled") || errorMsg.Contains("Cannot modify"))
                 {
@@ -405,6 +417,103 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         /// Beispiel Hyperliquid: errorMsg.Contains("canceled or filled")
         /// </summary>
         protected virtual bool IsTerminalUpdateError(string errorMsg) => false;
+
+        /// <summary>
+        /// Überschreiben um exchange-spezifische "Modify würde sofort matchen, daher rejected"-Fehler
+        /// zu erkennen. Tritt z.B. bei Hyperliquid mit ALO/Post-Only-Modifies auf (Netzwerk-Upgrade Juni 2026).
+        /// Wenn true zurückgegeben wird, führt UpdateOrder einen Cancel+Replace-Workaround aus
+        /// (alte Order ist auf der Exchange bereits tot, neue Order wird mit denselben Parametern platziert),
+        /// ohne dass LEAN ein Cancel-Event für die ursprüngliche Order sieht.
+        /// Beispiel Hyperliquid: errorMsg.Contains("would have immediately matched")
+        /// </summary>
+        protected virtual bool IsRejectedUpdateError(string errorMsg) => false;
+
+        /// <summary>
+        /// Workaround für Exchanges, die einen In-Place-Modify ablehnen können, weil die neue
+        /// Order-Konfiguration sofort gematcht hätte (z.B. Hyperliquid Post-Only/ALO Modify-Reject,
+        /// Netzwerk-Upgrade Juni 2026). Die alte Order ist auf der Exchange in diesem Fall bereits
+        /// storniert (der Modify-Call war intern ein Cancel+Replace, dessen Replace-Teil fehlschlug).
+        ///
+        /// Pattern identisch zu BitgetFuturesBrokerage.ExecuteUpdateOrderAsync: der bestehende
+        /// OrderState bleibt unverändert bestehen, eine neue ClientOrderId wird lediglich als ALIAS
+        /// auf diesen State registriert (_orderStateManager.TryAdd), BEVOR die neue Order via
+        /// ExecutePlaceOrderAsync rausgeschickt wird. Trifft die Socket-Bestätigung mit dieser
+        /// ClientOrderId ein, greift automatisch der bestehende "MODIFY / REPLACEMENT DETECTION"-Pfad
+        /// in HandleOrderSocket (gleiche ClientOrderId, neue BrokerId) – inkl. korrektem
+        /// IsUpdatePending-Reset und ohne Submitted-Event, da der State schon im Status Open/PartiallyFilled war.
+        /// IsUpdatePending bleibt bis zum Abschluss true, damit ein eventuell nachgeliefertes
+        /// Cancel-Event für die alte (jetzt tote) BrokerId unterdrückt wird.
+        /// </summary>
+        private bool ExecuteReplaceWorkaround(Order order, decimal price, decimal quantity, string activeBrokerId)
+        {
+            if (!_orderStateManager.TryGetByExchangeId(activeBrokerId, out var state))
+            {
+                Log.Error($"{Name}.ExecuteReplaceWorkaround: Old state for {activeBrokerId} not found. Aborting workaround.");
+                return false;
+            }
+
+            var newClientOrderId = GenerateClientId(order.Id);
+
+            // Alias VOR dem Place-Call registrieren, damit der Socket-Handler die neue
+            // ClientOrderId sofort auf den bestehenden State auflösen kann (instant fill/open).
+            _orderStateManager.TryAdd(newClientOrderId, state);
+
+            var request = new PlaceFuturesOrderRequest(
+                GetSharedSymbol(order.Symbol),
+                quantity > 0 ? SharedOrderSide.Buy : SharedOrderSide.Sell,
+                order.Type == OrderType.Limit ? SharedOrderType.Limit : SharedOrderType.Market,
+                new SharedQuantity { QuantityInBaseAsset = Math.Abs(quantity) })
+            {
+                Price = price,
+                ClientOrderId = newClientOrderId,
+                ExchangeParameters = PlaceFuturesOrderExchangeParameters,
+                PositionSide = SharedPositionSide
+            };
+
+            var placeRes = RunSync(() => ExecutePlaceOrderAsync(request));
+
+            if (!placeRes.Success)
+            {
+                _orderStateManager.RemoveAlias(newClientOrderId);
+                state.IsUpdatePending = false;
+
+                var errorMsg = placeRes.Error?.ToString() ?? "Unknown exchange error";
+                Log.Error($"{Name}.ExecuteReplaceWorkaround({order.Symbol.Value}): Replace order failed: {errorMsg}");
+                OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "UpdateOrderReplaceFailed", errorMsg));
+                return false;
+            }
+
+            // Falls der Socket die neue ClientOrderId noch nicht selbst verarbeitet hat
+            // (HandleOrderSocket-Pfad "MODIFY / REPLACEMENT DETECTION"): jetzt manuell nachziehen.
+            if (state.BrokerId != placeRes.Data.Id)
+            {
+                var oldBrokerId = state.BrokerId;
+
+                _orderStateManager.MapNewExchangeId(newClientOrderId, placeRes.Data.Id);
+                _orderStateManager.RemoveAlias(state.ClientOrderId); // alte ClientOrderId-Eintragung entfernen
+                state.ClientOrderId = newClientOrderId;
+                state.LastUpdateUtc = DateTime.UtcNow;
+                state.IsUpdatePending = false;
+
+                order.BrokerId.Add(placeRes.Data.Id);
+
+                OnOrderIdChangedEvent(new BrokerageOrderIdChangedEvent
+                {
+                    OrderId = order.Id,
+                    BrokerId = order.BrokerId
+                });
+
+                Log.Trace($"{Name}.ExecuteReplaceWorkaround: Replace mapped manually | Old: {oldBrokerId} -> New: {placeRes.Data.Id}.");
+            }
+            else
+            {
+                // Socket hat es bereits übernommen (Zeile 828ff Pfad).
+                state.IsUpdatePending = false;
+                Log.Trace($"{Name}.ExecuteReplaceWorkaround: Replace already mapped via socket for {order.Symbol.Value}.");
+            }
+
+            return true;
+        }
 
         /// <summary>
         /// Holt den echten Order-Status von der Exchange und feuert das korrekte LEAN-Event.
@@ -480,7 +589,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 Log.Error($"{Name}.ReconcileOrderImmediateAsync Error for {brokerId}: {ex.Message}");
             }
         }
-        
+
         #endregion
 
         #region Socket / Reconcile
@@ -758,7 +867,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                                 : OrderLifeCycleState.PartiallyFilled)
                             : OrderLifeCycleState.Open;
 
-                        if(existingState.State == OrderLifeCycleState.Open && prevState == OrderLifeCycleState.Submitted)
+                        if (existingState.State == OrderLifeCycleState.Open && prevState == OrderLifeCycleState.Submitted)
                         {
                             OnOrderEvent(new OrderEvent(existingState.Order, DateTime.UtcNow, OrderFee.Zero)
                             {
@@ -799,7 +908,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         continue;
                     }
                     // Wenn kein Trade-Stream unterstützt wird, verarbeiten wir jegliche Fills hier direkt 1:1 mit echten Fee-Daten aus dem Order-Payload
-                    else if(_orderStateManager.TryGetByExchangeId(o.OrderId, out var fillState))
+                    else if (_orderStateManager.TryGetByExchangeId(o.OrderId, out var fillState))
                     {
                         var sign = fillState.OriginalQuantity > 0 ? 1m : -1m;
                         var absFilled = o.QuantityFilled?.QuantityInBaseAsset ?? (o.Status == SharedOrderStatus.Filled ? Math.Abs(fillState.OriginalQuantity) : 0m);
@@ -840,7 +949,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         }
                     }
                 }
-                
+
                 // -------------------------------------------------------
                 // NORMAL STATUS UPDATE (Nur für Canceled / Open etc.)
                 // -------------------------------------------------------
@@ -927,7 +1036,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                                 .ConfigureAwait(false);
 
                         if (!statusCheck.Success || statusCheck.Data == null)
-                            {
+                        {
                             Log.Error($"{Name}.ReconcileLoop: Failed to verify order {brokerId}. Error: {statusCheck.Error}");
                             continue;
                         }
@@ -962,7 +1071,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                                 });
                             }
                         }
-                        
+
                         // CASE 2: STILL OPEN
                         else if (brokerOrder.Status == SharedOrderStatus.Open)
                         {

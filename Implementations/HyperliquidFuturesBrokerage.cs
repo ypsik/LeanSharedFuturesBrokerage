@@ -93,6 +93,14 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         protected override bool IsTerminalUpdateError(string errorMsg)
                 => errorMsg.Contains("canceled or filled", StringComparison.OrdinalIgnoreCase);
 
+        /// <summary>
+        /// Netzwerk-Upgrade Juni 2026: Modify in eine sofort ausführbare Order (Cross statt Resting)
+        /// wird von Hyperliquid abgelehnt. GTC-Modifies werden stattdessen serverseitig in ALO
+        /// (Add-Liquidity-Only / Post-Only) umgewandelt, was bei kreuzendem Preis zu diesem Fehler führt.
+        /// </summary>
+        protected override bool IsRejectedUpdateError(string errorMsg)
+                => errorMsg.Contains("would have immediately matched", StringComparison.OrdinalIgnoreCase);
+
         protected override void InitializeFromJob(QuantConnect.Packets.LiveNodePacket job, IDataAggregator aggregator)
         {
             // 1. Instanzen schützen: Nur erstellen, wenn sie null sind
@@ -209,7 +217,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 {
                     _subRateGate.WaitToProceed();
                     DateTime connectTime = StartTime;
-                    
+
                     var sub = RunSync(() =>
                             _socketClient.FuturesApi.Account.SubscribeToUserFundingUpdatesAsync(null,
                             update =>
@@ -248,7 +256,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                     {
                         _fundingUpdateSubscription = sub.Data;
                     }
-                    
+
                 }
             }
             base.Connect();
@@ -383,7 +391,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         protected override async Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(Order order, decimal price, decimal? quantity)
         {
             if (!quantity.HasValue)
-            { 
+            {
                 Log.Error($"Update error: quantity not provided");
                 return new ExchangeWebResult<SharedId>(Name, ArgumentError.Missing("Quantity"));
             }
