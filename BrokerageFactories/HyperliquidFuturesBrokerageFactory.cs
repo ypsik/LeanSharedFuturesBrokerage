@@ -20,6 +20,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
 {
     public class HyperliquidFuturesBrokerageFactory : BrokerageFactory
     {
+        // Oberes Ende der von Aster.Net erlaubten Spanne (0.001% - 0.1%),
+        // wird verwendet wenn eine Builder-Adresse gesetzt ist, aber kein Fee-Wert in der Config steht.
+        private const decimal DefaultBuilderFeePercentageWhenAddressSet = 0.1m;
+
         public HyperliquidFuturesBrokerageFactory() : base(typeof(HyperliquidFuturesBrokerage))
         {
             Market.Add("hyperliquid", 901);
@@ -34,7 +38,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
         {
             { "hyperliquid-address", Config.Get("hyperliquid-address") },
             { "hyperliquid-secret",  Config.Get("hyperliquid-secret")  },
-            { "hyperliquid-vault-address", Config.Get("hyperliquid-vault-address") },            
+            { "hyperliquid-vault-address", Config.Get("hyperliquid-vault-address") },
+            { "hyperliquid-builder-address", Config.Get("hyperliquid-builder-address") },
+            { "hyperliquid-builder-fee", Config.Get("hyperliquid-builder-fee") },
         };
 
         public override IBrokerageModel GetBrokerageModel(IOrderProvider orderProvider)
@@ -55,13 +61,42 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
             errors = new List<string>();
             var vaultAddress = Read<string>(job.BrokerageData, "hyperliquid-vault-address", errors);
 
+            // --- Builder Code Config (Address + Fee%) ---
+            // Kein hartes Read<> nutzen, da beide Felder optional sind und nicht in 'errors' münden sollen.
+            var builderAddressRaw = job.BrokerageData.TryGetValue("hyperliquid-builder-address", out var bAddr) ? bAddr : null;
+            var builderFeeRaw = job.BrokerageData.TryGetValue("hyperliquid-builder-fee", out var bFee) ? bFee : null;
+
+            string builderAddress;
+            decimal? builderFeePercentage;
+
+            if (string.IsNullOrWhiteSpace(builderAddressRaw))
+            {
+                // Keine Builder-Adresse gesetzt -> kein Builder Code, Fee ist 0
+                builderAddress = null;
+                builderFeePercentage = 0m;
+            }
+            else
+            {
+                builderAddress = builderAddressRaw;
+
+                if (string.IsNullOrWhiteSpace(builderFeeRaw) || !decimal.TryParse(builderFeeRaw, out var parsedFee))
+                {
+                    // Adresse gesetzt, aber keine (gültige) Fee in der Config -> oberes Ende der Spanne
+                    builderFeePercentage = DefaultBuilderFeePercentageWhenAddressSet;
+                }
+                else
+                {
+                    builderFeePercentage = parsedFee;
+                }
+            }
+
             var credentials = new HyperLiquidCredentials(String.IsNullOrEmpty(vaultAddress) ? address : vaultAddress, secret);
 
             var restClient = new HyperLiquidRestClient(options =>
             {
                 options.ApiCredentials = credentials;
-                options.BuilderFeePercentage = 0;
-                options.BuilderAddress = null;
+                options.BuilderFeePercentage = builderFeePercentage;
+                options.BuilderAddress = builderAddress;
                 options.OutputOriginalData = true;
             });
 
@@ -70,8 +105,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
                 options.ApiCredentials = credentials;
                 options.DelayAfterConnect = TimeSpan.FromMilliseconds(500);
                 options.SocketIndividualSubscriptionCombineTarget = 50;
-                options.BuilderFeePercentage = 0;
-                options.BuilderAddress = null;
+                options.BuilderFeePercentage = builderFeePercentage;
+                options.BuilderAddress = builderAddress;
                 options.OutputOriginalData = true;
             });
 
@@ -85,7 +120,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
                     .ToList();
 
             algorithm.Settings.DatabasesRefreshPeriod = TimeSpan.FromDays(36500);
-            var brokerage = new HyperliquidFuturesBrokerage(algorithm, restClient, socketClient, vaultAddress, aggregator, getHoldingsFunc); 
+            var brokerage = new HyperliquidFuturesBrokerage(algorithm, restClient, socketClient, vaultAddress, aggregator, getHoldingsFunc);
 
             // Register with MEF Composer so Lean reuses this instance when
             // resolving IDataQueueHandler instead of trying to construct a new one
