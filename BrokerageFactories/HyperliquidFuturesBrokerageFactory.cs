@@ -61,6 +61,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
             {
                 options.ApiCredentials = credentials;
                 options.BuilderFeePercentage = 0;
+                options.BuilderAddress = null;
                 options.OutputOriginalData = true;
             });
 
@@ -69,6 +70,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
                 options.ApiCredentials = credentials;
                 options.DelayAfterConnect = TimeSpan.FromMilliseconds(500);
                 options.SocketIndividualSubscriptionCombineTarget = 50;
+                options.BuilderFeePercentage = 0;
+                options.BuilderAddress = null;
+                options.OutputOriginalData = true;
             });
 
             // --- Aggregator & Holdings Setup ---
