@@ -359,6 +359,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             }
         }*/
 
+        protected override string GenerateClientId(int _)
+        {
+            return _restClient.FuturesApi.SharedClient.GenerateClientOrderId();
+        }
+
 
         protected override async Task<ExchangeWebResult<SharedId>> ExecutePlaceOrderAsync(PlaceFuturesOrderRequest request)
         {

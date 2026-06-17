@@ -242,6 +242,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             }
         }
 
+        protected override string GenerateClientId(int _)
+        {
+            return _restClient.FuturesApiV2.SharedClient.GenerateClientOrderId();
+        }
+
         #region Connect
 
         public override bool IsConnected => base.IsConnected && _fundingUpdateConnected;
@@ -345,7 +350,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
             var ticker = NativeTicker(order.Symbol);
 
-            string newClientOrderId = _restClient.FuturesApiV2.SharedClient.GenerateClientOrderId();
+            string newClientOrderId = GenerateClientId(order.Id);
             var brokerId = order.BrokerId.LastOrDefault();
             if (brokerId != null && _orderStateManager.TryGetByExchangeId(brokerId, out var state))
             {
