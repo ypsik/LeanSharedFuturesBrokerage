@@ -361,6 +361,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 quantity: request.Quantity?.QuantityInBaseAsset ?? 0m,
                 price: request.Price ?? 0m,
                 clientOrderId: request.ClientOrderId, // NEU: Zwingend erforderlich für das spätere Socket-Tracking
+                timeInForce: HyperLiquid.Net.Enums.TimeInForce.GoodTillCanceled,
                 vaultAddress: _vaultAdress);
 
             if (!res.Success)
@@ -402,6 +403,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                               : HyperLiquid.Net.Enums.OrderType.Market,
                           quantity: Math.Abs(quantity.Value),
                           price: price,
+                          timeInForce: HyperLiquid.Net.Enums.TimeInForce.GoodTillCanceled,
                           vaultAddress: _vaultAdress);
 
             if (!res.Success)
