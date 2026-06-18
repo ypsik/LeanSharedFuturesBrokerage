@@ -10,7 +10,7 @@ All exchange clients are built on JKorf's `CryptoExchange.Net` ecosystem (`Bybit
 |---|---|---|
 | Bybit | ✅ Live | In-place order modify, funding fees via user-trade stream |
 | Hyperliquid | ✅ Live | Vault trading, Builder Code support, cancel+replace workaround for post-June-2026 modify rejects |
-| AsterDEX | ✅ Live | ListenKey user stream, hedge mode, no native user-trade stream |
+| AsterDEX | ✅ Live | ListenKey user stream, hedge mode, Builder Code support, no native user-trade stream |
 | Bitget | ✅ Live | In-place EditOrder, funding fees via ledger polling |
 | BingX | ✅ Live | ListenKey user stream, hedge mode, funding rate via polling loop (not socket) |
 | Kraken | ⚠️ Blocked | Underlying library (`Kraken.Net`) does not return PnL data — cash/equity tracking unreliable. Waiting on upstream fix. |
@@ -81,6 +81,7 @@ Populated dynamically at startup from each exchange's live instrument list (tick
 - No native user-trade stream (`ExchangeSupportsUserTradeStream = false`) — fills are handled entirely through the order socket
 - ListenKey-based user stream with a 45-minute keep-alive loop and automatic reconnect on expiry
 - Optional hedge mode
+- Builder Code support: optional builder address + fee percentage (same config pattern as Hyperliquid; defaults to the top of the allowed range if an address is set without an explicit fee)
 
 **Bitget**
 - No funding-fee push event — detected via ticker-socket rollover, then polls the account ledger
