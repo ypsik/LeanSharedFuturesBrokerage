@@ -22,6 +22,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
 {
     public class AsterFuturesBrokerageFactory : BrokerageFactory
     {
+        // Oberes Ende der erlaubten Spanne (0.001% - 0.1%),
+        // wird verwendet wenn eine Builder-Adresse gesetzt ist, aber kein Fee-Wert in der Config steht.
+        private const decimal DefaultBuilderFeePercentageWhenAddressSet = 0.1m;
+
         public AsterFuturesBrokerageFactory() : base(typeof(AsterFuturesBrokerage))
         {
             Market.Add("aster", 902);
@@ -37,7 +41,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
             { "aster-public-address", Config.Get("aster-public-address") },
             { "aster-address", Config.Get("aster-address") },
             { "aster-secret", Config.Get("aster-secret") },
-            { "aster-hedge-mode", Config.Get("aster-hedge-mode", "false") }  
+            { "aster-hedge-mode", Config.Get("aster-hedge-mode", "false") },
+            { "aster-builder-address", Config.Get("aster-builder-address") },
+            { "aster-builder-fee", Config.Get("aster-builder-fee") },
         };
 
         public override IBrokerageModel GetBrokerageModel(IOrderProvider orderProvider)
@@ -61,11 +67,41 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
                 throw new ArgumentException(string.Join(Environment.NewLine, errors));
             }
 
+            // --- Builder Code Config (Address + Fee%) ---
+            // Optionale Felder, daher kein Read<> (das würde bei Fehlen in 'errors' münden).
+            var builderAddressRaw = job.BrokerageData.TryGetValue("aster-builder-address", out var bAddr) ? bAddr : null;
+            var builderFeeRaw = job.BrokerageData.TryGetValue("aster-builder-fee", out var bFee) ? bFee : null;
+
+            string builderAddress;
+            decimal? builderFeePercentage;
+
+            if (string.IsNullOrWhiteSpace(builderAddressRaw))
+            {
+                // Keine Builder-Adresse gesetzt -> kein Builder Code, Fee ist 0
+                builderAddress = null;
+                builderFeePercentage = null;
+            }
+            else
+            {
+                builderAddress = builderAddressRaw;
+
+                if (string.IsNullOrWhiteSpace(builderFeeRaw) || !decimal.TryParse(builderFeeRaw, out var parsedFee))
+                {
+                    // Adresse gesetzt, aber keine (gültige) Fee in der Config -> oberes Ende der Spanne
+                    builderFeePercentage = DefaultBuilderFeePercentageWhenAddressSet;
+                }
+                else
+                {
+                    builderFeePercentage = parsedFee;
+                }
+            }
+
             var asterCredentials = new AsterCredentials(new AsterV3Credential(publicAddress, address, secret));
 
             var asterRestClient = new AsterRestClient(options => {
                 options.ApiCredentials = asterCredentials;
-                options.BuilderFeePercentage = 0;
+                options.BuilderFeePercentage = builderFeePercentage;
+                options.BuilderAddress = builderAddress;
             });
 
             var asterSocketClient = new AsterSocketClient(options => {

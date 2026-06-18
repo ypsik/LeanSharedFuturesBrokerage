@@ -20,7 +20,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
 {
     public class HyperliquidFuturesBrokerageFactory : BrokerageFactory
     {
-        // Oberes Ende der von Aster.Net erlaubten Spanne (0.001% - 0.1%),
+        // Oberes Ende der von Hyperliquid erlaubten Spanne (0.001% - 0.1%),
         // wird verwendet wenn eine Builder-Adresse gesetzt ist, aber kein Fee-Wert in der Config steht.
         private const decimal DefaultBuilderFeePercentageWhenAddressSet = 0.1m;
 
@@ -73,7 +73,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
             {
                 // Keine Builder-Adresse gesetzt -> kein Builder Code, Fee ist 0
                 builderAddress = null;
-                builderFeePercentage = 0m;
+                builderFeePercentage = null;
             }
             else
             {
