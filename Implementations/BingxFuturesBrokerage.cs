@@ -358,7 +358,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         }
         #endregion
 
-
         public override List<CashAmount> GetCashBalance()
         {
             var res = RunSync(() => _restClient.PerpetualFuturesApi.Account.GetBalancesAsync());
@@ -455,6 +454,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             return true;
         }
 
+        protected override string GenerateClientId(int _)
+        {
+            return _restClient.PerpetualFuturesApi.SharedClient.GenerateClientOrderId(); 
+        }
+
+
         protected override async Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(
                 Order order, decimal price, decimal? quantity)
         {
@@ -484,7 +489,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 ? (SharedPositionSide ==  CryptoExchange.Net.SharedApis.SharedPositionSide.Long ? BingX.Net.Enums.PositionSide.Long : BingX.Net.Enums.PositionSide.Short)
                 : BingX.Net.Enums.PositionSide.Both;
 
-            string newClientOrderId = _restClient.PerpetualFuturesApi.SharedClient.GenerateClientOrderId();
+            string newClientOrderId = GenerateClientId(order.Id);
             _orderStateManager.TryAdd(newClientOrderId, state);
 
             var res = await _restClient.PerpetualFuturesApi.Trading.CancelReplaceOrderAsync(
