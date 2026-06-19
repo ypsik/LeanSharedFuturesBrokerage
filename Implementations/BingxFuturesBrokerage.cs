@@ -486,7 +486,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
             var side = order.Quantity > 0 ? BingX.Net.Enums.OrderSide.Buy : BingX.Net.Enums.OrderSide.Sell;
             var positionSide = _isHedgeMode
-                ? (SharedPositionSide ==  CryptoExchange.Net.SharedApis.SharedPositionSide.Long ? BingX.Net.Enums.PositionSide.Long : BingX.Net.Enums.PositionSide.Short)
+                ? (SharedPositionSide == CryptoExchange.Net.SharedApis.SharedPositionSide.Long ? BingX.Net.Enums.PositionSide.Long : BingX.Net.Enums.PositionSide.Short)
                 : BingX.Net.Enums.PositionSide.Both;
 
             string newClientOrderId = GenerateClientId(order.Id);
@@ -512,13 +512,59 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             }
 
             // Cancel-replace produces a new exchange order → return new ID (unlike Bitget EditOrder)
-            var newExchangeId = res.Data?.NewOrder?.OrderId.ToString();   
+            var newExchangeId = res.Data?.NewOrder?.OrderId.ToString();
+
+            // FIX: BingX liefert im Order-Update-Socket aktuell keine ClientOrderId zurück
+            // (JKorf-seitig, siehe gemeldetes Issue). Dadurch kann HandleOrderSocket's
+            // "MODIFY / REPLACEMENT DETECTION"-Pfad das Mapping nicht selbst durchführen,
+            // da dieser auf einem ClientOrderId-Match basiert.
+            // Wir mappen die neue BrokerId hier direkt aus dem REST-Response, der zuverlässig
+            // die echte neue Order-Id liefert — unabhängig vom betroffenen Socket-Feld.
+            if (!string.IsNullOrEmpty(newExchangeId) && newExchangeId != brokerId)
+            {
+                // Temporären Alias entfernen. Wenn RemoveAlias false zurückgibt, war der Alias
+                // bereits weg — der Socket (Race Condition) hat das Mapping vermutlich schon
+                // selbst über MapNewExchangeId durchgeführt, dann nicht nochmal mappen.
+                var aliasWasPresent = _orderStateManager.RemoveAlias(newClientOrderId);
+
+                if (aliasWasPresent)
+                {
+                    _orderStateManager.MapNewExchangeId(state.ClientOrderId, newExchangeId);
+
+                    if (!order.BrokerId.Contains(newExchangeId))
+                    {
+                        order.BrokerId.Add(newExchangeId);
+
+                        OnOrderIdChangedEvent(new BrokerageOrderIdChangedEvent
+                        {
+                            OrderId = order.Id,
+                            BrokerId = order.BrokerId
+                        });
+                    }
+
+                    // Mapping ist abgeschlossen — kein Grund mehr, ReconcileLoop für diese
+                    // Order bis zu 10s lang über updateStillPending zu blockieren.
+                    state.IsUpdatePending = false;
+
+                    Log.Trace($"{Name}.ExecuteUpdateOrderAsync: Manually mapped replace (Socket ClientOrderId unavailable) | Old: {brokerId} -> New: {newExchangeId}.");
+                }
+                else
+                {
+                    // Socket hat den Alias bereits aufgelöst — vermutlich hat er IsUpdatePending
+                    // im MODIFY / REPLACEMENT DETECTION-Pfad schon selbst zurückgesetzt, hier nicht anfassen.
+                    Log.Trace($"{Name}.ExecuteUpdateOrderAsync: Alias {newClientOrderId} already resolved (Socket beat us) | Old: {brokerId} -> New: {newExchangeId}.");
+                }
+            }
+            // else: kein verwertbarer newExchangeId vom REST-Response — Alias absichtlich NICHT
+            // hier entfernen, falls der Socket (Race Condition) den Alias zwischenzeitlich bereits
+            // selbst aufgelöst hat. RemoveAlias gibt jetzt bool zurück — dort prüfen, ob der Socket
+            // erfolgreich war, bevor wir hier eingreifen.
+
             return new ExchangeWebResult<SharedId>(
                 Name,
                 TradingMode.PerpetualLinear,
                 res.As(new SharedId(newExchangeId))
             );
         }
-
     }
 }

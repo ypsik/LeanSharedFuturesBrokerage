@@ -48,9 +48,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.Common
         /// und der alte Key nach erfolgreichem Mapping nicht mehr benötigt wird.
         /// Exchange-ID-Index wird NICHT angefasst.
         /// </summary>
-        public void RemoveAlias(string clientId)
+        public bool RemoveAlias(string clientId)
         {
-            _statesByClientId.TryRemove(clientId, out _);
+            return _statesByClientId.TryRemove(clientId, out _);
         }
 
         public bool TryRemove(string clientId, out OrderState? state)
