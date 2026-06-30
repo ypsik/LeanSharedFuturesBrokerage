@@ -297,7 +297,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             };
         }
 
-        protected override async Task<CallResult<UpdateSubscription>> CreateFundingSubscriptionAsync(
+        protected override async Task<WebSocketResult<UpdateSubscription>> CreateFundingSubscriptionAsync(
             string nativeTicker, Symbol symbol, Func<DateTime, decimal?, DateTime?, bool> onFundingRate)
         {
             return await _socketClientExData.FuturesApi.ExchangeData.SubscribeToSymbolUpdatesAsync(
@@ -340,7 +340,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                     BindingFlags.NonPublic | BindingFlags.Instance);
 
                 if (method != null)
-                    method.Invoke(_algorithm.Securities[symbol], new object[] { newProps });
+                    method.Invoke(_algorithm.Securities[symbol], [newProps]);
                 else
                     Log.Error($"{Name}: UpdateSymbolProperties method not found on Security — LEAN API may have changed");
             }
@@ -365,7 +365,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         }
 
 
-        protected override async Task<ExchangeWebResult<SharedId>> ExecutePlaceOrderAsync(PlaceFuturesOrderRequest request)
+        protected override async Task<HttpResult<SharedId>> ExecutePlaceOrderAsync(PlaceFuturesOrderRequest request)
         {
             var res = await _socketClient.FuturesApi.Trading.PlaceOrderAsync(
                 symbol: request.Symbol.BaseAsset,
@@ -383,22 +383,20 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                           $"Price: {request.Price ?? 0m} | " +
                           $"OriginalData : {res.OriginalData}");
 
-                return new ExchangeWebResult<SharedId>(Name, res.Error);
+                return new HttpResult<SharedId>(Name, null, res.Error);
             }
-
-            var sharedResult = res.Success
-                ? new WebCallResult<SharedId>(null, null, null, null, null, null, null, null, null, null, null, ResultDataSource.Server, new SharedId(res.Data.OrderId.ToString()), null)
-                : new WebCallResult<SharedId>(null, null, null, null, null, null, null, null, null, null, null, ResultDataSource.Server, default, res.Error);
-
-            return new ExchangeWebResult<SharedId>(Name, TradingMode.PerpetualLinear, sharedResult);
+            
+            return res.Success
+                ? new HttpResult<SharedId>(Name, new SharedId(res.Data.OrderId.ToString()), null)
+                : new HttpResult<SharedId>(Name, null, res.Error);
         }
 
-        protected override async Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(Order order, decimal price, decimal? quantity)
+        protected override async Task<HttpResult<SharedId>> ExecuteUpdateOrderAsync(Order order, decimal price, decimal? quantity)
         {
             if (!quantity.HasValue)
             {
                 Log.Error($"Update error: quantity not provided");
-                return new ExchangeWebResult<SharedId>(Name, ArgumentError.Missing("Quantity"));
+                return new HttpResult<SharedId>(Name, null, ArgumentError.Missing("Quantity"));
             }
 
             var ticker = NativeTicker(order.Symbol);
@@ -422,20 +420,18 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             if (!res.Success)
             {
                 Log.Error($"Hyperliquid update error: {res.Error} | Ticker: {ticker} | Price: {price}");
-                return new ExchangeWebResult<SharedId>(Name, res.Error);
+                return new HttpResult<SharedId>(Name, null, res.Error);
             }
 
             // Nutzt die LEAN OrderId als temporären Platzhalter.
             // Die Basisklasse ordnet sie temporär zu, bis der Socket über die ClientOrderId die neue BrokerId meldet.
-            var sharedResult = res.Success
-                ? new WebCallResult<SharedId>(null, null, null, null, null, null, null, null, null, null, null, ResultDataSource.Server, new SharedId(activeExchangeId.ToString()), null)
-                : new WebCallResult<SharedId>(null, null, null, null, null, null, null, null, null, null, null, ResultDataSource.Server, default, res.Error);
-
-            return new ExchangeWebResult<SharedId>(Name, TradingMode.PerpetualLinear, sharedResult);
+            return res.Success
+                ? new HttpResult<SharedId>(Name, new SharedId(activeExchangeId.ToString()), null)
+                : new HttpResult<SharedId>(Name, null, res.Error);
         }
 
 
-        protected override async Task<ExchangeWebResult<SharedId>> ExecuteCancelOrderAsync(CxCancelOrderRequest request)
+        protected override async Task<HttpResult<SharedId>> ExecuteCancelOrderAsync(CxCancelOrderRequest request)
         {
             var res = await _restClient.FuturesApi.Trading.CancelOrderAsync(
                 symbol: request.Symbol.BaseAsset,
@@ -447,13 +443,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 Log.Error($"HL-Update-Error: {res.Error} | " +
                           $"OriginalData : {res.OriginalData}");
 
-                return new ExchangeWebResult<SharedId>(Name, res.Error);
+                return new HttpResult<SharedId>(Name, null, res.Error);
             }
 
-            return new ExchangeWebResult<SharedId>(
+            return new HttpResult<SharedId>(
                     Name,
-                    TradingMode.PerpetualLinear,
-                    res.As(new SharedId(request.OrderId.ToString()))
+                    new SharedId(request.OrderId.ToString()),
+                    null
                 );
         }
 

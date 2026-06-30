@@ -401,14 +401,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         }
 
         protected virtual ExchangeParameters PlaceFuturesOrderExchangeParameters => new ExchangeParameters();
-        protected virtual Task<ExchangeWebResult<SharedId>> ExecutePlaceOrderAsync(PlaceFuturesOrderRequest request)
+        protected virtual Task<HttpResult<SharedId>> ExecutePlaceOrderAsync(PlaceFuturesOrderRequest request)
             => _orderClient.PlaceFuturesOrderAsync(request);
 
-        protected virtual Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(Order order, decimal price, decimal? quantity)
-            => Task.FromResult<ExchangeWebResult<SharedId>>(new ExchangeWebResult<SharedId>(Name, new InvalidOperationError("Update order not supported by this exchange")));
-
+        protected virtual Task<HttpResult<SharedId>> ExecuteUpdateOrderAsync(Order order, decimal price, decimal? quantity)
+            => Task.FromResult<HttpResult<SharedId>>(new HttpResult<SharedId>(Name, null, new InvalidOperationError("Update order not supported by this exchange")));
         protected virtual ExchangeParameters CancelFuturesOrderExchangeParameters => new ExchangeParameters();
-        protected virtual Task<ExchangeWebResult<SharedId>> ExecuteCancelOrderAsync(CxCancelOrderRequest request)
+        protected virtual Task<HttpResult<SharedId>> ExecuteCancelOrderAsync(CxCancelOrderRequest request)
             => _orderClient.CancelFuturesOrderAsync(request);
 
         /// <summary>

@@ -267,7 +267,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         #endregion
 
 
-        protected override async Task<CallResult<UpdateSubscription>> CreateFundingSubscriptionAsync(
+        protected override async Task<WebSocketResult<UpdateSubscription>> CreateFundingSubscriptionAsync(
            string nativeTicker, Symbol symbol, Func<DateTime, decimal?, DateTime?, bool> onFundingRate)
         {
             return await _socketClientExData.FuturesApiV2.SubscribeToTickerUpdatesAsync(
@@ -339,13 +339,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             };
         }
 
-        protected override async Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(
+        protected override async Task<HttpResult<SharedId>> ExecuteUpdateOrderAsync(
             Order order, decimal price, decimal? quantity)
         {
             if (!quantity.HasValue)
             {
                 Log.Error($"Update error: quantity not provided");
-                return new ExchangeWebResult<SharedId>(Name, ArgumentError.Missing("Quantity"));
+                return new HttpResult<SharedId>(Name, null, ArgumentError.Missing("Quantity"));
             }
 
             var ticker = NativeTicker(order.Symbol);
@@ -359,7 +359,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             else
             {
                 Log.Error($"Update error: old state missing for brokerId {brokerId}");
-                return new ExchangeWebResult<SharedId>(Name, new InvalidOperationError("old state missing"));
+                return new HttpResult<SharedId>(Name, null, new InvalidOperationError("old state missing"));
             }
 
             var res = await _restClient.FuturesApiV2.Trading.EditOrderAsync(
@@ -376,13 +376,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                     _orderStateManager.RemoveAlias(newClientOrderId);
 
                 Log.Error($"Bitget update error: {res.Error} | Ticker: {ticker} | Price: {price} | OriginalData: {res.OriginalData}");
-                return new ExchangeWebResult<SharedId>(Name, res.Error);
+                return new HttpResult<SharedId>(Name, null, res.Error);
             }
 
-            return new ExchangeWebResult<SharedId>(
+            return new HttpResult<SharedId>(
                 Name,
-                TradingMode.PerpetualLinear,
-                res.As(new SharedId(brokerId))
+                new SharedId(brokerId),
+                null
             );
         }
     }

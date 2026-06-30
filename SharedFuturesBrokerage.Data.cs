@@ -82,7 +82,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 PageRequest? nextPage = null;
                 do
                 {
-                    ExchangeWebResult<SharedFundingRate[]> res = null;
+                    HttpResult<SharedFundingRate[]>? res = null;
                     int retryCount = 0;
                     const int maxRetries = 5;
 
@@ -156,7 +156,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 PageRequest? nextPage = null;
                 do
                 {
-                    ExchangeWebResult<SharedKline[]>? res = null;
+                    HttpResult<SharedKline[]>? res = null;
                     int retryCount = 0;
                     const int maxRetries = 5;
 
@@ -409,9 +409,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             return true;
         }
 
-        protected virtual Task<CallResult<UpdateSubscription>> CreateFundingSubscriptionAsync(
+        protected virtual Task<WebSocketResult<UpdateSubscription>> CreateFundingSubscriptionAsync(
             string nativeTicker, Symbol symbol, Func<DateTime, decimal?, DateTime?, bool> onFundingRate)
-            => Task.FromResult(new CallResult<UpdateSubscription>(new InvalidOperationError("Funding subscription not supported by this exchange")));
+            => Task.FromResult(new WebSocketResult<UpdateSubscription>(Name, null, new InvalidOperationError("Funding subscription not supported by this exchange")));
 
         protected void EmitTick(Tick tick) => _aggregator?.Update(tick);
     }

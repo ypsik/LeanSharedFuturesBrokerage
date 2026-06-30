@@ -38,6 +38,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         private CancellationTokenSource _fundingCts;
         private CancellationTokenSource? _userStreamCts;
 
+        private string _listenKey;
+
         private bool _isHedgeMode = false;
 
         public override bool IsConnected => base.IsConnected && _fundingUpdateConnected;
@@ -158,7 +160,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             return result;
         }
 
-        protected override async Task<CallResult<UpdateSubscription>> CreateFundingSubscriptionAsync(
+        protected override async Task<WebSocketResult<UpdateSubscription>> CreateFundingSubscriptionAsync(
             string nativeTicker, Symbol symbol, Func<DateTime, decimal?, DateTime?, bool> onFundingRate)
         {
             return await _socketClientExData.FuturesV3Api.SubscribeToMarkPriceUpdatesAsync(
@@ -199,13 +201,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 return;
             }
 
-            ListenKey = listenKeyResult.Data;
+            _listenKey = listenKeyResult.Data;
 
             // 2. WebSocket mit ListenKey subscriben
             DateTime connectTime = StartTime;
             var sub = RunSync(() =>
                 _socketClient.FuturesV3Api.SubscribeToUserDataUpdatesAsync(
-                    ListenKey,
+                    _listenKey,
                     onAccountUpdate: update =>
                     {
                         if (update?.Data == null) return;
@@ -246,7 +248,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 _fundingUpdateSubscription = sub.Data;
 
                 // 3. Keep-alive Loop starten
-                StartListenKeyKeepAliveLoop(ListenKey, _userStreamCts.Token);
+                StartListenKeyKeepAliveLoop(_listenKey, _userStreamCts.Token);
             }
         }
 
@@ -313,7 +315,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         #endregion
 
-        protected override async Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(
+        protected override async Task<HttpResult<SharedId>> ExecuteUpdateOrderAsync(
         Order order, decimal price, decimal? quantity)
         {
             var ticker = NativeTicker(order.Symbol);
@@ -322,13 +324,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             if (!long.TryParse(brokerId, out var exchangeOrderId))
             {
                 Log.Error($"Update error: invalid brokerId '{brokerId}'");
-                return new ExchangeWebResult<SharedId>(Name, new InvalidOperationError("invalid brokerId"));
+                return new HttpResult<SharedId>(Name, null, new InvalidOperationError("invalid brokerId"));
             }
 
             if (!_orderStateManager.TryGetByExchangeId(brokerId, out var state))
             {
                 Log.Error($"Update error: old state missing for brokerId {brokerId}");
-                return new ExchangeWebResult<SharedId>(Name, new InvalidOperationError("old state missing"));
+                return new HttpResult<SharedId>(Name, null, new InvalidOperationError("old state missing"));
             }
 
             var res = await _restClient.FuturesV3Api.Trading.EditOrderAsync(
@@ -341,15 +343,15 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             if (!res.Success)
             {
                 Log.Error($"Update error: {res.Error} | Ticker: {ticker} | Price: {price} | OriginalData: {res.OriginalData}");
-                return new ExchangeWebResult<SharedId>(Name, res.Error);
+                return new HttpResult<SharedId>(Name, null, res.Error);
             }
 
             // Cancel-replace produces a new exchange order → return new ID (unlike Bitget EditOrder)
             var newExchangeId = res.Data?.Id ?? 0;
-            return new ExchangeWebResult<SharedId>(
+            return new HttpResult<SharedId>(
                 Name,
-                TradingMode.PerpetualLinear,
-                res.As(new SharedId(newExchangeId.ToString()))
+                new SharedId(newExchangeId.ToString()), 
+                null
             );
         }
     }

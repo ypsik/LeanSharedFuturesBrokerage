@@ -288,7 +288,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         // OKX has a dedicated funding-rate WebSocket channel (public, unauthenticated).
         // Pushed every minute. OKXFundingRate.NextFundingTime is DateTime (non-nullable).
-        protected override async Task<CallResult<UpdateSubscription>> CreateFundingSubscriptionAsync(
+        protected override async Task<WebSocketResult<UpdateSubscription>> CreateFundingSubscriptionAsync(
             string nativeTicker, Symbol symbol, Func<DateTime, decimal?, DateTime?, bool> onFundingRate)
         {
             return await _socketClientExData.UnifiedApi.ExchangeData.SubscribeToFundingRateUpdatesAsync(
@@ -324,7 +324,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         }
 
         // OKX AmendOrder is in-place: same order ID is kept after the amendment.
-        protected override async Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(
+        protected override async Task<HttpResult<SharedId>> ExecuteUpdateOrderAsync(
             Order order, decimal price, decimal? quantity)
         {
             var nativeTicker = NativeTicker(order.Symbol);
@@ -333,7 +333,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             if (!long.TryParse(orderIdStr, out var orderId))
             {
                 Log.Error($"OKX AmendOrder: cannot parse orderId '{orderIdStr}' as long");
-                return new ExchangeWebResult<SharedId>(Name, new InvalidOperationError($"Invalid order ID format: '{orderIdStr}'"));
+                return new HttpResult<SharedId>(Name, null, new InvalidOperationError($"Invalid order ID format: '{orderIdStr}'"));
             }
 
             var res = await _restClient.UnifiedApi.Trading.AmendOrderAsync(
@@ -345,13 +345,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             if (!res.Success)
             {
                 Log.Error($"OKX AmendOrder error: {res.Error} | OrderId: {orderId} | Price: {price} | OriginalData: {res.OriginalData}");
-                return new ExchangeWebResult<SharedId>(Name, res.Error);
+                return new HttpResult<SharedId>(Name, null, res.Error);
             }
 
-            return new ExchangeWebResult<SharedId>(
+            return new HttpResult<SharedId>(
                 Name,
-                TradingMode.PerpetualLinear,
-                res.As(new SharedId(res.Data.OrderId.ToString()))
+                new SharedId(res.Data.OrderId.ToString()),
+                null
             );
         }
     }

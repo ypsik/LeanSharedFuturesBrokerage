@@ -233,7 +233,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         #endregion
 
         // Public ticker feed for funding rate polling, via the unauthenticated extra client.
-        protected override async Task<CallResult<UpdateSubscription>> CreateFundingSubscriptionAsync(
+        protected override async Task<WebSocketResult<UpdateSubscription>> CreateFundingSubscriptionAsync(
             string nativeTicker, Symbol symbol, Func<DateTime, decimal?, DateTime?, bool> onFundingRate)
         {
             return await _socketClientExData.FuturesApi.SubscribeToTickerUpdatesAsync(
@@ -262,7 +262,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         // Kraken edit is true in-place: same order ID is kept, status returns "edited".
         // No cancel+replace, no new ID — same pattern as Bybit.
-        protected override async Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(
+        protected override async Task<HttpResult<SharedId>> ExecuteUpdateOrderAsync(
             Order order, decimal price, decimal? quantity)
         {
             var res = await _restClient.FuturesApi.Trading.EditOrderAsync(
@@ -273,14 +273,14 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             if (!res.Success)
             {
                 Log.Error($"Update error: {res.Error} | OrderId: {order.BrokerId.Last()} | Price: {price} | OriginalData: {res.OriginalData}");
-                return new ExchangeWebResult<SharedId>(Name, res.Error);
+                return new HttpResult<SharedId>(Name, null, res.Error);
             }
 
             // The order ID is unchanged after an in-place edit.
-            return new ExchangeWebResult<SharedId>(
+            return new HttpResult<SharedId>(
                 Name,
-                TradingMode.PerpetualLinear,
-                res.As(new SharedId(res.Data.OrderId.ToString()))
+                new SharedId(res.Data.OrderId.ToString()),
+                null
             );
         }
     }

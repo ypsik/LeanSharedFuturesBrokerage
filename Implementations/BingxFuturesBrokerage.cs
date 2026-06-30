@@ -36,6 +36,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         private UpdateSubscription? _fundingUpdateSubscription;
         private CancellationTokenSource _fundingCts;
         private CancellationTokenSource? _userStreamCts;
+        private string _listenKey;
 
         private bool _isHedgeMode = true;
 
@@ -236,12 +237,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 return;
             }
 
-            ListenKey = listenKeyResult.Data;
+            _listenKey = listenKeyResult.Data;
 
             // 2. Subscribe to WebSocket with the generated listenKey and handle expiration
             var sub = RunSync(() =>
                 _socketClient.PerpetualFuturesApi.SubscribeToUserDataUpdatesAsync(
-                    ListenKey,
+                    _listenKey,
                     onAccountUpdate: update =>
                     {
                         if (update.Data?.Update?.Trigger == "FUNDING_FEE")
@@ -281,7 +282,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 _fundingUpdateSubscription = sub.Data;
 
                 // 3. Start background keep-alive loop using the dedicated token
-                StartListenKeyKeepAliveLoop(ListenKey, _userStreamCts.Token);
+                StartListenKeyKeepAliveLoop(_listenKey, _userStreamCts.Token);
             }
         }
 
@@ -460,13 +461,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         }
 
 
-        protected override async Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(
+        protected override async Task<HttpResult<SharedId>> ExecuteUpdateOrderAsync(
                 Order order, decimal price, decimal? quantity)
         {
             if (!quantity.HasValue)
             {
                 Log.Error($"Update error: quantity not provided");
-                return new ExchangeWebResult<SharedId>(Name, ArgumentError.Missing("Quantity"));
+                return new HttpResult<SharedId>(Name, null, ArgumentError.Missing("Quantity"));
             }
 
             var ticker = NativeTicker(order.Symbol);
@@ -475,13 +476,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             if (!long.TryParse(brokerId, out var exchangeOrderId))
             {
                 Log.Error($"Update error: invalid brokerId '{brokerId}'");
-                return new ExchangeWebResult<SharedId>(Name, new InvalidOperationError("invalid brokerId"));
+                return new HttpResult<SharedId>(Name, null, new InvalidOperationError("invalid brokerId"));
             }
 
             if (!_orderStateManager.TryGetByExchangeId(brokerId, out var state))
             {
                 Log.Error($"Update error: old state missing for brokerId {brokerId}");
-                return new ExchangeWebResult<SharedId>(Name, new InvalidOperationError("old state missing"));
+                return new HttpResult<SharedId>(Name, null, new InvalidOperationError("old state missing"));
             }
 
             var side = order.Quantity > 0 ? BingX.Net.Enums.OrderSide.Buy : BingX.Net.Enums.OrderSide.Sell;
@@ -508,7 +509,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             {
                 _orderStateManager.RemoveAlias(newClientOrderId);
                 Log.Error($"Update error: {res.Error} | Ticker: {ticker} | Price: {price} | OriginalData: {res.OriginalData}");
-                return new ExchangeWebResult<SharedId>(Name, res.Error);
+                return new HttpResult<SharedId>(Name, null, res.Error);
             }
 
             // Cancel-replace produces a new exchange order → return new ID (unlike Bitget EditOrder)
@@ -560,10 +561,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             // selbst aufgelöst hat. RemoveAlias gibt jetzt bool zurück — dort prüfen, ob der Socket
             // erfolgreich war, bevor wir hier eingreifen.
 
-            return new ExchangeWebResult<SharedId>(
-                Name,
-                TradingMode.PerpetualLinear,
-                res.As(new SharedId(newExchangeId))
+            return new HttpResult<SharedId>(
+                Name,                
+                new SharedId(newExchangeId),
+                null
             );
         }
     }

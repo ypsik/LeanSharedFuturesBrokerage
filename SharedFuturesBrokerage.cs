@@ -49,7 +49,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         protected CancellationTokenSource _reconcileCts;
         protected Task? _reconcileTask = null;
         protected readonly TimeSpan _reconciliationInterval = TimeSpan.FromSeconds(30);
-        protected string ListenKey {  get; set; }
 
         protected static readonly RateGate _subRateGate = new RateGate(3, TimeSpan.FromSeconds(1));
 
@@ -159,7 +158,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     _subRateGate.WaitToProceed();
                     var sub = RunSync(() => _orderSocket.SubscribeToFuturesOrderUpdatesAsync(new SubscribeFuturesOrderRequest
                         {
-                            ListenKey = ListenKey,
                             ExchangeParameters = OrderUpdatesExchangeParameters                            
                         }, 
                         HandleOrderSocket));

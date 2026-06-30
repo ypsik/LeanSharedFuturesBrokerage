@@ -183,7 +183,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         }
         #endregion
 
-        protected override async Task<CallResult<UpdateSubscription>> CreateFundingSubscriptionAsync(
+        protected override async Task<WebSocketResult<UpdateSubscription>> CreateFundingSubscriptionAsync(
            string nativeTicker, Symbol symbol, Func<DateTime, decimal?, DateTime?,  bool> onFundingRate)
         {
             return await _socketClientExData.V5LinearApi.SubscribeToTickerUpdatesAsync(
@@ -207,7 +207,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             return result;
         }
 
-        protected override async Task<ExchangeWebResult<SharedId>> ExecuteUpdateOrderAsync(Order order, decimal price, decimal? quantity)
+        protected override async Task<HttpResult<SharedId>> ExecuteUpdateOrderAsync(Order order, decimal price, decimal? quantity)
         {
             var ticker = NativeTicker(order.Symbol);
 
@@ -221,15 +221,15 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             if (!res.Success)
             {
                 Log.Error($"Update error: {res.Error} | Ticker: {ticker} | Price: {price} | OriginalData: {res.OriginalData}");
-                return new ExchangeWebResult<SharedId>(Name, res.Error);
+                return new HttpResult<SharedId>(Name, null, res.Error);
             }
 
             // KORREKTUR: Bybit verändert die OrderId bei einem Modify NICHT. 
             // Daher wird hier die echte, bestätigte OrderId durchgereicht.
-            return new ExchangeWebResult<SharedId>(
+            return new HttpResult<SharedId>(
                     Name,
-                    TradingMode.PerpetualLinear,
-                    res.As(new SharedId(res.Data.OrderId.ToString()))
+                    new SharedId(res.Data.OrderId.ToString()),
+                    null
                 );
         }
     }
