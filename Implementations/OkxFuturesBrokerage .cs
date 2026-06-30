@@ -89,6 +89,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                     options.Environment = environment;
                     if (!string.IsNullOrEmpty(key) && !string.IsNullOrEmpty(secret) && !string.IsNullOrEmpty(passphrase))
                         options.ApiCredentials = new OKXCredentials(key, secret, passphrase);
+                    options.SharedApiEuropeUseXPerps = environment == OKXEnvironment.Europe;
                 });
             }
 
@@ -99,6 +100,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                     options.Environment = environment;
                     if (!string.IsNullOrEmpty(key) && !string.IsNullOrEmpty(secret) && !string.IsNullOrEmpty(passphrase))
                         options.ApiCredentials = new OKXCredentials(key, secret, passphrase);
+                    options.SharedApiEuropeUseXPerps = environment == OKXEnvironment.Europe;
                 });
             }
 
