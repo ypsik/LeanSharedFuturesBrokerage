@@ -240,6 +240,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             return $"PF_{baseAsset}{realQuoteAsset}";
         }
 
+        protected override SharedSymbol GetSharedSymbol(Symbol s)
+        {
+            CurrencyPairUtil.DecomposeCurrencyPair(s, out var baseAsset, out var quoteAsset);
+            return new SharedSymbol(TradingMode.PerpetualLinear, baseAsset, quoteAsset.Replace("USDT", "USD"));
+        }
+
         #endregion
 
         // Public ticker feed for funding rate polling, via the unauthenticated extra client.

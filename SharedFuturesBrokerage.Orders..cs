@@ -1111,7 +1111,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         protected virtual string NormalizeSymbol(string rawSymbol) => rawSymbol;
 
-        private SharedSymbol GetSharedSymbol(Symbol s)
+        protected virtual SharedSymbol GetSharedSymbol(Symbol s)
         {
             CurrencyPairUtil.DecomposeCurrencyPair(s, out var baseAsset, out var quoteAsset);
             return new SharedSymbol(TradingMode.PerpetualLinear, baseAsset, quoteAsset);
