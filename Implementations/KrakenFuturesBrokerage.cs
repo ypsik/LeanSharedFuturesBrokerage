@@ -197,8 +197,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
                 var symbolProperties = new SymbolProperties(
                     description: $"Kraken {symbol.BaseAsset} Perpetual",
-                    // Dirty fix: must match NormalizeSymbol's appended "USDT" suffix, see comment there.
-                    quoteCurrency: "USDT",
+                    // Dirty fix: must match NormalizeSymbol's appended "USDC" suffix, see comment there.
+                    quoteCurrency: "USDC",
                     contractMultiplier: 1m,
                     minimumPriceVariation: tickSize,
                     lotSize: lotSize,
@@ -223,27 +223,27 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             // future not quoted in
             // /BUSD/USDC as coin-margined/inverse, which breaks
             // HoldingsValue/UnrealizedProfit/collateral calculation for Kraken's linear,
-            // USD-quoted futures. We report every Kraken future to LEAN as "USDT"-quoted
-            // (by appending "T") so it gets correctly recognized as linear. The USDT/USD
+            // USD-quoted futures. We report every Kraken future to LEAN as "USDC"-quoted
+            // (by appending "C") so it gets correctly recognized as linear. The USDC/USD
             // spread is negligible for portfolio valuation purposes (~0.01-0.05%).
-            // NativeTicker() strips the appended "T" again before actually communicating
+            // NativeTicker() strips the appended "C" again before actually communicating
             // with Kraken's real API.
-            return ticker.EndsWith("USD") ? ticker + "T" : ticker;
+            return ticker.EndsWith("USD") ? ticker + "C" : ticker;
         }
 
         protected override string NativeTicker(Symbol symbol)
         {
             CurrencyPairUtil.DecomposeCurrencyPair(symbol, out var baseAsset, out var quoteAsset);
-            // quoteAsset is "USDT" due to the dirty fix above; Kraken's real API only
-            // knows "USD" — strip the artificially appended "T" back off here.
-            var realQuoteAsset = quoteAsset == "USDT" ? "USD" : quoteAsset;
+            // quoteAsset is "USDC" due to the dirty fix above; Kraken's real API only
+            // knows "USD" — strip the artificially appended "C" back off here.
+            var realQuoteAsset = quoteAsset == "USDC" ? "USD" : quoteAsset;
             return $"PF_{baseAsset}{realQuoteAsset}";
         }
 
         protected override SharedSymbol GetSharedSymbol(Symbol s)
         {
             CurrencyPairUtil.DecomposeCurrencyPair(s, out var baseAsset, out var quoteAsset);
-            return new SharedSymbol(TradingMode.PerpetualLinear, baseAsset, quoteAsset.Replace("USDT", "USD"));
+            return new SharedSymbol(TradingMode.PerpetualLinear, baseAsset, quoteAsset.Replace("USDC", "USD"));
         }
 
         #endregion
