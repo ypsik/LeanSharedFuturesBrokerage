@@ -206,13 +206,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 );
 
                 _spdb.SetEntry("kraken", ticker, SecurityType.CryptoFuture, symbolProperties);
-
-                // Register as Crypto only if LEAN's built-in Kraken spot market does not already have this pair,
-                // so that EnsureCurrencyDataFeed can resolve the base currency conversion rate.
-                if (!_spdb.ContainsKey("kraken", ticker, SecurityType.Crypto))
-                {
-                    _spdb.SetEntry("kraken", ticker, SecurityType.Crypto, symbolProperties);
-                }
+                _spdb.SetEntry("kraken", ticker, SecurityType.Crypto, symbolProperties);
             }
         }
 
