@@ -252,7 +252,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         }
 
         // USD for coin-margined X-Perps (ETHUSD UM, BTCUSD UM …).
-        protected override string SettleAsset => "USD";
+        protected override string SettleAsset => "USDC";
 
         #region Symbol Mapping
 
