@@ -252,12 +252,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             var res = RunSync(() => _restClient.FuturesApi.Account.GetBalancesAsync());
 
             var flex = res?.Data?.MultiCollateralMarginAccount;
-            var balance = flex?.BalanceValue ?? 0m;
+            var balance = (flex?.MarginEquity ?? 0m) - (flex?.TotalUnrealized ?? 0m);
 
-            return new List<CashAmount>
-            {
-                new CashAmount(balance, SettleAsset)
-            };
+            return
+            [
+                new(balance, SettleAsset)
+            ];
         }
 
         // Kraken edit is true in-place: same order ID is kept, status returns "edited".
