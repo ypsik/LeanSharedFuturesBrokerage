@@ -62,6 +62,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
             {
                 options.Environment = environment;
                 options.ApiCredentials = credentials;
+                options.SharedApiEuropeUseXPerps = environment == OKXEnvironment.Europe;
                 options.OutputOriginalData = true;
             });
 
@@ -69,6 +70,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
             {
                 options.Environment = environment;
                 options.ApiCredentials = credentials;
+                options.SharedApiEuropeUseXPerps = environment == OKXEnvironment.Europe;
                 options.DelayAfterConnect = TimeSpan.FromMilliseconds(500);
                 options.SocketIndividualSubscriptionCombineTarget = 50;
             });
