@@ -52,6 +52,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             _instrumentType = instrumentType;
             _ruleTypeFilter = ruleTypeFilter;
 
+            RunSync(() => _restClient.UnifiedApi.SharedClient.GetFuturesSymbolsAsync(new GetSymbolsRequest()));
+
             PopulateSPDB();
 
             // Dedicated unauthenticated socket client for public funding rate subscriptions.
@@ -91,6 +93,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                         options.ApiCredentials = new OKXCredentials(key, secret, passphrase);
                     options.SharedApiEuropeUseXPerps = environment == OKXEnvironment.Europe;
                 });
+                RunSync(() => _restClient.UnifiedApi.SharedClient.GetFuturesSymbolsAsync(new GetSymbolsRequest()));
+
             }
 
             if (_socketClient == null)
