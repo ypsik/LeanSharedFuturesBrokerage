@@ -185,7 +185,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 throw new Exception($"Failed to load Kraken symbols: {result.Error}");
 
             foreach (var symbol in result.Data.Where(s => s.Tradeable && s.Type == Kraken.Net.Enums.SymbolType.FlexibleFutures))
-            {                
+            {
                 var ticker = NormalizeSymbol(symbol.Symbol);
 
                 var tickSize = symbol.TickSize ?? 0.01m;
@@ -197,7 +197,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
                 var symbolProperties = new SymbolProperties(
                     description: $"Kraken {symbol.BaseAsset} Perpetual",
-                    quoteCurrency: symbol.QuoteAsset,  
+                    // Dirty fix: must match NormalizeSymbol's appended "USDT" suffix, see comment there.
+                    quoteCurrency: "USDT",
                     contractMultiplier: 1m,
                     minimumPriceVariation: tickSize,
                     lotSize: lotSize,
@@ -222,12 +223,27 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         #region Symbol Mapping
 
         protected override string NormalizeSymbol(string rawSymbol)
-                => rawSymbol.Replace("PF_", "");
+        {
+            var ticker = rawSymbol.Replace("PF_", "");
+            // Dirty fix: LEAN's CryptoFuture.IsCryptoCoinFuture() incorrectly classifies any
+            // future not quoted in
+            // /BUSD/USDC as coin-margined/inverse, which breaks
+            // HoldingsValue/UnrealizedProfit/collateral calculation for Kraken's linear,
+            // USD-quoted futures. We report every Kraken future to LEAN as "USDT"-quoted
+            // (by appending "T") so it gets correctly recognized as linear. The USDT/USD
+            // spread is negligible for portfolio valuation purposes (~0.01-0.05%).
+            // NativeTicker() strips the appended "T" again before actually communicating
+            // with Kraken's real API.
+            return ticker.EndsWith("USD") ? ticker + "T" : ticker;
+        }
 
         protected override string NativeTicker(Symbol symbol)
         {
             CurrencyPairUtil.DecomposeCurrencyPair(symbol, out var baseAsset, out var quoteAsset);
-            return $"PF_{baseAsset}{quoteAsset}";
+            // quoteAsset is "USDT" due to the dirty fix above; Kraken's real API only
+            // knows "USD" — strip the artificially appended "T" back off here.
+            var realQuoteAsset = quoteAsset == "USDT" ? "USD" : quoteAsset;
+            return $"PF_{baseAsset}{realQuoteAsset}";
         }
 
         #endregion
@@ -252,7 +268,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             var res = RunSync(() => _restClient.FuturesApi.Account.GetBalancesAsync());
 
             var flex = res?.Data?.MultiCollateralMarginAccount;
-            var balance = (flex?.MarginEquity ?? 0m) - (flex?.TotalUnrealized ?? 0m);
+            var balance = flex?.BalanceValue ?? 0m;
 
             return
             [

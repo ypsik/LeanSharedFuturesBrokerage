@@ -14,7 +14,7 @@
     <PackageReference Include="HyperLiquid.Net" Version="5.0.0" />
     <PackageReference Include="JK.BingX.Net" Version="4.0.0" />
     <PackageReference Include="JK.Bitget.Net" Version="4.0.0" />
-    <PackageReference Include="JK.OKX.Net" Version="5.0.0" />
+    <PackageReference Include="JK.OKX.Net" Version="5.0.2" />
     <PackageReference Include="Jkorf.Aster.Net" Version="4.0.0" />
     <PackageReference Include="KrakenExchange.Net" Version="8.0.0" />
     <PackageReference Include="QuantConnect.Lean.Engine" Version="2.5.17865" />
