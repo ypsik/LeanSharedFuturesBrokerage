@@ -285,7 +285,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             // of "XAUUSDC" as actually stored in PopulateSPDB).
             var rawTicker = symbol.Value;
 
-            var entry = _spdb.GetSymbolProperties("okx", rawTicker, SecurityType.CryptoFuture, null);
+            var entry = _spdb.GetSymbolProperties("okx", rawTicker, SecurityType.CryptoFuture, quoteAsset);
 
             if (entry != null && !string.IsNullOrEmpty(entry.MarketTicker))
                 return entry.MarketTicker;
