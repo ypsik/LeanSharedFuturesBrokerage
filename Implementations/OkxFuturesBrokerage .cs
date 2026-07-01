@@ -288,20 +288,18 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             if (_instrumentType == InstrumentType.Swap)
                 return $"{baseAsset}-{quoteAsset}-SWAP";
 
-            // For FUTURES (X-Perps) the expiry suffix is date-based ("310404").
-            // The MarketTicker stored in SPDB during PopulateSPDB is the canonical instId.
-            // Ticker key = baseAsset + quoteAsset (e.g. "BTCUSD"), same as PopulateSPDB.
-            var leanTicker = baseAsset + quoteAsset;
-            var entry = _spdb.GetSymbolProperties("okx", leanTicker, SecurityType.CryptoFuture, quoteAsset);
+            // FUTURES (X-Perp): look up the canonical instId (with date suffix) from SPDB.
+            // Use symbol.Value directly (raw LEAN ticker), not the decompose-reconstructed
+            // baseAsset+quoteAsset, since GetSharedSymbol() strips the dirty-fix "C" suffix
+            // and callers may reconstruct/pass the symbol without it (e.g. "XAUUSD" instead
+            // of "XAUUSDC" as actually stored in PopulateSPDB).
+            if(string.IsNullOrEmpty(symbol.Value))
+                throw new ArgumentNullException(nameof(symbol), $"Symbol.Value is null or empty for {symbol}");
+            var rawTicker = symbol.Value;
+            var entry = _spdb.GetSymbolProperties("okx", rawTicker, SecurityType.CryptoFuture, quoteAsset);
 
-            if (entry == null && quoteAsset == "USD")
-            {
-                // GetSharedSymbol() strips the dirty-fix "C" suffix (USDC -> USD), which can
-                // cause the symbol to be reconstructed elsewhere as "USD" instead of "USDC".
-                // Fall back to the actual SPDB key used during PopulateSPDB.
-                leanTicker = baseAsset + quoteAsset + "C";
-                entry = _spdb.GetSymbolProperties("okx", leanTicker, SecurityType.CryptoFuture, quoteAsset + "C");
-            }
+            if (entry == null)
+                entry = _spdb.GetSymbolProperties("okx", rawTicker + "C", SecurityType.CryptoFuture, quoteAsset + "C");
 
             if (entry != null && !string.IsNullOrEmpty(entry.MarketTicker))
                 return entry.MarketTicker;
