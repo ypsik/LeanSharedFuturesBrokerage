@@ -143,12 +143,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             };
         }
 
-        // JKorf OKXApiAddresses.Europe sets WSS to wss://wseea.okx.com:8443.
-        // This endpoint currently returns HTTP 404 — the correct EU WebSocket address is unknown.
-        // mywspri.okx.com (found in OKX frontend JS) is a dangling CNAME, not a valid endpoint.
-        // TODO: find the correct EEA WebSocket endpoint (via OKX API support or official docs)
-        //       and override options.Environment.UnifiedSocketAddress here if needed.
-
         #region Connect / Disconnect
 
         // OKX AmendOrder keeps the same order ID — identical in-place semantics to Kraken.
@@ -221,6 +215,18 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                     continue;
                 }
 
+                // Dirty fix: LEAN's CryptoFuture.IsCryptoCoinFuture() incorrectly classifies any
+                // future not quoted in USDT/BUSD/USDC as coin-margined/inverse, which breaks
+                // HoldingsValue/UnrealizedProfit/collateral calculation for linear, USD-quoted
+                // X-Perp futures (same root cause as Kraken). Only applies to FUTURES (EU X-Perp);
+                // SWAP is untouched (always USDT-settled, not affected by this bug).
+                // We report USD-quoted X-Perps to LEAN as "USDC"-quoted (append "C" to ticker +
+                // quoteCurrency) so they're correctly recognized as linear. GetSharedSymbol()
+                // below maps "USDC" back to "USD" (FUTURES only). NativeTicker() for FUTURES
+                // uses the SPDB MarketTicker lookup, so it is unaffected by this ticker-key change.
+                if (_instrumentType == InstrumentType.Futures && quoteAsset == "USD")
+                    quoteAsset += "C";
+
                 var ticker = baseAsset + quoteAsset;
 
                 var tickSize = symbol.TickSize ?? 0.01m;
@@ -228,7 +234,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 if (lotSize <= 0m) lotSize = 1m;
 
                 // settleCcy is the margin/settlement asset for FUTURES/SWAP (e.g. "USD", "USDT").
+                // Apply the same USD -> USDC dirty fix here (FUTURES only) so quoteCurrency matches the ticker.
                 var quoteCurrency = string.IsNullOrEmpty(symbol.SettlementAsset) ? SettleAsset : symbol.SettlementAsset;
+                if (_instrumentType == InstrumentType.Futures && quoteCurrency == "USD")
+                    quoteCurrency += "C";
+
                 var contractMultiplier = symbol.ContractValue ?? 1m;
 
                 var symbolProperties = new SymbolProperties(
@@ -288,6 +298,17 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
             throw new InvalidOperationException(
                 $"OKX native ticker not found in SPDB for {symbol.Value}");
+        }
+
+        protected override SharedSymbol GetSharedSymbol(Symbol s)
+        {
+            CurrencyPairUtil.DecomposeCurrencyPair(s, out var baseAsset, out var quoteAsset);
+            // Only FUTURES (X-Perp) quoteAsset was artificially remapped USD -> USDC in PopulateSPDB.
+            // SWAP quoteAsset is untouched, so genuine USDC-quoted SWAP pairs must stay as USDC.
+            if (_instrumentType == InstrumentType.Futures)
+                quoteAsset = quoteAsset.Replace("USDC", "USD");
+
+            return new SharedSymbol(TradingMode.PerpetualLinear, baseAsset, quoteAsset);
         }
 
         #endregion
