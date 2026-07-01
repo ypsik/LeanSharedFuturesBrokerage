@@ -235,8 +235,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                     marketTicker: symbol.Symbol    // full native instId, e.g. "ETH-USD-310404"
                 );
 
-                _spdb.SetEntry("okx", ticker, SecurityType.CryptoFuture, symbolProperties);
-                _spdb.SetEntry("okx", ticker, SecurityType.Crypto, symbolProperties);
+                _spdb.SetEntry(Name, ticker, SecurityType.CryptoFuture, symbolProperties);
+                _spdb.SetEntry(Name, ticker, SecurityType.Crypto, symbolProperties);
             }
         }
 
@@ -286,7 +286,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                     ? Symbol.Create(rawTicker + "C", SecurityType.CryptoFuture, Name)
                     : symbol;
 
-            var entry = _spdb.GetSymbolProperties("okx", dbSymbol, SecurityType.CryptoFuture, _instrumentType == InstrumentType.Futures && quoteAsset == "USD" ? quoteAsset + "C" : quoteAsset);
+            var entry = _spdb.GetSymbolProperties(Name, dbSymbol, SecurityType.CryptoFuture, _instrumentType == InstrumentType.Futures && quoteAsset == "USD" ? quoteAsset + "C" : quoteAsset);
 
             if (entry != null && !string.IsNullOrEmpty(entry.MarketTicker))
                 return entry.MarketTicker;
