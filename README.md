@@ -13,7 +13,7 @@ All exchange clients are built on JKorf's `CryptoExchange.Net` ecosystem (`Bybit
 | AsterDEX | ✅ Live | ListenKey user stream, hedge mode, Builder Code support, no native user-trade stream |
 | Bitget | ✅ Live | In-place EditOrder, funding fees via ledger polling |
 | BingX | ✅ Live | ListenKey user stream, hedge mode, funding rate via polling loop (not socket) |
-| Kraken | ✅ Live | EU MiCA-compliant (USD-quoted futures). Requires dirty fix for LEAN core bug — see [LEAN core bug](#lean-core-bug-iscryptocoinfu-ture-eu-mica). |
+| Kraken | ✅ Live | USD-quoted futures. Requires dirty fix for LEAN core bug. Described below |
 | OKX | ⚠️ Blocked | Underlying library's `SharedClient` constructs native symbols as `BASE-QUOTE-SWAP`, breaking subscriptions for any non-BTC pair (`error 60018`). Waiting on upstream fix. |
 
 ## Architecture
