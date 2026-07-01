@@ -205,8 +205,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                     marketTicker: symbol.Symbol
                 );
 
-                _spdb.SetEntry("kraken", ticker, SecurityType.CryptoFuture, symbolProperties);
-                _spdb.SetEntry("kraken", ticker, SecurityType.Crypto, symbolProperties);
+                _spdb.SetEntry(Name, ticker, SecurityType.CryptoFuture, symbolProperties);
+                _spdb.SetEntry(Name, ticker, SecurityType.Crypto, symbolProperties);
             }
         }
 

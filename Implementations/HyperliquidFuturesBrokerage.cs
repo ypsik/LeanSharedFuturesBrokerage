@@ -188,8 +188,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                     marketTicker: symbol.Name
                 );
 
-                _spdb.SetEntry("hyperliquid", ticker, SecurityType.Crypto, symbolProperties);
-                _spdb.SetEntry("hyperliquid", ticker, SecurityType.CryptoFuture, symbolProperties);
+                _spdb.SetEntry(Name, ticker, SecurityType.Crypto, symbolProperties);
+                _spdb.SetEntry(Name, ticker, SecurityType.CryptoFuture, symbolProperties);
             }
         }
 
