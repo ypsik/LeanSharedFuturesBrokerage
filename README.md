@@ -108,7 +108,7 @@ Populated dynamically at startup from each exchange's live instrument list (tick
 - Funding rates polled via a dedicated unauthenticated socket client (`_socketClientExData`) to avoid connection pool conflicts
 - Requires the LEAN core dirty fix described below
 
-## LEAN core bug: `IsCryptoCoinFuture` / EU MiCA
+## LEAN core bug: `IsCryptoCoinFuture`
 
 ### Background
 
