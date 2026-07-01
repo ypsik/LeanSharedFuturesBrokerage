@@ -293,6 +293,16 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             // Ticker key = baseAsset + quoteAsset (e.g. "BTCUSD"), same as PopulateSPDB.
             var leanTicker = baseAsset + quoteAsset;
             var entry = _spdb.GetSymbolProperties("okx", leanTicker, SecurityType.CryptoFuture, quoteAsset);
+
+            if (entry == null && quoteAsset == "USD")
+            {
+                // GetSharedSymbol() strips the dirty-fix "C" suffix (USDC -> USD), which can
+                // cause the symbol to be reconstructed elsewhere as "USD" instead of "USDC".
+                // Fall back to the actual SPDB key used during PopulateSPDB.
+                leanTicker = baseAsset + quoteAsset + "C";
+                entry = _spdb.GetSymbolProperties("okx", leanTicker, SecurityType.CryptoFuture, quoteAsset + "C");
+            }
+
             if (entry != null && !string.IsNullOrEmpty(entry.MarketTicker))
                 return entry.MarketTicker;
 
