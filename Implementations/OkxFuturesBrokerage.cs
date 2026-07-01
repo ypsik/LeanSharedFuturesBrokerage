@@ -236,13 +236,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 );
 
                 _spdb.SetEntry("okx", ticker, SecurityType.CryptoFuture, symbolProperties);
-
-                // Register as Crypto so EnsureCurrencyDataFeed can resolve the base
-                // currency conversion rate (same pattern as Kraken/Hyperliquid fix).
-                if (!_spdb.ContainsKey("okx", ticker, SecurityType.Crypto))
-                {
-                    _spdb.SetEntry("okx", ticker, SecurityType.Crypto, symbolProperties);
-                }
+                _spdb.SetEntry("okx", ticker, SecurityType.Crypto, symbolProperties);
             }
         }
 
