@@ -277,9 +277,16 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             // baseAsset+quoteAsset, since GetSharedSymbol() strips the dirty-fix "C" suffix
             // and callers may reconstruct/pass the symbol without it (e.g. "XAUUSD" instead
             // of "XAUUSDC" as actually stored in PopulateSPDB).
+            if (symbol.Value == null)                
+                throw new InvalidOperationException($"Cannot get native ticker for symbol {symbol} with null Value");
             var rawTicker = symbol.Value;
 
-            var entry = _spdb.GetSymbolProperties("okx", rawTicker, SecurityType.CryptoFuture, _instrumentType == InstrumentType.Futures ? quoteAsset + "C" : quoteAsset);
+            Symbol dbSymbol =
+                _instrumentType == InstrumentType.Futures && rawTicker.EndsWith("USD")
+                    ? Symbol.Create(rawTicker + "C", SecurityType.CryptoFuture, Name)
+                    : symbol;
+
+            var entry = _spdb.GetSymbolProperties("okx", dbSymbol, SecurityType.CryptoFuture, _instrumentType == InstrumentType.Futures && quoteAsset == "USD" ? quoteAsset + "C" : quoteAsset);
 
             if (entry != null && !string.IsNullOrEmpty(entry.MarketTicker))
                 return entry.MarketTicker;
