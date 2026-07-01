@@ -13,7 +13,7 @@ All exchange clients are built on JKorf's `CryptoExchange.Net` ecosystem (`Bybit
 | AsterDEX | ✅ Live | ListenKey user stream, hedge mode, Builder Code support, no native user-trade stream |
 | Bitget | ✅ Live | In-place EditOrder, funding fees via ledger polling |
 | BingX | ✅ Live | ListenKey user stream, hedge mode, funding rate via polling loop (not socket) |
-| Kraken | ⚠️ Blocked | Underlying library (`Kraken.Net`) does not return PnL data — cash/equity tracking unreliable. Waiting on upstream fix. |
+| Kraken | ✅ Live | USD-quoted futures. Requires dirty fix for LEAN core bug. Described below |
 | OKX | ⚠️ Blocked | Underlying library's `SharedClient` constructs native symbols as `BASE-QUOTE-SWAP`, breaking subscriptions for any non-BTC pair (`error 60018`). Waiting on upstream fix. |
 
 ## Architecture
@@ -61,6 +61,7 @@ Funding *fee* settlement (the actual cash movement, separate from the funding *r
 - **Bybit**: extracted from the user-trade-update stream, filtered to `TradeType.Funding`
 - **Bitget**: no push event for fees — detected via a ticker-socket rollover trigger, then polls the account ledger (idempotent via last-processed-ledger-ID) after a short delay
 - **AsterDEX**: pushed via the account-update stream (`AccountUpdateReason.FundingFee`), filtered from the ListenKey user stream
+- **Kraken**: pushed via the `account_log` WebSocket feed, filtered to entries where `Info == "funding rate change"` and `RealizedFunding != 0`
 
 ### Minimum order notional
 
@@ -95,16 +96,45 @@ Populated dynamically at startup from each exchange's live instrument list (tick
 - No native user-trade stream (`ExchangeSupportsUserTradeStream = false`) — fills handled via the order socket, like AsterDEX
 - ListenKey-based user stream with 45-minute keep-alive loop and automatic reconnect on expiry
 - Hedge mode by default, with `positionSide` (Long/Short) mapping per side
-- Funding *rate* is not pushed via socket — handled by a dedicated polling loop that fetches the next funding timestamp, sleeps until settlement, then re-fetches rate + next timestamp (distinct from the socket+rollover pattern used by the other exchanges)
+- Funding *rate* is not pushed via socket — handled by a dedicated polling loop that fetches the next funding timestamp, sleeps until settlement, then re-fetches rate + next timestamp
 - Funding *fee* settlement pushed via the account-update stream, filtered to `Trigger == "FUNDING_FEE"`
 - Order updates via `CancelReplaceOrderAsync`, which returns a new exchange order ID (cancel+replace under the hood, not a true in-place edit)
 
+**Kraken**
+- Futures are quoted in fiat USD (not USDT/USDC).
+- Multi-collateral (flex) account: `GetCashBalance()` returns `BalanceValue` (haircut-free collateral value, PnL-neutral), letting LEAN add unrealized PnL separately via holdings
+- In-place order modify (`ExchangeModifiesOrdersInPlace = true`): Kraken keeps the same order ID after an edit, same pattern as Bybit
+- Funding fees pushed via the `account_log` WebSocket feed (snapshot on connect is ignored; only live `new_entry` events with `Info == "funding rate change"` are processed)
+- Funding rates polled via a dedicated unauthenticated socket client (`_socketClientExData`) to avoid connection pool conflicts
+- Requires the LEAN core dirty fix described below
+
+## LEAN core bug: `IsCryptoCoinFuture`
+
+### Background
+
+LEAN's `CryptoFuture.IsCryptoCoinFuture()` classifies a futures contract as coin-margined (inverse) if its quote currency is not `USDT`, `BUSD`, or `USDC`. Kraken Futures and OKX EU therefore quote all their linear perpetuals in **USD** (fiat), causing LEAN to misclassify them as inverse contracts.
+
+This misclassification causes:
+- `CryptoFutureHolding.GetQuantityValue()` to use the inverse formula (`quantity / price` in base currency) instead of the linear formula (`price × quantity` in quote currency), making `TotalHoldingsValue` equal to `Quantity` (e.g. `2.80` instead of `~163,000` USD for a 2.8 BTC position)
+- `CryptoFutureMarginModel.GetCollateralCash()` to attribute collateral to base currency (XBT) instead of USD, breaking margin calculations
+- `Portfolio.TotalPortfolioValue` completely wrong, causing incorrect position sizing in live trading
+
+A [GitHub issue](https://github.com/QuantConnect/Lean/issues/9574) has been filed.
+
+### Dirty fix (applied in `KrakenFuturesBrokerage`)
+
+Since `IsCryptoCoinFuture()` is not `virtual` and cannot be overridden, the fix operates at the SPDB/ticker level:
+
+1. **`NormalizeSymbol()`**: appends `"C"` to any USD-quoted ticker (`PF_XBTUSD` → `XBTUSDC`), so LEAN sees `quoteCurrency = "USDC"` and correctly classifies the contract as linear.
+2. **`PopulateSPDB()`**: registers all Kraken futures with `quoteCurrency: "USDC"` to match.
+3. **`NativeTicker()`**: strips the `"C"` back off before any Kraken API call (`XBTUSDC` → `PF_XBTUSD`).
+4. **`GetSharedSymbol()`**: replaces `"USDC"` with `"USD"` in the shared symbol used by `CryptoExchange.Net` internally.
+
+The USDC/USD spread is negligible for portfolio valuation (~0.01%). Config tickers must use the `USDC`-suffixed form (e.g. `XBTUSDC`, `TRXUSDC`) to match the LEAN-internal ticker.
+
 ## Known blockers (not exchange-side, library-side)
 
-- **Kraken**: `Kraken.Net` does not surface PnL in the account/balance response needed for LEAN's cash/equity tracking. No workaround currently in place — not used live.
 - **OKX**: `OKX.Net`'s `SharedClient` constructs native symbols as `BASE-QUOTE-SWAP`, which breaks subscriptions for any pair other than BTC (`error 60018`). Paused pending an upstream fix.
-
-Both are JKorf library issues, not implementation bugs in this repo.
 
 ## Status of this repository
 
