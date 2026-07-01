@@ -14,7 +14,7 @@ All exchange clients are built on JKorf's `CryptoExchange.Net` ecosystem (`Bybit
 | Bitget | ✅ Live | In-place EditOrder, funding fees via ledger polling |
 | BingX | ✅ Live | ListenKey user stream, hedge mode, funding rate via polling loop (not socket) |
 | Kraken | ✅ Live | USD-quoted futures. Requires dirty fix for LEAN core bug. Described below |
-| OKX | ⚠️ Blocked | Underlying library's `SharedClient` constructs native symbols as `BASE-QUOTE-SWAP`, breaking subscriptions for any non-BTC pair (`error 60018`). Waiting on upstream fix. |
+| OKX | ✅ Live | FUTURES (EU X-Perp) requires dirty fix for LEAN core bug (same as Kraken), described below. Only tested on EU accounts (FUTURES/X-Perp) — Global (SWAP) untested. |
 
 ## Architecture
 
@@ -108,11 +108,20 @@ Populated dynamically at startup from each exchange's live instrument list (tick
 - Funding rates polled via a dedicated unauthenticated socket client (`_socketClientExData`) to avoid connection pool conflicts
 - Requires the LEAN core dirty fix described below
 
+**OKX**
+- Only tested on EU accounts (FUTURES/X-Perp). Global accounts (SWAP) are untested.
+- FUTURES (EU X-Perp, MiFID-regulated, 5-year expiry with funding rate) are quoted in fiat USD, same issue as Kraken. SWAP (true perpetuals, Global/US accounts) are typically USDT-quoted and unaffected.
+- Requires the LEAN core dirty fix described below, applied only to the FUTURES instrument type — SWAP is left untouched.
+- In-place order modify via `AmendOrder` (`ExchangeModifiesOrdersInPlace = true`), same order ID kept after amendment, same pattern as Kraken
+- No fills channel on non-VIP5 accounts (`ExchangeSupportsUserTradeStream = false`) — fills read from the `orders` channel instead
+- Funding rates via a dedicated public funding-rate WebSocket channel, pushed every minute
+- `GetCashBalance()` returns `TotalEquity` minus `UnrealizedPnl`, same pattern as Kraken/Bybit/Hyperliquid
+- FUTURES native ticker resolution (canonical instId with date suffix, e.g. `ETH-USD-310404`) requires an SPDB lookup rather than a pure string transform (unlike Kraken); `NativeTicker()`, `NormalizeSymbol()`, and `PopulateSPDB()` must all derive the same ticker key for a given instrument, or the lookup fails with "native ticker not found in SPDB"
 ## LEAN core bug: `IsCryptoCoinFuture`
 
 ### Background
 
-LEAN's `CryptoFuture.IsCryptoCoinFuture()` classifies a futures contract as coin-margined (inverse) if its quote currency is not `USDT`, `BUSD`, or `USDC`. Kraken Futures and OKX EU therefore quote all their linear perpetuals in **USD** (fiat), causing LEAN to misclassify them as inverse contracts.
+LEAN's `CryptoFuture.IsCryptoCoinFuture()` classifies a futures contract as coin-margined (inverse) if its quote currency is not `USDT`, `BUSD`, or `USDC`. Kraken Futures and OKX EU X-Perps therefore quote all their linear perpetuals in **USD** (fiat), causing LEAN to misclassify them as inverse contracts.
 
 This misclassification causes:
 - `CryptoFutureHolding.GetQuantityValue()` to use the inverse formula (`quantity / price` in base currency) instead of the linear formula (`price × quantity` in quote currency), making `TotalHoldingsValue` equal to `Quantity` (e.g. `2.80` instead of `~163,000` USD for a 2.8 BTC position)
@@ -121,20 +130,18 @@ This misclassification causes:
 
 A [GitHub issue](https://github.com/QuantConnect/Lean/issues/9574) has been filed.
 
-### Dirty fix (applied in `KrakenFuturesBrokerage`)
+### Dirty fix (applied in `KrakenFuturesBrokerage` and `OkxFuturesBrokerage`)
 
 Since `IsCryptoCoinFuture()` is not `virtual` and cannot be overridden, the fix operates at the SPDB/ticker level:
 
-1. **`NormalizeSymbol()`**: appends `"C"` to any USD-quoted ticker (`PF_XBTUSD` → `XBTUSDC`), so LEAN sees `quoteCurrency = "USDC"` and correctly classifies the contract as linear.
-2. **`PopulateSPDB()`**: registers all Kraken futures with `quoteCurrency: "USDC"` to match.
-3. **`NativeTicker()`**: strips the `"C"` back off before any Kraken API call (`XBTUSDC` → `PF_XBTUSD`).
+1. **`NormalizeSymbol()`**: appends `"C"` to any USD-quoted ticker (Kraken: `PF_XBTUSD` → `XBTUSDC`; OKX FUTURES: `BTC-USD_UM_XPERP-...` → `BTCUSDC`), so LEAN sees `quoteCurrency = "USDC"` and correctly classifies the contract as linear.
+2. **`PopulateSPDB()`**: registers all USD-quoted futures with `quoteCurrency: "USDC"` to match, deriving the ticker key from the same `NormalizeSymbol()` logic so both methods produce an identical key for a given instrument.
+3. **`NativeTicker()`**: strips the `"C"` back off before any exchange API call (Kraken: `XBTUSDC` → `PF_XBTUSD`). For OKX FUTURES, the canonical instId (with date suffix) is looked up from SPDB instead, since it can't be reconstructed from the ticker alone.
 4. **`GetSharedSymbol()`**: replaces `"USDC"` with `"USD"` in the shared symbol used by `CryptoExchange.Net` internally.
 
-The USDC/USD spread is negligible for portfolio valuation (~0.01%). Config tickers must use the `USDC`-suffixed form (e.g. `XBTUSDC`, `TRXUSDC`) to match the LEAN-internal ticker.
+On OKX, this fix is scoped to the FUTURES instrument type only (`_instrumentType == InstrumentType.Futures`) — SWAP tickers are left completely untouched, since they are USDT-quoted and not affected by the bug.
 
-## Known blockers (not exchange-side, library-side)
-
-- **OKX**: `OKX.Net`'s `SharedClient` constructs native symbols as `BASE-QUOTE-SWAP`, which breaks subscriptions for any pair other than BTC (`error 60018`). Paused pending an upstream fix.
+The USDC/USD spread is negligible for portfolio valuation (~0.01%). Config tickers must use the `USDC`-suffixed form (e.g. `XBTUSDC`, `TRXUSDC`, `BTCUSDC`) to match the LEAN-internal ticker.
 
 ## Status of this repository
 
