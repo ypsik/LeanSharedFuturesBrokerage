@@ -215,19 +215,20 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                     continue;
                 }
 
-                var ticker = baseAsset + quoteAsset;
+                var ticker = NormalizeSymbol(symbol.Symbol);
+                if (quoteAsset == "USD")
+                    quoteAsset += "C";
 
                 var tickSize = symbol.TickSize ?? 0.01m;
                 var lotSize = symbol.LotSize ?? 1m;
                 if (lotSize <= 0m) lotSize = 1m;
 
                 // settleCcy is the margin/settlement asset for FUTURES/SWAP (e.g. "USD", "USDT").
-                var quoteCurrency = string.IsNullOrEmpty(symbol.SettlementAsset) ? SettleAsset : symbol.SettlementAsset;
                 var contractMultiplier = symbol.ContractValue ?? 1m;
 
                 var symbolProperties = new SymbolProperties(
                     description: $"OKX {baseAsset} {_instrumentType}",
-                    quoteCurrency: quoteCurrency,
+                    quoteCurrency: quoteAsset,
                     contractMultiplier: contractMultiplier,
                     minimumPriceVariation: tickSize,
                     lotSize: lotSize,
@@ -255,14 +256,19 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         // FUTURES: "BTC-USD_UM_XPERP-310404" → not used (ticker built from uly in PopulateSPDB)
         protected override string NormalizeSymbol(string rawSymbol)
         {
-            // Take first two dash-separated segments, strip anything after '_' in segment 2.
-            // "BTC-USDT-SWAP"          → "BTC" + "USDT" → "BTCUSDT"
-            // "BTC-USD_UM_XPERP-310404"→ "BTC" + "USD"  → "BTCUSD"
             var parts = rawSymbol.Split('-');
-            if (parts.Length >= 2)
-                return parts[0] + parts[1].Split('_')[0];
+            if (parts.Length < 2)
+                return rawSymbol;
 
-            return rawSymbol;
+            var baseAsset = parts[0];
+            var quoteAsset = parts[1].Split('_')[0];
+
+            // Same USD -> USDC dirty fix as PopulateSPDB (FUTURES/X-Perp only), so this method
+            // produces the exact same ticker key as PopulateSPDB for the same instrument.
+            if (quoteAsset == "USD")
+                quoteAsset += "C";
+
+            return baseAsset + quoteAsset;
         }
 
         protected override string NativeTicker(Symbol symbol)
@@ -272,16 +278,31 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             if (_instrumentType == InstrumentType.Swap)
                 return $"{baseAsset}-{quoteAsset}-SWAP";
 
-            // For FUTURES (X-Perps) the expiry suffix is date-based ("310404").
-            // The MarketTicker stored in SPDB during PopulateSPDB is the canonical instId.
-            // Ticker key = baseAsset + quoteAsset (e.g. "BTCUSD"), same as PopulateSPDB.
-            var leanTicker = baseAsset + quoteAsset;
-            var entry = _spdb.GetSymbolProperties("okx", leanTicker, SecurityType.CryptoFuture, quoteAsset);
+            // FUTURES (X-Perp): look up the canonical instId (with date suffix) from SPDB.
+            // Use symbol.Value directly (raw LEAN ticker), not the decompose-reconstructed
+            // baseAsset+quoteAsset, since GetSharedSymbol() strips the dirty-fix "C" suffix
+            // and callers may reconstruct/pass the symbol without it (e.g. "XAUUSD" instead
+            // of "XAUUSDC" as actually stored in PopulateSPDB).
+            var rawTicker = symbol.Value;
+
+            var entry = _spdb.GetSymbolProperties("okx", rawTicker, SecurityType.CryptoFuture, null);
+
             if (entry != null && !string.IsNullOrEmpty(entry.MarketTicker))
                 return entry.MarketTicker;
 
             throw new InvalidOperationException(
                 $"OKX native ticker not found in SPDB for {symbol.Value}");
+        }
+
+        protected override SharedSymbol GetSharedSymbol(Symbol s)
+        {
+            CurrencyPairUtil.DecomposeCurrencyPair(s, out var baseAsset, out var quoteAsset);
+            // Only FUTURES (X-Perp) quoteAsset was artificially remapped USD -> USDC in PopulateSPDB.
+            // SWAP quoteAsset is untouched, so genuine USDC-quoted SWAP pairs must stay as USDC.
+            if (_instrumentType == InstrumentType.Futures)
+                quoteAsset = quoteAsset.Replace("USDC", "USD");
+
+            return new SharedSymbol(TradingMode.PerpetualLinear, baseAsset, quoteAsset);
         }
 
         #endregion
