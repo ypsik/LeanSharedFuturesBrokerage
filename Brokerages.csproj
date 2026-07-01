@@ -10,7 +10,7 @@
 
   <ItemGroup>
     <PackageReference Include="Bybit.Net" Version="7.0.0" />
-    <PackageReference Include="CryptoExchange.Net" Version="12.0.1" />
+    <PackageReference Include="CryptoExchange.Net" Version="12.0.2" />
     <PackageReference Include="HyperLiquid.Net" Version="5.0.0" />
     <PackageReference Include="JK.BingX.Net" Version="4.0.0" />
     <PackageReference Include="JK.Bitget.Net" Version="4.0.0" />
