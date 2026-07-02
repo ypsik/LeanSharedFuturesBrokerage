@@ -36,6 +36,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         /// Wenn false, werden Fills direkt im Order-Stream verarbeitet.
         /// </summary>
         public virtual bool ExchangeSupportsUserTradeStream => true;
+        protected virtual SharedMarginMode? SharedMarginMode => null;
+        protected virtual SharedPositionSide? SharedPositionSide => null;
 
         #region Quantity Unit Conversion
 
@@ -180,8 +182,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             }).ToList();
         }
 
-        protected virtual SharedPositionSide? SharedPositionSide => null;
-
         public override bool PlaceOrder(Order order)
         {
             decimal executionQuantity = order.Quantity;
@@ -233,7 +233,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 Price = (order as LimitOrder)?.LimitPrice,
                 ClientOrderId = clientOrderId,
                 ExchangeParameters = PlaceFuturesOrderExchangeParameters,
-                PositionSide = SharedPositionSide
+                PositionSide = SharedPositionSide, 
+                MarginMode = SharedMarginMode
             };
 
             // State Machine: Order mit Placing-State registrieren bevor API-Call rausgeht.

@@ -37,6 +37,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         private readonly SymbolRuleType? _ruleTypeFilter;
         protected override int? FundingRolloverHours => null;
 
+        protected override SharedMarginMode? SharedMarginMode => CryptoExchange.Net.SharedApis.SharedMarginMode.Cross;
+
         internal OkxFuturesBrokerage(
             IAlgorithm algorithm,
             OKXRestClient restClient,
