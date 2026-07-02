@@ -37,6 +37,33 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         /// </summary>
         public virtual bool ExchangeSupportsUserTradeStream => true;
 
+        #region Quantity Unit Conversion
+
+        /// <summary>
+        /// Wandelt eine LEAN Base-Asset-Menge (z.B. 1.5 HYPE) in die von der Exchange erwartete
+        /// SharedQuantity-Repräsentation um. Default: 1:1 Passthrough als BaseAsset, für Exchanges
+        /// wie Hyperliquid, Bybit, Bitget, die Orders direkt in Base-Asset-Einheiten entgegennehmen.
+        /// Exchanges mit Contract-Notation (z.B. OKX) überschreiben dies, um in Contracts umzurechnen
+        /// (base_qty / ContractMultiplier) und geben zusätzlich die tatsächlich gerundete Base-Menge
+        /// über <paramref name="roundedBaseQuantity"/> zurück, damit die State-Machine mit der real
+        /// an der Exchange platzierten Menge arbeitet statt mit der ungerundeten Zielmenge.
+        /// </summary>
+        protected virtual SharedQuantity ToExchangeQuantity(Symbol symbol, decimal absBaseQuantity, out decimal roundedBaseQuantity)
+        {
+            roundedBaseQuantity = absBaseQuantity;
+            return new SharedQuantity { QuantityInBaseAsset = absBaseQuantity };
+        }
+
+        /// <summary>
+        /// Wandelt eine von der Exchange gelieferte SharedOrderQuantity zurück in eine LEAN
+        /// Base-Asset-Menge um. Default: liest QuantityInBaseAsset direkt.
+        /// Exchanges mit Contract-Notation (z.B. OKX) überschreiben dies, um Contracts zurück
+        /// in Base-Asset-Einheiten umzurechnen (contracts * ContractMultiplier).
+        /// </summary>
+        protected virtual decimal FromExchangeQuantity(Symbol symbol, SharedOrderQuantity? quantity)
+            => quantity?.QuantityInBaseAsset ?? 0m;
+
+        #endregion
 
         #region State Machine Models
 
@@ -95,8 +122,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             {
                 var symbol = Symbol.Create(NormalizeSymbol(o.Symbol), SecurityType.CryptoFuture, Name);
                 var sign = o.Side == SharedOrderSide.Sell ? -1m : 1m;
-                var qty = (o.OrderQuantity?.QuantityInBaseAsset ?? 0m) * sign;
-                var filledQty = (o.QuantityFilled?.QuantityInBaseAsset ?? 0m) * sign;
+                var qty = FromExchangeQuantity(symbol, o.OrderQuantity) * sign;
+                var filledQty = FromExchangeQuantity(symbol, o.QuantityFilled) * sign;
                 var price = o.OrderPrice ?? 0m;
 
                 Order order;
@@ -179,11 +206,17 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
             var clientOrderId = GenerateClientId(order.Id);
 
+            // Base-Menge in die von der Exchange erwartete Einheit umrechnen (BaseAsset oder Contracts).
+            // roundedExecutionQuantity ist die tatsächlich gültige Base-Menge NACH Rundung auf
+            // Contract-/Lot-Steps, damit die State-Machine mit der real platzierten Menge arbeitet.
+            var sharedQuantity = ToExchangeQuantity(order.Symbol, Math.Abs(executionQuantity), out var roundedAbsQuantity);
+            var signedRoundedQuantity = executionQuantity >= 0 ? roundedAbsQuantity : -roundedAbsQuantity;
+
             var request = new PlaceFuturesOrderRequest(
                 GetSharedSymbol(order.Symbol),
                 executionQuantity > 0 ? SharedOrderSide.Buy : SharedOrderSide.Sell,
                 order.Type == OrderType.Limit ? SharedOrderType.Limit : SharedOrderType.Market,
-                new SharedQuantity { QuantityInBaseAsset = Math.Abs(executionQuantity) })
+                sharedQuantity)
             {
                 Price = (order as LimitOrder)?.LimitPrice,
                 ClientOrderId = clientOrderId,
@@ -196,10 +229,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             // und das WS-Event noch während RunSync() ankommt.
             // BrokerId = clientOrderId (temp) → manager indexes it in _statesByExchangeId as well.
             // No self-reference sentinel needed anymore.
+            // WICHTIG: OriginalQuantity nutzt die GERUNDETE Menge (signedRoundedQuantity), nicht die
+            // ursprüngliche executionQuantity, damit Fill-Tracking/Remaining mit der real an der
+            // Exchange platzierten Menge übereinstimmt (relevant für Contract-Exchanges wie OKX).
             var placingState = new OrderState
             {
                 Order = order,
-                OriginalQuantity = executionQuantity,
+                OriginalQuantity = signedRoundedQuantity,
                 FilledQuantity = 0m,
                 ClientOrderId = clientOrderId,
                 State = OrderLifeCycleState.Placing,
@@ -457,11 +493,15 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             // ClientOrderId sofort auf den bestehenden State auflösen kann (instant fill/open).
             _orderStateManager.TryAdd(newClientOrderId, state);
 
+            // Base-Menge in die von der Exchange erwartete Einheit umrechnen (analog PlaceOrder).
+            var sharedQuantity = ToExchangeQuantity(order.Symbol, Math.Abs(quantity), out var roundedAbsQuantity);
+            var signedRoundedQuantity = quantity >= 0 ? roundedAbsQuantity : -roundedAbsQuantity;
+
             var request = new PlaceFuturesOrderRequest(
                 GetSharedSymbol(order.Symbol),
                 quantity > 0 ? SharedOrderSide.Buy : SharedOrderSide.Sell,
                 order.Type == OrderType.Limit ? SharedOrderType.Limit : SharedOrderType.Market,
-                new SharedQuantity { QuantityInBaseAsset = Math.Abs(quantity) })
+                sharedQuantity)
             {
                 Price = price,
                 ClientOrderId = newClientOrderId,
@@ -481,6 +521,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "UpdateOrderReplaceFailed", errorMsg));
                 return false;
             }
+
+            // WICHTIG: OriginalQuantity nutzt die GERUNDETE Menge, analog zu PlaceOrder.
+            state.OriginalQuantity = signedRoundedQuantity;
 
             // Falls der Socket die neue ClientOrderId noch nicht selbst verarbeitet hat
             // (HandleOrderSocket-Pfad "MODIFY / REPLACEMENT DETECTION"): jetzt manuell nachziehen.
@@ -554,21 +597,27 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                 if (brokerOrder.Status == SharedOrderStatus.Filled)
                 {
-                    var finalFillAbsQty = brokerOrder.QuantityFilled?.QuantityInBaseAsset
-                                          ?? Math.Abs(removedState.OriginalQuantity);
+                    var finalFillAbsQty = FromExchangeQuantity(order.Symbol, brokerOrder.QuantityFilled);
+                    if (finalFillAbsQty == 0m)
+                        finalFillAbsQty = Math.Abs(removedState.OriginalQuantity);
+
                     var sign = removedState.OriginalQuantity > 0 ? 1m : -1m;
                     var finalSignedFillQty = finalFillAbsQty * sign;
                     var remainingToFill = finalSignedFillQty - removedState.FilledQuantity;
 
                     if (Math.Abs(remainingToFill) > 0)
                     {
+                        // FIX 3: Doppelbuchungen der Gebühren verhindern!
+                        var totalExchangeFee = brokerOrder.Fee ?? 0m;
+                        var remainingFee = Math.Max(0m, totalExchangeFee - removedState.CumulativeFeePaid);
+
                         Log.Trace($"{Name}.ReconcileOrderImmediateAsync: Order {brokerId} confirmed FILLED. Emitting fill event.");
                         OnOrderEvent(new OrderEvent(removedState.Order, DateTime.UtcNow, OrderFee.Zero)
                         {
                             Status = QuantConnect.Orders.OrderStatus.Filled,
                             FillPrice = brokerOrder.AveragePrice ?? 0,
                             FillQuantity = remainingToFill,
-                            OrderFee = new OrderFee(new CashAmount(brokerOrder.Fee ?? 0, brokerOrder.FeeAsset ?? SettleAsset)),
+                            OrderFee = new OrderFee(new CashAmount(remainingFee, brokerOrder.FeeAsset ?? SettleAsset)),
                             Message = "Immediate Reconcile – Fill"
                         });
                     }
@@ -696,6 +745,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                 // =======================================================
                 // TRADE VERARBEITEN (Da 'state' eine Referenz ist, updaten wir das richtige Objekt!)
+                // Hinweis: trade.Quantity wird hier bewusst NICHT über FromExchangeQuantity umgerechnet.
+                // Dieser Pfad wird nur bei ExchangeSupportsUserTradeStream=true genutzt; alle bisher
+                // angebundenen Exchanges mit User-Trade-Stream liefern Base-Asset-Mengen (kein Contract-
+                // Exchange nutzt aktuell diesen Pfad, OKX z.B. hat ExchangeSupportsUserTradeStream=false).
                 // =======================================================
                 var sign = trade.Side == SharedOrderSide.Buy ? 1m : -1m;
                 var signedFill = trade.Quantity * sign;
@@ -910,7 +963,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     else if (_orderStateManager.TryGetByExchangeId(o.OrderId, out var fillState))
                     {
                         var sign = fillState.OriginalQuantity > 0 ? 1m : -1m;
-                        var absFilled = o.QuantityFilled?.QuantityInBaseAsset ?? (o.Status == SharedOrderStatus.Filled ? Math.Abs(fillState.OriginalQuantity) : 0m);
+                        var reportedFilled = FromExchangeQuantity(fillState.Order.Symbol, o.QuantityFilled);
+                        var absFilled = reportedFilled > 0m
+                            ? reportedFilled
+                            : (o.Status == SharedOrderStatus.Filled ? Math.Abs(fillState.OriginalQuantity) : 0m);
                         var targetSignedFilled = absFilled * sign;
                         var signedFill = targetSignedFilled - fillState.FilledQuantity;
 
@@ -962,7 +1018,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     }
 
                     state.LastUpdateUtc = DateTime.UtcNow;
-                    var absFilled = o.QuantityFilled?.QuantityInBaseAsset ?? 0m;
+                    var absFilled = FromExchangeQuantity(state.Order.Symbol, o.QuantityFilled);
                     var leanStatus = MapStatus(o.Status, absFilled);
 
                     if (leanStatus is QuantConnect.Orders.OrderStatus.Canceled or QuantConnect.Orders.OrderStatus.Invalid)
@@ -1049,8 +1105,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         // CASE 1: FILLED
                         if (brokerOrder.Status == SharedOrderStatus.Filled)
                         {
-                            var finalFillAbsQty = brokerOrder.QuantityFilled?.QuantityInBaseAsset
-                                                  ?? Math.Abs(removedState.OriginalQuantity);
+                            var finalFillAbsQty = FromExchangeQuantity(state.Order.Symbol, brokerOrder.QuantityFilled);
+                            if (finalFillAbsQty == 0m)
+                                finalFillAbsQty = Math.Abs(removedState.OriginalQuantity);
 
                             var finalSignedFillQty = finalFillAbsQty * (removedState.OriginalQuantity > 0 ? 1m : -1m);
                             var remainingToFill = finalSignedFillQty - removedState.FilledQuantity;

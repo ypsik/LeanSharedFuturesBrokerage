@@ -277,7 +277,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             // baseAsset+quoteAsset, since GetSharedSymbol() strips the dirty-fix "C" suffix
             // and callers may reconstruct/pass the symbol without it (e.g. "XAUUSD" instead
             // of "XAUUSDC" as actually stored in PopulateSPDB).
-            if (symbol.Value == null)                
+            if (symbol.Value == null)
                 throw new InvalidOperationException($"Cannot get native ticker for symbol {symbol} with null Value");
             var rawTicker = symbol.Value;
 
@@ -304,6 +304,65 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 quoteAsset = quoteAsset.Replace("USDC", "USD");
 
             return new SharedSymbol(TradingMode.PerpetualLinear, baseAsset, quoteAsset);
+        }
+
+        #endregion
+
+        #region Contract Quantity Conversion
+
+        /// <summary>
+        /// OKX Futures/Swap-Endpunkte erwarten und liefern Quantities ausschließlich in Contracts
+        /// (sz-Parameter), nicht in Base-Asset-Einheiten. Ein Contract entspricht dem in der SPDB
+        /// hinterlegten ContractMultiplier (= OKX ctVal, z.B. 0.01 BTC pro Contract).
+        /// Lookup via _spdb, befüllt in PopulateSPDB() aus symbol.ContractValue.
+        /// </summary>
+        private decimal GetContractMultiplier(Symbol symbol)
+        {
+            var props = _spdb.GetSymbolProperties(Name, symbol, SecurityType.CryptoFuture, SettleAsset);
+            var multiplier = props?.ContractMultiplier ?? 1m;
+            return multiplier > 0m ? multiplier : 1m;
+        }
+
+        /// <summary>
+        /// Base-Asset-Menge → Contracts. Rundet IMMER AUF (Ceiling) auf den nächstgültigen
+        /// LotSize-Step. Grund: bei Abrundung wäre die tatsächlich an OKX gesendete Menge kleiner
+        /// als die von LEAN erwartete OriginalQuantity, wodurch die Order nie vollständig gefüllt
+        /// werden kann und als PartiallyFilled/Open unbegrenzt in der State-Machine hängen bleibt.
+        /// Ceiling stellt sicher, dass die Exchange-Menge >= LEAN-Zielmenge ist.
+        /// roundedBaseQuantity gibt die daraus resultierende, exakt darstellbare Base-Menge zurück,
+        /// damit die State-Machine mit dem realen (aufgerundeten) Wert arbeitet.
+        /// </summary>
+        protected override SharedQuantity ToExchangeQuantity(Symbol symbol, decimal absBaseQuantity, out decimal roundedBaseQuantity)
+        {
+            var ctVal = GetContractMultiplier(symbol);
+            var props = _spdb.GetSymbolProperties(Name, symbol, SecurityType.CryptoFuture, SettleAsset);
+            var lotSize = props?.LotSize ?? 1m;
+            if (lotSize <= 0m) lotSize = 1m;
+
+            var rawContracts = absBaseQuantity / ctVal;
+
+            // Ceiling auf den gültigen Contract-Lot-Step.
+            var steppedContracts = Math.Ceiling(rawContracts / lotSize) * lotSize;
+            if (steppedContracts <= 0m)
+                steppedContracts = lotSize; // Minimum: 1 Lot, nie 0 senden
+
+            roundedBaseQuantity = steppedContracts * ctVal;
+
+            return new SharedQuantity { QuantityInContracts = steppedContracts };
+        }
+
+        /// <summary>
+        /// Contracts → Base-Asset-Menge (reine Multiplikation, keine Rundung nötig,
+        /// da wir hier nur von der Exchange gemeldete Ist-Werte zurückrechnen).
+        /// </summary>
+        protected override decimal FromExchangeQuantity(Symbol symbol, SharedOrderQuantity? quantity)
+        {
+            if (quantity == null)
+                return 0m;
+
+            var contracts = quantity.QuantityInContracts ?? 0m;
+            var ctVal = GetContractMultiplier(symbol);
+            return contracts * ctVal;
         }
 
         #endregion
@@ -358,11 +417,22 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 return new HttpResult<SharedId>(Name, null, new InvalidOperationError($"Invalid order ID format: '{orderIdStr}'"));
             }
 
+            // AmendOrder erwartet ebenfalls Contracts (newSz), nicht Base-Asset-Menge.
+            // Gleiche Umrechnung + Rundung wie beim initialen PlaceOrder, damit die neue
+            // Restmenge auf einen gültigen Contract-Lot-Step fällt.
+            decimal? newContractQuantity = null;
+            if (quantity.HasValue)
+            {
+                ToExchangeQuantity(order.Symbol, Math.Abs(quantity.Value), out var roundedBaseQty);
+                var ctVal = GetContractMultiplier(order.Symbol);
+                newContractQuantity = roundedBaseQty / ctVal;
+            }
+
             var res = await _restClient.UnifiedApi.Trading.AmendOrderAsync(
                 symbol: nativeTicker,
                 orderId: orderId,
                 newPrice: price,
-                newQuantity: quantity.HasValue ? Math.Abs(quantity.Value) : (decimal?)null);
+                newQuantity: newContractQuantity);
 
             if (!res.Success)
             {
