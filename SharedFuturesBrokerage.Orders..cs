@@ -63,6 +63,18 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         protected virtual decimal FromExchangeQuantity(Symbol symbol, SharedOrderQuantity? quantity)
             => quantity?.QuantityInBaseAsset ?? 0m;
 
+        /// <summary>
+        /// Prüft ob die Exchange für dieses SharedOrderQuantity-Objekt tatsächlich einen Wert geliefert
+        /// hat (im Unterschied zu einer echten, gemeldeten Menge von 0). Wird an Stellen benötigt, die
+        /// ursprünglich per Null-Coalescing (?. ... ?? Fallback) nur bei FEHLENDEM Wert auf einen Fallback
+        /// (meist OriginalQuantity) zurückfielen, nicht bei einer echten 0-Meldung. FromExchangeQuantity
+        /// allein kann das nicht unterscheiden (liefert in beiden Fällen 0m), daher dieser separate Hook.
+        /// Default prüft QuantityInBaseAsset.HasValue. Exchanges mit Contract-Notation (z.B. OKX)
+        /// überschreiben dies auf QuantityInContracts.HasValue.
+        /// </summary>
+        protected virtual bool HasExchangeQuantity(SharedOrderQuantity? quantity)
+            => quantity?.QuantityInBaseAsset.HasValue == true;
+
         #endregion
 
         #region State Machine Models
@@ -597,9 +609,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                 if (brokerOrder.Status == SharedOrderStatus.Filled)
                 {
-                    var finalFillAbsQty = FromExchangeQuantity(order.Symbol, brokerOrder.QuantityFilled);
-                    if (finalFillAbsQty == 0m)
-                        finalFillAbsQty = Math.Abs(removedState.OriginalQuantity);
+                    var finalFillAbsQty = HasExchangeQuantity(brokerOrder.QuantityFilled)
+                        ? FromExchangeQuantity(order.Symbol, brokerOrder.QuantityFilled)
+                        : Math.Abs(removedState.OriginalQuantity);
 
                     var sign = removedState.OriginalQuantity > 0 ? 1m : -1m;
                     var finalSignedFillQty = finalFillAbsQty * sign;
@@ -963,9 +975,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     else if (_orderStateManager.TryGetByExchangeId(o.OrderId, out var fillState))
                     {
                         var sign = fillState.OriginalQuantity > 0 ? 1m : -1m;
-                        var reportedFilled = FromExchangeQuantity(fillState.Order.Symbol, o.QuantityFilled);
-                        var absFilled = reportedFilled > 0m
-                            ? reportedFilled
+                        var absFilled = HasExchangeQuantity(o.QuantityFilled)
+                            ? FromExchangeQuantity(fillState.Order.Symbol, o.QuantityFilled)
                             : (o.Status == SharedOrderStatus.Filled ? Math.Abs(fillState.OriginalQuantity) : 0m);
                         var targetSignedFilled = absFilled * sign;
                         var signedFill = targetSignedFilled - fillState.FilledQuantity;
@@ -1105,9 +1116,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         // CASE 1: FILLED
                         if (brokerOrder.Status == SharedOrderStatus.Filled)
                         {
-                            var finalFillAbsQty = FromExchangeQuantity(state.Order.Symbol, brokerOrder.QuantityFilled);
-                            if (finalFillAbsQty == 0m)
-                                finalFillAbsQty = Math.Abs(removedState.OriginalQuantity);
+                            var finalFillAbsQty = HasExchangeQuantity(brokerOrder.QuantityFilled)
+                                ? FromExchangeQuantity(state.Order.Symbol, brokerOrder.QuantityFilled)
+                                : Math.Abs(removedState.OriginalQuantity);
 
                             var finalSignedFillQty = finalFillAbsQty * (removedState.OriginalQuantity > 0 ? 1m : -1m);
                             var remainingToFill = finalSignedFillQty - removedState.FilledQuantity;

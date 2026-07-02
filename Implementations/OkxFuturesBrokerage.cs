@@ -365,6 +365,15 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             return contracts * ctVal;
         }
 
+        /// <summary>
+        /// OKX befüllt ausschließlich QuantityInContracts (nie QuantityInBaseAsset). Der Default-Hook
+        /// der Basisklasse prüft QuantityInBaseAsset.HasValue und würde bei OKX daher IMMER false
+        /// liefern — was fälschlich jeden Fill-Wert auf den OriginalQuantity-Fallback umleiten würde
+        /// (der ursprüngliche Bug, den wir hier gerade beheben). Deshalb Override auf Contracts-Feld.
+        /// </summary>
+        protected override bool HasExchangeQuantity(SharedOrderQuantity? quantity)
+            => quantity?.QuantityInContracts.HasValue == true;
+
         #endregion
 
         // OKX has a dedicated funding-rate WebSocket channel (public, unauthenticated).
