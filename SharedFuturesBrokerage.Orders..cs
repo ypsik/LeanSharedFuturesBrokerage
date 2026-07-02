@@ -128,7 +128,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     FilledQuantity = filledQty,
                     BrokerId = o.OrderId,
                     ClientOrderId = o.ClientOrderId ?? string.Empty,
-                    State = order.Status == OrderStatus.PartiallyFilled ? OrderLifeCycleState.PartiallyFilled : OrderLifeCycleState.Open,
+                    State = order.Status == QuantConnect.Orders.OrderStatus.PartiallyFilled ? OrderLifeCycleState.PartiallyFilled : OrderLifeCycleState.Open,
                     LastUpdateUtc = DateTime.UtcNow
                 };
 
@@ -239,7 +239,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 //    - _statesByClientId[clientOrderId] bleibt unverändert
                 _orderStateManager.MapNewExchangeId(clientOrderId, res.Data.Id);
 
-                OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero) { Status = OrderStatus.Submitted });
+                OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero) { Status = QuantConnect.Orders.OrderStatus.Submitted });
             }
             // else: Socket hat Placing-State bereits umgebogen + Events gefeuert
 
@@ -271,7 +271,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                 OnOrderEvent(new OrderEvent(state.Order, DateTime.UtcNow, OrderFee.Zero)
                 {
-                    Status = OrderStatus.Canceled,
+                    Status = QuantConnect.Orders.OrderStatus.Canceled,
                     Message = "Cancel confirmed"
                 });
             }
@@ -565,7 +565,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         Log.Trace($"{Name}.ReconcileOrderImmediateAsync: Order {brokerId} confirmed FILLED. Emitting fill event.");
                         OnOrderEvent(new OrderEvent(removedState.Order, DateTime.UtcNow, OrderFee.Zero)
                         {
-                            Status = OrderStatus.Filled,
+                            Status = QuantConnect.Orders.OrderStatus.Filled,
                             FillPrice = brokerOrder.AveragePrice ?? 0,
                             FillQuantity = remainingToFill,
                             OrderFee = new OrderFee(new CashAmount(brokerOrder.Fee ?? 0, brokerOrder.FeeAsset ?? SettleAsset)),
@@ -578,7 +578,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     Log.Trace($"{Name}.ReconcileOrderImmediateAsync: Order {brokerId} confirmed CANCELED. Emitting cancel event.");
                     OnOrderEvent(new OrderEvent(removedState.Order, DateTime.UtcNow, OrderFee.Zero)
                     {
-                        Status = OrderStatus.Canceled,
+                        Status = QuantConnect.Orders.OrderStatus.Canceled,
                         Message = "Immediate Reconcile – Cancel"
                     });
                 }
@@ -706,10 +706,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 state.LastUpdateUtc = DateTime.UtcNow;
 
                 var leanStatus = Math.Abs(state.FilledQuantity) >= Math.Abs(state.OriginalQuantity)
-                    ? OrderStatus.Filled
-                    : OrderStatus.PartiallyFilled;
+                    ? QuantConnect.Orders.OrderStatus.Filled
+                    : QuantConnect.Orders.OrderStatus.PartiallyFilled;
 
-                state.State = leanStatus == OrderStatus.Filled ? OrderLifeCycleState.Filled : OrderLifeCycleState.PartiallyFilled;
+                state.State = leanStatus == QuantConnect.Orders.OrderStatus.Filled ? OrderLifeCycleState.Filled : OrderLifeCycleState.PartiallyFilled;
 
                 // Wenn der Trade die Order schließt, räumen wir ab.
                 // TryRemove bereinigt beide internen Dicts (_statesByClientId + _statesByExchangeId).
@@ -819,7 +819,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                     Log.Trace($"{Name}.HandleOrderSocket: Placing→Submitted for {o.OrderId} via socket. Fill (if any) follows via trade socket.");
 
-                    OnOrderEvent(new OrderEvent(placingCandidate.Order, DateTime.UtcNow, OrderFee.Zero) { Status = OrderStatus.Submitted });
+                    OnOrderEvent(new OrderEvent(placingCandidate.Order, DateTime.UtcNow, OrderFee.Zero) { Status = QuantConnect.Orders.OrderStatus.Submitted });
                     continue;
                 }
 
@@ -870,7 +870,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         {
                             OnOrderEvent(new OrderEvent(existingState.Order, DateTime.UtcNow, OrderFee.Zero)
                             {
-                                Status = OrderStatus.UpdateSubmitted,
+                                Status = QuantConnect.Orders.OrderStatus.UpdateSubmitted,
                                 Message = "Order modified"
                             });
                         }
@@ -923,10 +923,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                             fillState.LastUpdateUtc = DateTime.UtcNow;
 
                             var leanStatus = Math.Abs(fillState.FilledQuantity) >= Math.Abs(fillState.OriginalQuantity) || o.Status == SharedOrderStatus.Filled
-                                ? OrderStatus.Filled
-                                : OrderStatus.PartiallyFilled;
+                                ? QuantConnect.Orders.OrderStatus.Filled
+                                : QuantConnect.Orders.OrderStatus.PartiallyFilled;
 
-                            fillState.State = leanStatus == OrderStatus.Filled ? OrderLifeCycleState.Filled : OrderLifeCycleState.PartiallyFilled;
+                            fillState.State = leanStatus == QuantConnect.Orders.OrderStatus.Filled ? OrderLifeCycleState.Filled : OrderLifeCycleState.PartiallyFilled;
 
                             if (fillState.IsClosed)
                             {
@@ -941,7 +941,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                                 Message = "Order socket stream (Execution fallback)"
                             });
 
-                            if (leanStatus == OrderStatus.Filled)
+                            if (leanStatus == QuantConnect.Orders.OrderStatus.Filled)
                             {
                                 continue;
                             }
@@ -965,7 +965,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     var absFilled = o.QuantityFilled?.QuantityInBaseAsset ?? 0m;
                     var leanStatus = MapStatus(o.Status, absFilled);
 
-                    if (leanStatus is OrderStatus.Canceled or OrderStatus.Invalid)
+                    if (leanStatus is QuantConnect.Orders.OrderStatus.Canceled or QuantConnect.Orders.OrderStatus.Invalid)
                     {
                         if (state.IsUpdatePending)
                         {
@@ -983,7 +983,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                             Message = "Order socket update"
                         });
                     }
-                    else if (leanStatus == OrderStatus.Submitted) // SharedOrderStatus.Open ohne Fill
+                    else if (leanStatus == QuantConnect.Orders.OrderStatus.Submitted) // SharedOrderStatus.Open ohne Fill
                     {
                         state.State = OrderLifeCycleState.Open;
                     }
@@ -1062,7 +1062,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                                 OnOrderEvent(new OrderEvent(removedState.Order, DateTime.UtcNow, OrderFee.Zero)
                                 {
-                                    Status = OrderStatus.Filled,
+                                    Status = QuantConnect.Orders.OrderStatus.Filled,
                                     FillPrice = brokerOrder.AveragePrice ?? 0,
                                     FillQuantity = remainingToFill,
                                     OrderFee = new OrderFee(new CashAmount(remainingFee, brokerOrder.FeeAsset ?? SettleAsset)),
@@ -1084,7 +1084,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         {
                             OnOrderEvent(new OrderEvent(removedState.Order, DateTime.UtcNow, OrderFee.Zero)
                             {
-                                Status = OrderStatus.Canceled,
+                                Status = QuantConnect.Orders.OrderStatus.Canceled,
                                 Message = $"Order {brokerOrder.OrderId} reconciled cancel"
                             });
                         }
@@ -1117,16 +1117,16 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             return new SharedSymbol(TradingMode.PerpetualLinear, baseAsset, quoteAsset);
         }
 
-        private OrderStatus MapStatus(SharedOrderStatus status, decimal filled)
+        private QuantConnect.Orders.OrderStatus MapStatus(SharedOrderStatus status, decimal filled)
         {
             if (status == SharedOrderStatus.Open)
-                return filled > 0 ? OrderStatus.PartiallyFilled : OrderStatus.Submitted;
+                return filled > 0 ? QuantConnect.Orders.OrderStatus.PartiallyFilled : QuantConnect.Orders.OrderStatus.Submitted;
 
             return status switch
             {
-                SharedOrderStatus.Filled => OrderStatus.Filled,
-                SharedOrderStatus.Canceled => OrderStatus.Canceled,
-                _ => OrderStatus.None
+                SharedOrderStatus.Filled => QuantConnect.Orders.OrderStatus.Filled,
+                SharedOrderStatus.Canceled => QuantConnect.Orders.OrderStatus.Canceled,
+                _ => QuantConnect.Orders.OrderStatus.None
             };
         }
 
