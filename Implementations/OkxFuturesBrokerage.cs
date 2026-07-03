@@ -37,6 +37,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         private readonly SymbolRuleType? _ruleTypeFilter;
         protected override int? FundingRolloverHours => null;
 
+        protected override SharedMarginMode? SharedMarginMode => CryptoExchange.Net.SharedApis.SharedMarginMode.Cross;
+
+
         internal OkxFuturesBrokerage(
             IAlgorithm algorithm,
             OKXRestClient restClient,
@@ -424,6 +427,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             {
                 new CashAmount(balance, SettleAsset)
             };
+        }
+
+        protected override string GenerateClientId(int _)
+        {
+            return (_restClient.UnifiedApi.SharedClient as IFuturesOrderRestClient).GenerateClientOrderId();
         }
 
         // OKX AmendOrder is in-place: same order ID is kept after the amendment.
