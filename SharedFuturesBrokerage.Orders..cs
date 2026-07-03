@@ -125,10 +125,20 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         protected virtual ExchangeParameters OpenOrdersExchangeParameters => new ExchangeParameters();
 
+        /// <summary>
+        /// Überschreiben um für GetOpenOrders/ReconcileLoop einen expliziten TradingMode zu erzwingen,
+        /// statt den Shared-Client-Default (PerpetualLinear → i.d.R. Swap-Instrumente) zu nutzen.
+        /// Relevant für Exchanges, bei denen der Shared-Client anhand von TradingMode.IsPerpetual()
+        /// zwischen unterschiedlichen Instrument-Kategorien verzweigt (z.B. OKX: Swap vs. Futures),
+        /// und der Default-Zweig für bestimmte Instrumente falsch ist (z.B. OKX X-Perp läuft nativ
+        /// unter InstrumentType.Futures, obwohl wirtschaftlich ein Perpetual).
+        /// </summary>
+        protected virtual TradingMode? OpenOrdersTradingMode => null;
+
         public override List<Order> GetOpenOrders()
         {
             var res = RunSync(() => _orderClient.GetOpenFuturesOrdersAsync(
-                new GetOpenOrdersRequest(exchangeParameters: OpenOrdersExchangeParameters)));
+                new GetOpenOrdersRequest(tradingMode: OpenOrdersTradingMode, exchangeParameters: OpenOrdersExchangeParameters)));
 
             if (!res.Success || res.Data == null) return new List<Order>();
 
@@ -233,7 +243,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 Price = (order as LimitOrder)?.LimitPrice,
                 ClientOrderId = clientOrderId,
                 ExchangeParameters = PlaceFuturesOrderExchangeParameters,
-                PositionSide = SharedPositionSide, 
+                PositionSide = SharedPositionSide,
                 MarginMode = SharedMarginMode
             };
 
@@ -854,7 +864,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                           $"ClientOrderId='{o.ClientOrderId}', " +
                           $"Symbol='{o.Symbol}', " +
                           $"Status='{o.Status}', " +
-                          $"Qty='{o.OrderQuantity?.QuantityInBaseAsset}', " +
+                          $"Qty='{o.OrderQuantity?.QuantityInBaseAsset ?? o.OrderQuantity?.QuantityInContracts}', " +
                           $"Price='{o.OrderPrice}'" +
                           (!ExchangeSupportsUserTradeStream
                               ? $", Fee='{o.Fee}', FeeAsset='{o.FeeAsset}', AvgPrice='{o.AveragePrice}', LastTradeFee='{o.LastTrade?.Fee}'"
@@ -1068,7 +1078,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     await Task.Delay(_reconciliationInterval, ct).ConfigureAwait(false);
 
                     var openRes = await _orderClient.GetOpenFuturesOrdersAsync(
-                        new GetOpenOrdersRequest(exchangeParameters: OpenOrdersExchangeParameters)
+                        new GetOpenOrdersRequest(tradingMode: OpenOrdersTradingMode, exchangeParameters: OpenOrdersExchangeParameters)
                     ).ConfigureAwait(false);
 
                     if (!openRes.Success || openRes.Data == null)

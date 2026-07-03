@@ -319,6 +319,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         #endregion
 
+        protected override TradingMode? OpenOrdersTradingMode =>
+            _instrumentType == InstrumentType.Futures ? TradingMode.DeliveryLinear : TradingMode.PerpetualLinear;
+
         #region Contract Quantity Conversion
 
         /// <summary>
