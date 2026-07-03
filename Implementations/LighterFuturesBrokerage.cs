@@ -241,7 +241,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             if (!res.Success || res.Data == null)
             {
                 Log.Error($"Cash {res.Error?.Message}");
-                return new List<CashAmount> { new CashAmount(0m, SettleAsset) };
+                return [new CashAmount(0m, SettleAsset)];
             }
 
             var accountIndex = _restClient.ExchangeApi.ApiCredentials?.Credential.AccountIndex;
@@ -258,7 +258,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             // TotalAssetValue oder Assets[].MarginBalance minus Sum(Positions[].UnrealizedPnl).
             // Gegen Kraken-TotalPortfolioValue-Vorfall macht das eine Live/Testnet-Verifikation
             // vor Produktivbetrieb noetig.
-            return new List<CashAmount> { new CashAmount(account.CrossAssetValue, SettleAsset) };
+            return [new CashAmount(account.CrossAssetValue, SettleAsset)];
         }
 
         // Das hier ist NUR die Funding-RATE (fuer SPDB/Strategie), nicht die tatsaechliche

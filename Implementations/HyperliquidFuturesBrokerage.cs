@@ -155,8 +155,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         private void PopulateSPDB()
         {
-            // --- Populate SPDB with all live HL assets ---
-            var result = RunSync(() => _restClient.FuturesApi.ExchangeData.GetExchangeInfoAsync());
+            // --- Populate SPDB mit allen live HL Assets, über alle Dexs (Main + HIP-3) ---
+            var result = RunSync(() => _restClient.FuturesApi.ExchangeData.GetExchangeInfoAllDexesAsync());
 
             if (!result.Success)
                 throw new Exception($"Failed to load Hyperliquid assets: {result.Error}");
@@ -164,46 +164,95 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             // WICHTIG: Die Summe aus szDecimals und pxDecimals ist bei HL Perps 5!
             const int HL_SUM_DECIMALS = 5;
 
-            foreach (var symbol in result.Data.Where(s => !s.IsDelisted))
+            foreach (var dexInfo in result.Data)
             {
-                var ticker = symbol.Name + SettleAsset;
+                bool isMainDex = dexInfo.Name == "default";
 
-                var lotSize = (decimal)Math.Pow(10, -symbol.QuantityDecimals);
+                foreach (var symbol in dexInfo.Symbols.Where(s => !s.IsDelisted))
+                {
+                    // HIP-3 liefert symbol.Name bereits im Format "xyz:GOLD" (Dex-Prefix inklusive)
+                    var coin = symbol.Name.Contains(':') ? symbol.Name.Split(':')[1] : symbol.Name;
 
-                var priceDecimals = HL_SUM_DECIMALS - symbol.QuantityDecimals;
+                    // LEAN-Ticker: Main-Dex wie bisher "BTCUSDC", HIP-3 als "xyz.goldusdc"
+                    // (Punkt-Trennzeichen konsistent mit dem Downloader-Schema)
+                    var ticker = isMainDex
+                        ? coin + SettleAsset
+                        : $"{dexInfo.Name.ToLower()}.{coin}{SettleAsset}".ToLower();
 
-                decimal tickSize;
+                    var lotSize = (decimal)Math.Pow(10, -symbol.QuantityDecimals);
 
-                if (priceDecimals >= 0)
-                    tickSize = (decimal)Math.Pow(10, -priceDecimals);
-                else
-                    tickSize = 1m;
+                    var priceDecimals = HL_SUM_DECIMALS - symbol.QuantityDecimals;
 
-                var symbolProperties = new SymbolProperties(
-                    description: $"Hyperliquid {symbol.Name} Perpetual",
-                    quoteCurrency: SettleAsset,
-                    contractMultiplier: 1m,
-                    minimumPriceVariation: tickSize,
-                    lotSize: lotSize,
-                    marketTicker: symbol.Name
-                );
+                    decimal tickSize;
 
-                _spdb.SetEntry(Name, ticker, SecurityType.Crypto, symbolProperties);
-                _spdb.SetEntry(Name, ticker, SecurityType.CryptoFuture, symbolProperties);
+                    if (priceDecimals >= 0)
+                        tickSize = (decimal)Math.Pow(10, -priceDecimals);
+                    else
+                        tickSize = 1m;
+
+                    var symbolProperties = new SymbolProperties(
+                        description: $"Hyperliquid {symbol.Name} Perpetual",
+                        quoteCurrency: SettleAsset,
+                        contractMultiplier: 1m,
+                        minimumPriceVariation: tickSize,
+                        lotSize: lotSize,
+                        // symbol.Name ist bereits im korrekten API-Format ("BTC" bzw. "xyz:GOLD")
+                        // und dient als Quelle der Wahrheit für NativeTicker(), statt aus dem
+                        // LEAN-Ticker-String zurückzuparsen.
+                        marketTicker: symbol.Name
+                    );
+
+                    _spdb.SetEntry(Name, ticker, SecurityType.Crypto, symbolProperties);
+                    _spdb.SetEntry(Name, ticker, SecurityType.CryptoFuture, symbolProperties);
+                }
             }
         }
 
         #region Symbol Mapping
         protected override string NormalizeSymbol(string rawSymbol)
         {
+            if (rawSymbol.Contains(':'))
+            {
+                var parts = rawSymbol.Split(':', 2);
+                var dex = parts[0].ToLowerInvariant();
+                var coin = parts[1];
+                return $"{dex}.{coin}{SettleAsset}".ToLowerInvariant();
+            }
+
             var upper = rawSymbol.ToUpperInvariant();
             return upper.EndsWith(SettleAsset) ? upper : upper + SettleAsset;
         }
 
         protected override string NativeTicker(Symbol symbol)
         {
+            // MarketTicker aus dem SPDB ist die Quelle der Wahrheit (von PopulateSPDB befüllt) —
+            // liefert für Main-Dex z.B. "BTC", für HIP-3 z.B. "xyz:GOLD". Kein String-Parsing
+            // auf Basis von Ticker-Suffixen (Base Asset ist nicht immer USDC bei HIP-3).
+            var props = _spdb.GetSymbolProperties(symbol.ID.Market, symbol, symbol.SecurityType, SettleAsset);
+            if (props?.MarketTicker != null)
+                return props.MarketTicker;
+
+            // Fallback nur falls kein SPDB-Eintrag existiert (sollte nicht vorkommen)
             CurrencyPairUtil.DecomposeCurrencyPair(symbol, out var baseAsset, out _);
             return baseAsset;
+        }
+
+        /// <summary>
+        /// Überschreibt die Basis-Implementierung, die via DecomposeCurrencyPair aus dem
+        /// LEAN-Ticker-String Base/Quote ableitet — das schlägt bei HIP-3-Tickern wie
+        /// "xyz.goldusdc" fehl (Punkt-Trennzeichen, kein Standard-Format).
+        /// SymbolName überschreibt in SharedSymbol.GetSymbol() die formatierte Base/Quote-
+        /// Kombination und liefert direkt NativeTicker() (bereits korrekt via SPDB aufgelöst,
+        /// z.B. "BTC" bzw. "xyz:GOLD"). BaseAsset/QuoteAsset bleiben als grobe Platzhalter für
+        /// generische Zwecke (z.B. Anzeige) gesetzt, werden aber für die tatsächliche
+        /// Symbol-Formatierung nicht mehr herangezogen.
+        /// </summary>
+        protected override SharedSymbol GetSharedSymbol(Symbol s)
+        {
+            var nativeTicker = NativeTicker(s);
+            var baseAsset = nativeTicker.Contains(':') ? nativeTicker.Split(':')[1] : nativeTicker;
+
+            return new SharedSymbol(TradingMode.PerpetualLinear, baseAsset, SettleAsset, nativeTicker);
         }
 
         #endregion
@@ -368,7 +417,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         protected override async Task<HttpResult<SharedId>> ExecutePlaceOrderAsync(PlaceFuturesOrderRequest request)
         {
             var res = await _socketClient.FuturesApi.Trading.PlaceOrderAsync(
-                symbol: request.Symbol.BaseAsset,
+                symbol: request.Symbol.SymbolName ?? request.Symbol.BaseAsset,
                 side: request.Side == SharedOrderSide.Buy ? OrderSide.Buy : OrderSide.Sell,
                 orderType: request.OrderType == SharedOrderType.Limit ? HyperLiquid.Net.Enums.OrderType.Limit : HyperLiquid.Net.Enums.OrderType.Market,
                 quantity: request.Quantity?.QuantityInBaseAsset ?? 0m,
@@ -385,7 +434,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
                 return new HttpResult<SharedId>(Name, null, res.Error);
             }
-            
+
             return res.Success
                 ? new HttpResult<SharedId>(Name, new SharedId(res.Data.OrderId.ToString()), null)
                 : new HttpResult<SharedId>(Name, null, res.Error);
@@ -434,7 +483,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         protected override async Task<HttpResult<SharedId>> ExecuteCancelOrderAsync(CxCancelOrderRequest request)
         {
             var res = await _restClient.FuturesApi.Trading.CancelOrderAsync(
-                symbol: request.Symbol.BaseAsset,
+                symbol: request.Symbol.SymbolName ?? request.Symbol.BaseAsset,
                 orderId: long.Parse(request.OrderId),
                 vaultAddress: _vaultAdress);
 
