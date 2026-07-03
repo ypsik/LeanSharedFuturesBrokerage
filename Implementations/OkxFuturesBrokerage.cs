@@ -37,8 +37,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         private readonly SymbolRuleType? _ruleTypeFilter;
         protected override int? FundingRolloverHours => null;
 
-        protected override SharedMarginMode? SharedMarginMode => CryptoExchange.Net.SharedApis.SharedMarginMode.Cross;
-
         internal OkxFuturesBrokerage(
             IAlgorithm algorithm,
             OKXRestClient restClient,
@@ -228,12 +226,20 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 // settleCcy is the margin/settlement asset for FUTURES/SWAP (e.g. "USD", "USDT").
                 var contractMultiplier = symbol.ContractValue ?? 1m;
 
+                // FIX: OKX liefert lotSz/minSz in Contracts, nicht in Base-Asset-Einheiten (z.B. HYPE
+                // lotSz=1 bedeutet 1 Contract = 0.1 HYPE bei ctVal=0.1). LEANs interne Order-Validierung
+                // vergleicht order.Quantity (Base-Asset) direkt gegen SymbolProperties.LotSize, daher muss
+                // LotSize hier in Base-Asset-Einheiten stehen (lotSz * ctVal), konsistent mit allen anderen
+                // Exchanges (dort ist ContractMultiplier=1, also unverändert). ToExchangeQuantity() rechnet
+                // das für den eigentlichen Order-Placement-Call wieder zurück in Contracts.
+                var baseLotSize = lotSize * contractMultiplier;
+
                 var symbolProperties = new SymbolProperties(
                     description: $"OKX {baseAsset} {_instrumentType}",
                     quoteCurrency: quoteAsset,
                     contractMultiplier: contractMultiplier,
                     minimumPriceVariation: tickSize,
-                    lotSize: lotSize,
+                    lotSize: baseLotSize,
                     marketTicker: symbol.Symbol    // full native instId, e.g. "ETH-USD-310404"
                 );
 
@@ -338,15 +344,20 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         {
             var ctVal = GetContractMultiplier(symbol);
             var props = _spdb.GetSymbolProperties(Name, symbol, SecurityType.CryptoFuture, SettleAsset);
-            var lotSize = props?.LotSize ?? 1m;
-            if (lotSize <= 0m) lotSize = 1m;
+
+            // props.LotSize liegt seit dem SPDB-Fix in Base-Asset-Einheiten vor (lotSz * ctVal),
+            // für die Contract-Rundung hier brauchen wir aber den nativen OKX-Lot-Step in Contracts
+            // zurück: contractLotStep = baseLotSize / ctVal (ergibt wieder den rohen lotSz-Wert).
+            var baseLotSize = props?.LotSize ?? ctVal;
+            var contractLotStep = baseLotSize / ctVal;
+            if (contractLotStep <= 0m) contractLotStep = 1m;
 
             var rawContracts = absBaseQuantity / ctVal;
 
             // Ceiling auf den gültigen Contract-Lot-Step.
-            var steppedContracts = Math.Ceiling(rawContracts / lotSize) * lotSize;
+            var steppedContracts = Math.Ceiling(rawContracts / contractLotStep) * contractLotStep;
             if (steppedContracts <= 0m)
-                steppedContracts = lotSize; // Minimum: 1 Lot, nie 0 senden
+                steppedContracts = contractLotStep; // Minimum: 1 Lot, nie 0 senden
 
             roundedBaseQuantity = steppedContracts * ctVal;
 
