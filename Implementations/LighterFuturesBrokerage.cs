@@ -71,7 +71,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 socketClient.ExchangeApi.SharedClient,
                 socketClient.ExchangeApi.SharedClient,
                 socketClient.ExchangeApi.SharedClient,
-                null, //restClient.ExchangeApi.SharedClient,
+                restClient.ExchangeApi.SharedClient,
                 restClient.ExchangeApi.SharedClient,
                 aggregator,
                 getHoldingsFunc);
@@ -109,7 +109,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 _socketClient.ExchangeApi.SharedClient,
                 _socketClient.ExchangeApi.SharedClient,
                 _socketClient.ExchangeApi.SharedClient,
-                null, // _restClient.ExchangeApi.SharedClient,
+                _restClient.ExchangeApi.SharedClient,
                 _restClient.ExchangeApi.SharedClient,
                 aggregator
             );
@@ -126,7 +126,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 return null;
 
             return new LighterCredentials(
-                publicAddress,
+                EthKey.FromPublicKey(publicAddress),
                 long.Parse(accountIndexStr ?? "0"),
                 int.Parse(apiKeyIndexStr ?? "0"),
                 secret);

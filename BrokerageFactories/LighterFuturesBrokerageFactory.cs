@@ -112,7 +112,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
             if (errors.Any())
                 throw new ArgumentException(string.Join(Environment.NewLine, errors));
 
-            var credentials = new LighterCredentials(publicAddress, accountIndex, apiKeyIndex, secret);
+            var credentials = new LighterCredentials(EthKey.FromPublicKey(publicAddress), accountIndex, apiKeyIndex, secret);
 
             var restClient = new LighterRestClient(options =>
             {
