@@ -8,6 +8,7 @@ using QuantConnect.Logging;
 using QuantConnect.Securities;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 
 namespace SilverQuant.Lean.Brokerages.Futures.Shared
@@ -39,7 +40,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             }
             else if (res.Data != null)
             {
-                return res.Data.Where(f=>f.PositionSize != 0).Select(p =>
+                return res.Data.Where(f => f.PositionSize != 0).Select(p =>
                 {
                     var ticker = NormalizeSymbol(p.Symbol);
                     var security = _algorithm.Securities.Values
@@ -48,7 +49,16 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                     var symbol = security?.Symbol ?? Symbol.Create(ticker, SecurityType.CryptoFuture, Name);
 
-                    var quantity = p.PositionSize;
+                    // FIX: PositionSize liegt bei Exchanges mit Contract-Notation (z.B. OKX) in Contracts
+                    // vor, nicht in Base-Asset-Einheiten. Wir verpacken den rohen Wert in BEIDE Felder
+                    // (BaseAsset und Contracts) und lassen das bereits vorhandene, pro Exchange korrekt
+                    // überschriebene FromExchangeQuantity entscheiden, welches Feld tatsächlich gilt —
+                    // Default-Exchanges lesen QuantityInBaseAsset (No-Op), OKX liest QuantityInContracts
+                    // und rechnet via ContractMultiplier (ctVal) um. Ohne diese Umrechnung war Quantity
+                    // um den Faktor ContractMultiplier verzerrt (z.B. XAU: 50 Contracts statt 0.05 XAU),
+                    // was LEANs intern berechnetes UnrealizedProfit massiv verfälscht hat.
+                    var rawPositionQuantity = new SharedOrderQuantity(baseAssetQuantity: p.PositionSize, contractQuantity: p.PositionSize);
+                    var quantity = FromExchangeQuantity(symbol, rawPositionQuantity);
                     if (p.PositionSide == CryptoExchange.Net.SharedApis.SharedPositionSide.Short)
                     {
                         quantity *= -1;
