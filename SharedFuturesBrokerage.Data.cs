@@ -249,7 +249,24 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             foreach (var symbol in symbols)
             {
                 var shared = GetSharedSymbol(symbol);
-                var subKey = $"{NativeTicker(symbol)}_{tickType.ToString()}";
+
+                // FIX: NativeTicker() kann für Symbole werfen, die nicht in unserer SPDB stehen
+                // (z.B. LEANs automatische Cross-Currency-Cash-Konvertierungs-Subscriptions wie
+                // XAUEUR/USDCEUR, die durch AccountCurrency-Umstellungen entstehen und nichts mit
+                // unseren tatsächlich gehandelten Instrumenten zu tun haben). Ohne diesen Schutz
+                // crasht ein einzelnes unbekanntes Symbol die gesamte Subscription-Runde und damit
+                // den kompletten Live-Algorithmus. Wir überspringen daher nur dieses eine Symbol.
+                string subKey;
+                try
+                {
+                    subKey = $"{NativeTicker(symbol)}_{tickType.ToString()}";
+                }
+                catch (Exception ex)
+                {
+                    Log.Trace($"{Name}.SubscribeSymbols: Skipping {symbol.Value} ({tickType}) — NativeTicker lookup failed: {ex.Message}");
+                    continue;
+                }
+
                 if (_subscriptions.ContainsKey(subKey)) continue;
 
                 _subRateGate.WaitToProceed();
