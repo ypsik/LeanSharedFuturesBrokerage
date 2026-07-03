@@ -445,9 +445,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             decimal? newContractQuantity = null;
             if (quantity.HasValue)
             {
-                ToExchangeQuantity(order.Symbol, Math.Abs(quantity.Value), out var roundedBaseQty);
-                var ctVal = GetContractMultiplier(order.Symbol);
-                newContractQuantity = roundedBaseQty / ctVal;
+                var sharedQty = ToExchangeQuantity(order.Symbol, Math.Abs(quantity.Value), out _);
+                newContractQuantity = sharedQty.QuantityInContracts;
             }
 
             var res = await _restClient.UnifiedApi.Trading.AmendOrderAsync(
