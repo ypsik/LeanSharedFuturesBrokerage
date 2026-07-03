@@ -20,6 +20,29 @@ using System.Threading.Tasks;
 
 namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 {
+    /// <summary>
+    /// Erweitert SymbolProperties um ContractValue (OKX ctVal), getrennt von ContractMultiplier.
+    /// ContractMultiplier bleibt fest 1m, da LEAN dieses Feld intern für eigene PnL-/Notional-
+    /// Berechnungen nutzt (siehe SecurityHolding.UnrealizedProfit, CryptoFutureHolding.GetQuantityValue)
+    /// und dort davon ausgeht, dass Quantity × ContractMultiplier den korrekten Notional-Wert ergibt.
+    /// Da wir Quantity über die gesamte Order-/Holdings-Kette hinweg bereits durchgängig auf Base-Asset-
+    /// Einheiten normalisieren (nicht Contracts), würde ein ContractMultiplier=ctVal hier zu falschem,
+    /// eingefrorenem UnrealizedProfit führen (Quantity wird effektiv doppelt herunterskaliert).
+    /// ContractValue (ctVal) wird stattdessen separat gespeichert, ausschließlich für unsere eigene
+    /// Contract↔Base-Umrechnung beim OKX-API-Call (ToExchangeQuantity/FromExchangeQuantity).
+    /// </summary>
+    public class OkxSymbolProperties : SymbolProperties
+    {
+        public decimal ContractValue { get; }
+
+        public OkxSymbolProperties(string description, string quoteCurrency, decimal minimumPriceVariation,
+            decimal lotSize, string marketTicker, decimal contractValue)
+            : base(description, quoteCurrency, 1m, minimumPriceVariation, lotSize, marketTicker)
+        {
+            ContractValue = contractValue;
+        }
+    }
+
     public class OkxFuturesBrokerage : SharedFuturesBrokerage
     {
         private OKXRestClient _restClient;
@@ -237,13 +260,19 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 // das für den eigentlichen Order-Placement-Call wieder zurück in Contracts.
                 var baseLotSize = lotSize * contractMultiplier;
 
-                var symbolProperties = new SymbolProperties(
+                // FIX: ContractMultiplier bleibt fest 1m (siehe OkxSymbolProperties-Doku oben) — LEAN
+                // nutzt dieses Feld selbst für PnL/Notional-Berechnungen und erwartet dort Quantity
+                // bereits in der Einheit, die zusammen mit ContractMultiplier den korrekten Notional
+                // ergibt. Da wir Quantity durchgängig auf Base-Asset normalisieren, muss der Multiplier
+                // dafür 1 sein. ctVal (contractMultiplier) wird stattdessen separat als ContractValue
+                // gespeichert, ausschließlich für unsere eigene Contract-Umrechnung.
+                var symbolProperties = new OkxSymbolProperties(
                     description: $"OKX {baseAsset} {_instrumentType}",
                     quoteCurrency: quoteAsset,
-                    contractMultiplier: contractMultiplier,
                     minimumPriceVariation: tickSize,
                     lotSize: baseLotSize,
-                    marketTicker: symbol.Symbol    // full native instId, e.g. "ETH-USD-310404"
+                    marketTicker: symbol.Symbol,   // full native instId, e.g. "ETH-USD-310404"
+                    contractValue: contractMultiplier
                 );
 
                 _spdb.SetEntry(Name, ticker, SecurityType.CryptoFuture, symbolProperties);
@@ -332,8 +361,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         /// </summary>
         private decimal GetContractMultiplier(Symbol symbol)
         {
-            var props = _spdb.GetSymbolProperties(Name, symbol, SecurityType.CryptoFuture, SettleAsset);
-            var multiplier = props?.ContractMultiplier ?? 1m;
+            var props = _spdb.GetSymbolProperties(Name, symbol, SecurityType.CryptoFuture, SettleAsset) as OkxSymbolProperties;
+            var multiplier = props?.ContractValue ?? 1m;
             return multiplier > 0m ? multiplier : 1m;
         }
 
