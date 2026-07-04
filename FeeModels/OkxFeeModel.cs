@@ -11,7 +11,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.FeeModels
     {
         public override OrderFee GetOrderFee(OrderFeeParameters parameters)
         {
-            decimal feeRate = parameters.Order.Type == OrderType.Limit ? 0.0002m : 0.0006m;
+            decimal feeRate = parameters.Order.Type == OrderType.Limit ? 0.0002m : 0.0005m;
 
             decimal tradeValue = parameters.Security.Price * Math.Abs(parameters.Order.Quantity);
             decimal feeAmount = tradeValue * feeRate;
