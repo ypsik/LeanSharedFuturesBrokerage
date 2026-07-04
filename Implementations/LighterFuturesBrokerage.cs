@@ -252,13 +252,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 return new List<CashAmount> { new CashAmount(0m, SettleAsset) };
             }
 
-            // OFFENE FRAGE - NICHT verifiziert, bitte vor Live-Einsatz gegenspiegeln:
-            // CrossAssetValue wird hier als Account-Equity inkl. UnrealizedPnl angenommen
-            // (Analogon zu HL's "MarginBalance - UnrealizedPnl"-Rechnung). Alternativen waeren
-            // TotalAssetValue oder Assets[].MarginBalance minus Sum(Positions[].UnrealizedPnl).
-            // Gegen Kraken-TotalPortfolioValue-Vorfall macht das eine Live/Testnet-Verifikation
-            // vor Produktivbetrieb noetig.
-            return [new CashAmount(account.CrossAssetValue, SettleAsset)];
+            return [new CashAmount(account.Assets?.Sum(x => x.MarginBalance) ?? 0m, SettleAsset)];
         }
 
         // Das hier ist NUR die Funding-RATE (fuer SPDB/Strategie), nicht die tatsaechliche
