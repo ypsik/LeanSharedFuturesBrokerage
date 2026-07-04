@@ -333,10 +333,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             var data = res?.Data?.FirstOrDefault();
             var cashBalance = (data?.UsdtEquity ?? 0) - (data?.UnrealizedProfitAndLoss ?? 0);
 
-            return new List<CashAmount>
-            {
+            return
+            [
                 new CashAmount(cashBalance, SettleAsset)
-            };
+            ];
         }
 
         protected override async Task<HttpResult<SharedId>> ExecuteUpdateOrderAsync(

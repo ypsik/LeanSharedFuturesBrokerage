@@ -11,9 +11,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.FeeModels
     {
         public override OrderFee GetOrderFee(OrderFeeParameters parameters)
         {
-            // Aster Standard-Gebühren: Maker = 0.00%, Taker = 0.04%
-            // Wir nehmen an: Limit-Orders sind Maker, Market-Orders sind Taker
-            decimal feeRate = parameters.Order.Type == OrderType.Limit ? 0.0000m : 0.0004m;
+            decimal feeRate = parameters.Order.Type == OrderType.Limit ? 0.0002m : 0.0005m;
 
             // Transaktionsvolumen berechnen (Preis * Menge)
             decimal tradeValue = parameters.Security.Price * Math.Abs(parameters.Order.Quantity);

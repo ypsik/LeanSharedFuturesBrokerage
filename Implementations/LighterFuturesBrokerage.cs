@@ -249,7 +249,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             if (account == null)
             {
                 Log.Error("Cash: account not found in accounts response");
-                return new List<CashAmount> { new CashAmount(0m, SettleAsset) };
+                return [new CashAmount(0m, SettleAsset)];
             }
 
             return [new CashAmount(account.Assets?.Sum(x => x.MarginBalance) ?? 0m, SettleAsset)];
