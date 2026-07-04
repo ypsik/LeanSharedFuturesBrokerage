@@ -272,6 +272,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 });
         }
 
+        protected override string GenerateClientId(int _)
+        {
+            return (_restClient.ExchangeApi.SharedClient as IFuturesOrderRestClient).GenerateClientOrderId();
+        }
+
+
         // Kein Override von ExecutePlaceOrderAsync / ExecuteCancelOrderAsync noetig:
         // Lighter's Shared-Client implementiert IFuturesOrderRestClient.PlaceFuturesOrderAsync bereits
         // korrekt fuer unser State-Machine-Pattern - er gibt die lokal generierte ClientOrderIndex als
