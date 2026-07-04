@@ -117,6 +117,9 @@ Populated dynamically at startup from each exchange's live instrument list (tick
 - Funding rates via a dedicated public funding-rate WebSocket channel, pushed every minute
 - `GetCashBalance()` returns `TotalEquity` minus `UnrealizedPnl`, same pattern as Kraken/Bybit/Hyperliquid
 - FUTURES native ticker resolution (canonical instId with date suffix, e.g. `ETH-USD-310404`) requires an SPDB lookup rather than a pure string transform (unlike Kraken); `NativeTicker()`, `NormalizeSymbol()`, and `PopulateSPDB()` must all derive the same ticker key for a given instrument, or the lookup fails with "native ticker not found in SPDB"
+- **Contract notation**: unlike every other exchange in this repo, OKX Futures/Swap order and position endpoints work exclusively in contracts (`sz`), not base-asset units — a "contract" is `ctVal` units of the underlying (e.g. 1 XAU contract = 0.001 XAU, 1 HYPE contract = 0.1 HYPE). `ctVal` is tracked internally via a small `OkxSymbolProperties : SymbolProperties` subclass (extra `ContractValue` field, separate from LEAN's own `ContractMultiplier`) and converted transparently at the boundary (`ToExchangeQuantity`/`FromExchangeQuantity`/`HasExchangeQuantity` overrides) — order placement, amendment, fills, open-orders, and account holdings all round-trip through base-asset units, so strategies and LEAN's own P&L/margin math never need to know contracts exist. Only the raw REST/WS payloads sent to and received from OKX are in contracts. `ContractMultiplier` itself is kept fixed at `1` since LEAN's internal `UnrealizedProfit`/`GetQuantityValue` formulas multiply by it directly and already receive base-asset quantities; setting it to `ctVal` there would double-apply the conversion and silently freeze/corrupt unrealized P&L.
+
+
 ## LEAN core bug: `IsCryptoCoinFuture`
 
 ### Background
