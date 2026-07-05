@@ -2,7 +2,7 @@
 
 Crypto futures (perpetuals) brokerage integrations for [QuantConnect LEAN](https://github.com/QuantConnect/Lean), built on a single shared base class instead of one independent plugin per exchange.
 
-All exchange clients are built on JKorf's `CryptoExchange.Net` ecosystem (`Bybit.Net`, `Bitget.Net`, `Aster.Net`, `HyperLiquid.Net`, `BingX.Net`, `Kraken.Net`, `OKX.Net`), which exposes a common "Shared" interface layer (`IFuturesOrderRestClient`, `IFuturesOrderSocketClient`, `IBookTickerSocketClient`, `ITradeSocketClient`, `IUserTradeSocketClient`, `IFundingRateRestClient`, `IKlineRestClient`, `IBalanceRestClient`). `SharedFuturesBrokerage` drives all exchanges through these shared interfaces, so order management, reconciliation, and funding-rate handling are implemented **once**, with per-exchange classes only overriding what's genuinely exchange-specific.
+All exchange clients are built on JKorf's `CryptoExchange.Net` ecosystem (`Bybit.Net`, `Bitget.Net`, `Aster.Net`, `HyperLiquid.Net`, `BingX.Net`, `Kraken.Net`, `OKX.Net`, `Lighter.Net`), which exposes a common "Shared" interface layer (`IFuturesOrderRestClient`, `IFuturesOrderSocketClient`, `IBookTickerSocketClient`, `ITradeSocketClient`, `IUserTradeSocketClient`, `IFundingRateRestClient`, `IKlineRestClient`, `IBalanceRestClient`). `SharedFuturesBrokerage` drives all exchanges through these shared interfaces, so order management, reconciliation, and funding-rate handling are implemented **once**, with per-exchange classes only overriding what's genuinely exchange-specific.
 
 ## Status
 
@@ -15,6 +15,7 @@ All exchange clients are built on JKorf's `CryptoExchange.Net` ecosystem (`Bybit
 | BingX | ✅ Live | ListenKey user stream, hedge mode, funding rate via polling loop (not socket) |
 | Kraken | ✅ Live | USD-quoted futures. Requires dirty fix for LEAN core bug. Described below |
 | OKX | ✅ Live | FUTURES (EU X-Perp) requires dirty fix for LEAN core bug (same as Kraken), described below. Only tested on EU accounts (FUTURES/X-Perp) — Global (SWAP) untested. |
+| Lighter | ✅ Live | ZK-L2 DEX perpetuals. |
 
 ## Architecture
 
@@ -119,6 +120,8 @@ Populated dynamically at startup from each exchange's live instrument list (tick
 - FUTURES native ticker resolution (canonical instId with date suffix, e.g. `ETH-USD-310404`) requires an SPDB lookup rather than a pure string transform (unlike Kraken); `NativeTicker()`, `NormalizeSymbol()`, and `PopulateSPDB()` must all derive the same ticker key for a given instrument, or the lookup fails with "native ticker not found in SPDB"
 - **Contract notation**: unlike every other exchange in this repo, OKX Futures/Swap order and position endpoints work exclusively in contracts (`sz`), not base-asset units — a "contract" is `ctVal` units of the underlying (e.g. 1 XAU contract = 0.001 XAU, 1 HYPE contract = 0.1 HYPE). `ctVal` is tracked internally via a small `OkxSymbolProperties : SymbolProperties` subclass (extra `ContractValue` field, separate from LEAN's own `ContractMultiplier`) and converted transparently at the boundary (`ToExchangeQuantity`/`FromExchangeQuantity`/`HasExchangeQuantity` overrides) — order placement, amendment, fills, open-orders, and account holdings all round-trip through base-asset units, so strategies and LEAN's own P&L/margin math never need to know contracts exist. Only the raw REST/WS payloads sent to and received from OKX are in contracts. `ContractMultiplier` itself is kept fixed at `1` since LEAN's internal `UnrealizedProfit`/`GetQuantityValue` formulas multiply by it directly and already receive base-asset quantities; setting it to `ctVal` there would double-apply the conversion and silently freeze/corrupt unrealized P&L.
 
+**Lighter**
+- ZK-L2 DEX perpetuals, integrated via JKorf's `Lighter.Net`
 
 ## LEAN core bug: `IsCryptoCoinFuture`
 
