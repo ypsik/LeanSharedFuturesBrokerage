@@ -212,7 +212,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
 
 
-        protected override string SettleAsset => "USD";
+        protected override string SettleAsset => "USDC";
 
         #region Symbol Mapping
 
