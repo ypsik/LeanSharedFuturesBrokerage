@@ -27,8 +27,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageModels
         // 2. Den Standard-Hebel (Buying Power) definieren
         public override IBuyingPowerModel GetBuyingPowerModel(Security security)
         {
-            // Setzt den Standard-Hebel für Hyperliquid (z.B. 20x)
-            return new SecurityMarginModel(20m);
+            return new SecurityMarginModel(10m);
         }
 
         // 3. Optionale Feineinstellungen (z.B. Settlement)

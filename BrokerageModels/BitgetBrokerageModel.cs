@@ -26,7 +26,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageModels
 
         public override IBuyingPowerModel GetBuyingPowerModel(Security security)
         {
-            return new SecurityMarginModel(20m);
+            return new SecurityMarginModel(10m);
         }
 
         // 3. Optionale Feineinstellungen (z.B. Settlement)
