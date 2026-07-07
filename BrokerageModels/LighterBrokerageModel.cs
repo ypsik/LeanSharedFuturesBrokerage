@@ -2,6 +2,7 @@
 using QuantConnect.Brokerages;
 using QuantConnect.Orders.Fees;
 using QuantConnect.Securities;
+using QuantConnect.Securities.CryptoFuture;
 using SilverQuant.Lean.Brokerages.Futures.Shared.FeeModels;
 using System;
 using System.Collections.Generic;
@@ -25,7 +26,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageModels
 
         public override IBuyingPowerModel GetBuyingPowerModel(Security security)
         {
-            return new SecurityMarginModel(10m);
+            return new CryptoFutureMarginModel(10m);
         }
 
         // 3. Optionale Feineinstellungen (z.B. Settlement)
