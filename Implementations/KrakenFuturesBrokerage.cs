@@ -30,16 +30,26 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
     /// erwartet Quantity × ContractMultiplier = Notional, unsere Quantity ist aber durchgängig
     /// Base-Asset). ContractSize wird separat gehalten, ausschließlich für die eigene
     /// Contract↔Base-Umrechnung beim Kraken-API-Call (ToExchangeQuantity/FromExchangeQuantity).
+    ///
+    /// ContractValueTradePrecision bestimmt zusätzlich die zulässige Rundungsgranularität der
+    /// Contract-Menge (Kraken-Feld "contractValueTradePrecision", verifiziert gegen die Live-
+    /// Instrument-Liste): z.B. 4 bei PF_XBTUSD (0.0001-Schritte, fraktionale Contracts erlaubt),
+    /// 0 bei PF_TRXUSD (nur ganze Contracts), -3 bei PF_PEPEUSD (nur 1000er-Schritte). Erfüllt
+    /// exakt die gleiche Rolle wie OKX' contractLotStep (dort aus dem expliziten lotSz-Feld
+    /// abgeleitet) — Kraken liefert stattdessen die Präzision als Dezimalstellen-Exponent statt
+    /// als eigenes Lot-Size-Feld.
     /// </summary>
     public class KrakenSymbolProperties : SymbolProperties
     {
         public decimal ContractSize { get; }
+        public int ContractValueTradePrecision { get; }
 
         public KrakenSymbolProperties(string description, string quoteCurrency, decimal minimumPriceVariation,
-            decimal lotSize, string marketTicker, decimal contractSize)
+            decimal lotSize, string marketTicker, decimal contractSize, int contractValueTradePrecision)
             : base(description, quoteCurrency, 1m, minimumPriceVariation, lotSize, marketTicker)
         {
             ContractSize = contractSize;
+            ContractValueTradePrecision = contractValueTradePrecision;
         }
     }
 
@@ -210,19 +220,38 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
                 var tickSize = symbol.TickSize ?? 0.01m;
 
-                // ContractSize is the actual minimum lot size (e.g. 1 for BTC, 10 for TRX).
-                // ContractValueTradePrecision is decimal precision, not a quantity.
-                var lotSize = symbol.ContractSize ?? 1m;
-                if (lotSize <= 0m) lotSize = 1m;
+                // ContractSize ist bei Kraken (wie ctVal bei OKX) die Base-Asset-Menge pro Contract.
+                // Aktuell (Stand 2026-07) bei allen PF_-Symbolen konstant 1, verifiziert gegen die
+                // Live-Instrument-Liste (futures.kraken.com/derivatives/api/v3/instruments).
+                var contractSize = symbol.ContractSize ?? 1m;
+                if (contractSize <= 0m) contractSize = 1m;
+
+                // KORREKTUR: Die Contract-Menge ist NICHT zwingend ganzzahlig — Kraken definiert die
+                // zulässige Rundungsgranularität über contractValueTradePrecision (analog OKX' lotSz,
+                // nur als Dezimalstellen-Exponent statt als eigenes Lot-Size-Feld ausgedrückt).
+                // Verifiziert gegen die Live-Instrument-Liste, Werte variieren stark pro Symbol:
+                // PF_XBTUSD=4 (0.0001-Schritte, fraktionale Contracts erlaubt), PF_TRXUSD=0 (nur
+                // ganze Contracts), PF_PEPEUSD=-3 (nur 1000er-Schritte). Ein pauschales Ceiling auf
+                // ganze Zahlen (wie zunächst implementiert) wäre für PF_XBTUSD z.B. grob falsch:
+                // eine Zielmenge von 0.05 BTC würde auf 1 volles BTC aufgerundet.
+                var contractValueTradePrecision = (int)(symbol.ContractValueTradePrecision ?? 0m);
+                var contractLotStep = Pow10(-contractValueTradePrecision);
+                if (contractLotStep <= 0m) contractLotStep = 1m;
+
+                // props.LotSize (Base-Asset-Einheiten, für LEANs interne Order-Validierung) muss
+                // konsistent mit dem nativen Contract-Lot-Step sein: baseLotSize = contractLotStep * contractSize,
+                // exakt das gleiche Pattern wie bei OKX (dort: baseLotSize = lotSz * ctVal).
+                var baseLotSize = contractLotStep * contractSize;
 
                 var symbolProperties = new KrakenSymbolProperties(
                     description: $"Kraken {symbol.BaseAsset} Perpetual",
                     // Dirty fix: must match NormalizeSymbol's appended "USDC" suffix, see comment there.
                     quoteCurrency: "USDC",
                     minimumPriceVariation: tickSize,
-                    lotSize: lotSize,
+                    lotSize: baseLotSize,
                     marketTicker: symbol.Symbol,
-                    contractSize: lotSize
+                    contractSize: contractSize,
+                    contractValueTradePrecision: contractValueTradePrecision
                 );
 
                 _spdb.SetEntry(Name, ticker, SecurityType.CryptoFuture, symbolProperties);
@@ -274,7 +303,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         /// Kraken Futures PlaceOrder/EditOrder erwarten Quantity in Contracts, nicht in Base-Asset-
         /// Einheiten ("Quantity for Buy.Limit required in contracts" — gleiches Symptom wie bei OKX).
         /// Ein Contract entspricht dem in der SPDB hinterlegten ContractSize (Kraken-Feld "contractSize"),
-        /// z.B. 1 Contract = 1 BTC oder 1 Contract = 10 TRX. Lookup via _spdb, befüllt in PopulateSPDB().
+        /// aktuell verifiziert konstant 1 über alle Symbole. Lookup via _spdb, befüllt in PopulateSPDB().
         /// </summary>
         private decimal GetContractSize(Symbol symbol)
         {
@@ -284,20 +313,51 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         }
 
         /// <summary>
-        /// Base-Asset-Menge → Contracts. Kraken-Contracts sind ganzzahlig (kein fraktionaler
-        /// Contract-Lot-Step wie bei OKX), daher immer Ceiling auf die nächste ganze Zahl.
-        /// Ceiling stellt wie bei OKX sicher, dass die an Kraken gesendete Menge >= LEAN-Zielmenge
-        /// ist (bei Abrundung würde die Order nie vollständig gefüllt werden können).
+        /// Rundungsgranularität der Contract-Menge in Contract-Einheiten (KEIN Ganzzahl-Zwang!).
+        /// Kraken kodiert das über ContractValueTradePrecision statt über ein explizites lotSz-Feld
+        /// wie OKX: 10^-precision, z.B. precision=4 → Schritt 0.0001 (PF_XBTUSD), precision=0 →
+        /// Schritt 1 (PF_TRXUSD), precision=-3 → Schritt 1000 (PF_PEPEUSD). Verifiziert gegen die
+        /// Live-Instrument-Liste — die Werte variieren stark pro Symbol, ein pauschales Ceiling auf
+        /// ganze Zahlen wäre für die meisten Majors (BTC, ETH, ...) grob falsch.
+        /// </summary>
+        private decimal GetContractLotStep(Symbol symbol)
+        {
+            var props = _spdb.GetSymbolProperties(Name, symbol, SecurityType.CryptoFuture, SettleAsset) as KrakenSymbolProperties;
+            var precision = props?.ContractValueTradePrecision ?? 0;
+            var step = Pow10(-precision);
+            return step > 0m ? step : 1m;
+        }
+
+        private static decimal Pow10(int exponent)
+        {
+            decimal result = 1m;
+            if (exponent >= 0)
+            {
+                for (var i = 0; i < exponent; i++) result *= 10m;
+            }
+            else
+            {
+                for (var i = 0; i < -exponent; i++) result /= 10m;
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Base-Asset-Menge → Contracts. Rundet IMMER AUF (Ceiling) auf den nächstgültigen
+        /// ContractLotStep (siehe GetContractLotStep) — exakt das gleiche Pattern wie bei OKX.
+        /// Ceiling stellt sicher, dass die an Kraken gesendete Menge >= LEAN-Zielmenge ist (bei
+        /// Abrundung würde die Order nie vollständig gefüllt werden können).
         /// roundedBaseQuantity gibt die daraus resultierende, exakt darstellbare Base-Menge zurück.
         /// </summary>
         protected override SharedQuantity ToExchangeQuantity(Symbol symbol, decimal absBaseQuantity, out decimal roundedBaseQuantity)
         {
             var contractSize = GetContractSize(symbol);
+            var contractLotStep = GetContractLotStep(symbol);
 
             var rawContracts = absBaseQuantity / contractSize;
-            var steppedContracts = Math.Ceiling(rawContracts);
+            var steppedContracts = Math.Ceiling(rawContracts / contractLotStep) * contractLotStep;
             if (steppedContracts <= 0m)
-                steppedContracts = 1m; // Minimum: 1 Contract, nie 0 senden
+                steppedContracts = contractLotStep; // Minimum: 1 Lot, nie 0 senden
 
             roundedBaseQuantity = steppedContracts * contractSize;
 
