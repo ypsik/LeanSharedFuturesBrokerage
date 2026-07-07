@@ -23,6 +23,26 @@ using System.Threading.Tasks;
 
 namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 {
+    /// <summary>
+    /// Erweitert SymbolProperties um ContractSize (Kraken Futures "contractSize"), getrennt vom
+    /// LEAN-internen ContractMultiplier. Gleiches Pattern wie OkxSymbolProperties.ContractValue:
+    /// ContractMultiplier bleibt fest 1m (LEAN nutzt es intern für PnL-/Notional-Berechnung und
+    /// erwartet Quantity × ContractMultiplier = Notional, unsere Quantity ist aber durchgängig
+    /// Base-Asset). ContractSize wird separat gehalten, ausschließlich für die eigene
+    /// Contract↔Base-Umrechnung beim Kraken-API-Call (ToExchangeQuantity/FromExchangeQuantity).
+    /// </summary>
+    public class KrakenSymbolProperties : SymbolProperties
+    {
+        public decimal ContractSize { get; }
+
+        public KrakenSymbolProperties(string description, string quoteCurrency, decimal minimumPriceVariation,
+            decimal lotSize, string marketTicker, decimal contractSize)
+            : base(description, quoteCurrency, 1m, minimumPriceVariation, lotSize, marketTicker)
+        {
+            ContractSize = contractSize;
+        }
+    }
+
     public class KrakenFuturesBrokerage : SharedFuturesBrokerage
     {
         private KrakenRestClient _restClient;
@@ -195,14 +215,14 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 var lotSize = symbol.ContractSize ?? 1m;
                 if (lotSize <= 0m) lotSize = 1m;
 
-                var symbolProperties = new SymbolProperties(
+                var symbolProperties = new KrakenSymbolProperties(
                     description: $"Kraken {symbol.BaseAsset} Perpetual",
                     // Dirty fix: must match NormalizeSymbol's appended "USDC" suffix, see comment there.
                     quoteCurrency: "USDC",
-                    contractMultiplier: 1m,
                     minimumPriceVariation: tickSize,
                     lotSize: lotSize,
-                    marketTicker: symbol.Symbol
+                    marketTicker: symbol.Symbol,
+                    contractSize: lotSize
                 );
 
                 _spdb.SetEntry(Name, ticker, SecurityType.CryptoFuture, symbolProperties);
@@ -248,6 +268,66 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         #endregion
 
+        #region Contract Quantity Conversion
+
+        /// <summary>
+        /// Kraken Futures PlaceOrder/EditOrder erwarten Quantity in Contracts, nicht in Base-Asset-
+        /// Einheiten ("Quantity for Buy.Limit required in contracts" — gleiches Symptom wie bei OKX).
+        /// Ein Contract entspricht dem in der SPDB hinterlegten ContractSize (Kraken-Feld "contractSize"),
+        /// z.B. 1 Contract = 1 BTC oder 1 Contract = 10 TRX. Lookup via _spdb, befüllt in PopulateSPDB().
+        /// </summary>
+        private decimal GetContractSize(Symbol symbol)
+        {
+            var props = _spdb.GetSymbolProperties(Name, symbol, SecurityType.CryptoFuture, SettleAsset) as KrakenSymbolProperties;
+            var size = props?.ContractSize ?? 1m;
+            return size > 0m ? size : 1m;
+        }
+
+        /// <summary>
+        /// Base-Asset-Menge → Contracts. Kraken-Contracts sind ganzzahlig (kein fraktionaler
+        /// Contract-Lot-Step wie bei OKX), daher immer Ceiling auf die nächste ganze Zahl.
+        /// Ceiling stellt wie bei OKX sicher, dass die an Kraken gesendete Menge >= LEAN-Zielmenge
+        /// ist (bei Abrundung würde die Order nie vollständig gefüllt werden können).
+        /// roundedBaseQuantity gibt die daraus resultierende, exakt darstellbare Base-Menge zurück.
+        /// </summary>
+        protected override SharedQuantity ToExchangeQuantity(Symbol symbol, decimal absBaseQuantity, out decimal roundedBaseQuantity)
+        {
+            var contractSize = GetContractSize(symbol);
+
+            var rawContracts = absBaseQuantity / contractSize;
+            var steppedContracts = Math.Ceiling(rawContracts);
+            if (steppedContracts <= 0m)
+                steppedContracts = 1m; // Minimum: 1 Contract, nie 0 senden
+
+            roundedBaseQuantity = steppedContracts * contractSize;
+
+            return new SharedQuantity { QuantityInContracts = steppedContracts };
+        }
+
+        /// <summary>
+        /// Contracts → Base-Asset-Menge (reine Multiplikation, keine Rundung nötig,
+        /// da wir hier nur von der Exchange gemeldete Ist-Werte zurückrechnen).
+        /// </summary>
+        protected override decimal FromExchangeQuantity(Symbol symbol, SharedOrderQuantity? quantity)
+        {
+            if (quantity == null)
+                return 0m;
+
+            var contracts = quantity.QuantityInContracts ?? 0m;
+            var contractSize = GetContractSize(symbol);
+            return contracts * contractSize;
+        }
+
+        /// <summary>
+        /// Kraken befüllt (wie OKX) ausschließlich QuantityInContracts, nie QuantityInBaseAsset.
+        /// Der Default-Hook der Basisklasse würde bei Kraken daher immer false liefern und fälschlich
+        /// auf den OriginalQuantity-Fallback umleiten. Deshalb Override auf Contracts-Feld.
+        /// </summary>
+        protected override bool HasExchangeQuantity(SharedOrderQuantity? quantity)
+            => quantity?.QuantityInContracts.HasValue == true;
+
+        #endregion
+
         // Public ticker feed for funding rate polling, via the unauthenticated extra client.
         protected override async Task<WebSocketResult<UpdateSubscription>> CreateFundingSubscriptionAsync(
             string nativeTicker, Symbol symbol, Func<DateTime, decimal?, DateTime?, bool> onFundingRate)
@@ -281,10 +361,20 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         protected override async Task<HttpResult<SharedId>> ExecuteUpdateOrderAsync(
             Order order, decimal price, decimal? quantity)
         {
+            // EditOrder erwartet ebenfalls Contracts, nicht Base-Asset-Menge. Gleiche Umrechnung
+            // + Rundung wie beim initialen PlaceOrder (siehe ToExchangeQuantity), damit die neue
+            // Restmenge auf einen gültigen Contract-Wert fällt.
+            decimal? newContractQuantity = null;
+            if (quantity.HasValue)
+            {
+                var sharedQty = ToExchangeQuantity(order.Symbol, Math.Abs(quantity.Value), out _);
+                newContractQuantity = sharedQty.QuantityInContracts;
+            }
+
             var res = await _restClient.FuturesApi.Trading.EditOrderAsync(
                 orderId: order.BrokerId.Last(),
                 price: price,
-                quantity: quantity.HasValue ? Math.Abs(quantity.Value) : null);
+                quantity: newContractQuantity);
 
             if (!res.Success)
             {
