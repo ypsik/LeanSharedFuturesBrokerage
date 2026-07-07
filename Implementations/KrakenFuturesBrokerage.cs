@@ -416,6 +416,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             ];
         }
 
+        protected override string GenerateClientId(int _)
+        {
+            return _restClient.FuturesApi.SharedClient.GenerateClientOrderId();
+        }
+
         // Kraken edit is true in-place: same order ID is kept, status returns "edited".
         // No cancel+replace, no new ID — same pattern as Bybit.
         protected override async Task<HttpResult<SharedId>> ExecuteUpdateOrderAsync(
