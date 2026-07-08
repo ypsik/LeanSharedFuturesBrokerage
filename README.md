@@ -13,8 +13,8 @@ All exchange clients are built on JKorf's `CryptoExchange.Net` ecosystem (`Bybit
 | AsterDEX | ✅ Live | ListenKey user stream, hedge mode, Builder Code support, no native user-trade stream |
 | Bitget | ✅ Live | In-place EditOrder, funding fees via ledger polling |
 | BingX | ✅ Live | ListenKey user stream, hedge mode, funding rate via polling loop (not socket) |
-| Kraken | ✅ Live | USD-quoted futures. Requires dirty fix for LEAN core bug. Described below |
-| OKX | ✅ Live | FUTURES (EU X-Perp) requires dirty fix for LEAN core bug (same as Kraken), described below. Only tested on EU accounts (FUTURES/X-Perp) — Global (SWAP) untested. |
+| Kraken | ✅ Live | USD-quoted futures. Requires dirty fix for LEAN core bug. Contract-notation quantities (see below). Described below |
+| OKX | ✅ Live | FUTURES (EU X-Perp) requires dirty fix for LEAN core bug (same as Kraken), described below. Contract-notation quantities (see below). Only tested on EU accounts (FUTURES/X-Perp) — Global (SWAP) untested. |
 | Lighter | ✅ Live | ZK-L2 DEX perpetuals. |
 
 ## Architecture
@@ -33,6 +33,7 @@ Each exchange implementation (`BybitFuturesBrokerage`, `HyperliquidFuturesBroker
 - `ExecuteUpdateOrderAsync` — in-place modify vs. cancel+replace differs per exchange
 - `CreateFundingSubscriptionAsync` — funding rate delivery differs per exchange (ticker socket, mark-price socket, user-data socket)
 - Exchange-specific `ExchangeParameters` (e.g. Bitget's `ProductType`, Bybit's `category`/`settleCoin`)
+- `ToExchangeQuantity` / `FromExchangeQuantity` / `HasExchangeQuantity` — only needed for exchanges that speak contracts instead of base-asset units (currently OKX and Kraken, see below)
 
 ### Order state machine & `OrderStateManager`
 
@@ -108,6 +109,7 @@ Populated dynamically at startup from each exchange's live instrument list (tick
 - Funding fees pushed via the `account_log` WebSocket feed (snapshot on connect is ignored; only live `new_entry` events with `Info == "funding rate change"` are processed)
 - Funding rates polled via a dedicated unauthenticated socket client (`_socketClientExData`) to avoid connection pool conflicts
 - Requires the LEAN core dirty fix described below
+- **Contract notation**: like OKX, Kraken Futures order and position endpoints work exclusively in contracts (`size` parameter), not base-asset units directly — a "contract" is `contractSize` units of the underlying, tracked per-symbol via Kraken's `contractSize` instrument field (currently `1` for every listed Kraken Futures symbol, verified against the live instrument list, but not hardcoded — read dynamically per symbol so a future non-1 value is handled automatically). Order sizes must additionally be rounded to the exchange's allowed decimal granularity, which Kraken expresses per symbol as `contractValueTradePrecision` (e.g. `4` for `PF_XBTUSD` → 0.0001 BTC steps; `0` for `PF_TRXUSD` → whole contracts only; `-3` for `PF_PEPEUSD` → steps of 1000) rather than an explicit lot-size field like OKX's `lotSz`. Confirmed against Kraken's documented order-rejection error ("Quantity decimals are greater than the contract value trade precision"). Tracked via a small `KrakenSymbolProperties : SymbolProperties` subclass (extra `ContractSize` and `ContractValueTradePrecision` fields, separate from LEAN's own `ContractMultiplier`) and converted transparently at the boundary (`ToExchangeQuantity`/`FromExchangeQuantity`/`HasExchangeQuantity` overrides), same pattern as OKX — order placement, amendment, fills, open-orders, and account holdings all round-trip through base-asset units. `ContractMultiplier` itself is kept fixed at `1` for the same reason as OKX (see below).
 
 **OKX**
 - Only tested on EU accounts (FUTURES/X-Perp). Global accounts (SWAP) are untested.
@@ -118,7 +120,7 @@ Populated dynamically at startup from each exchange's live instrument list (tick
 - Funding rates via a dedicated public funding-rate WebSocket channel, pushed every minute
 - `GetCashBalance()` returns `TotalEquity` minus `UnrealizedPnl`, same pattern as Kraken/Bybit/Hyperliquid
 - FUTURES native ticker resolution (canonical instId with date suffix, e.g. `ETH-USD-310404`) requires an SPDB lookup rather than a pure string transform (unlike Kraken); `NativeTicker()`, `NormalizeSymbol()`, and `PopulateSPDB()` must all derive the same ticker key for a given instrument, or the lookup fails with "native ticker not found in SPDB"
-- **Contract notation**: unlike every other exchange in this repo, OKX Futures/Swap order and position endpoints work exclusively in contracts (`sz`), not base-asset units — a "contract" is `ctVal` units of the underlying (e.g. 1 XAU contract = 0.001 XAU, 1 HYPE contract = 0.1 HYPE). `ctVal` is tracked internally via a small `OkxSymbolProperties : SymbolProperties` subclass (extra `ContractValue` field, separate from LEAN's own `ContractMultiplier`) and converted transparently at the boundary (`ToExchangeQuantity`/`FromExchangeQuantity`/`HasExchangeQuantity` overrides) — order placement, amendment, fills, open-orders, and account holdings all round-trip through base-asset units, so strategies and LEAN's own P&L/margin math never need to know contracts exist. Only the raw REST/WS payloads sent to and received from OKX are in contracts. `ContractMultiplier` itself is kept fixed at `1` since LEAN's internal `UnrealizedProfit`/`GetQuantityValue` formulas multiply by it directly and already receive base-asset quantities; setting it to `ctVal` there would double-apply the conversion and silently freeze/corrupt unrealized P&L.
+- **Contract notation**: OKX Futures/Swap order and position endpoints work exclusively in contracts (`sz`), not base-asset units — a "contract" is `ctVal` units of the underlying (e.g. 1 XAU contract = 0.001 XAU, 1 HYPE contract = 0.1 HYPE), and the exchange additionally enforces a minimum contract lot step (`lotSz`, e.g. 10 contracts) that quantities must round to. `ctVal` and `lotSz` are tracked internally via a small `OkxSymbolProperties : SymbolProperties` subclass (extra `ContractValue` field, separate from LEAN's own `ContractMultiplier`) and converted transparently at the boundary (`ToExchangeQuantity`/`FromExchangeQuantity`/`HasExchangeQuantity` overrides) — order placement, amendment, fills, open-orders, and account holdings all round-trip through base-asset units, so strategies and LEAN's own P&L/margin math never need to know contracts exist. Only the raw REST/WS payloads sent to and received from OKX are in contracts. `ContractMultiplier` itself is kept fixed at `1` since LEAN's internal `UnrealizedProfit`/`GetQuantityValue` formulas multiply by it directly and already receive base-asset quantities; setting it to `ctVal` there would double-apply the conversion and silently freeze/corrupt unrealized P&L. Kraken follows the identical pattern (see above), with `contractValueTradePrecision` playing the role OKX's `lotSz` plays.
 
 **Lighter**
 - ZK-L2 DEX perpetuals, integrated via JKorf's `Lighter.Net`
