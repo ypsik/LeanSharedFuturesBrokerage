@@ -143,8 +143,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                         var sub = RunSync(() => _userTradeSocket.SubscribeToUserTradeUpdatesAsync(userTradeRequest, HandleUserTradeSocket));
 
-                        SetupSubscriptionEvents(sub.Success, sub.Data, state => _isConnectedUserTrade = state, "User trade", "User trade socket failed", sub.Error?.ToString());
-                        if (sub.Success)
+                        SetupSubscriptionEvents(sub?.Success ?? false, sub?.Data, state => _isConnectedUserTrade = state, "User trade", "User trade socket failed", sub?.Error?.ToString());
+                        if (sub?.Success ?? false)
                         {
                             _userTradeSocketSub = sub.Data;
                         }
@@ -162,8 +162,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         }, 
                         HandleOrderSocket));
 
-                    SetupSubscriptionEvents(sub.Success, sub.Data, state => _isConnectedOrder = state, "Order", "Order socket failed", sub.Error?.ToString());
-                    if (sub.Success)
+                    SetupSubscriptionEvents(sub?.Success ?? false, sub?.Data, state => _isConnectedOrder = state, "Order", "Order socket failed", sub?.Error?.ToString());
+                    if (sub?.Success ?? false)
                     {
                         _orderSocketSub = sub.Data;
                     }
@@ -173,20 +173,20 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     GetNextCashRefreshDelay(), TimeSpan.FromMinutes(30));
         }
 
-        protected void SetupSubscriptionEvents(bool isSuccess, dynamic subscriptionData, Action<bool> setConnectedState, string streamName, string errorMessage, string? errorDetails = null)
+        protected void SetupSubscriptionEvents(bool isSuccess, dynamic? subscriptionData, Action<bool> setConnectedState, string streamName, string errorMessage, string? errorDetails = null)
         {
             if (isSuccess)
             {
                 Log.Trace($"{Name} {streamName}: Subscribed.");
 
-                subscriptionData.ConnectionLost += new Action(() =>
+                subscriptionData?.ConnectionLost += new Action(() =>
                 {
                     setConnectedState(false);
                     Log.Error($"{streamName}: Connection lost!");
                     OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "Disconnect", $"{streamName} stream lost."));
                 });
 
-                subscriptionData.ConnectionRestored += new Action<TimeSpan>((duration) =>
+                subscriptionData?.ConnectionRestored += new Action<TimeSpan>((duration) =>
                 {
                     setConnectedState(true);
                     Log.Trace($"{streamName}: Connection restored after {duration}.");

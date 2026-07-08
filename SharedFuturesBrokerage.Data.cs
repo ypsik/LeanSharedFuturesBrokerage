@@ -290,8 +290,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                             }
                         }));
 
-                    SetupSubscriptionEvents(sub.Success, sub.Data, _ => { }, $"{symbol.Value} Trade", $"Trade subscription failed for {symbol.Value}", sub.Error?.ToString());
-                    if (sub.Success)
+                    SetupSubscriptionEvents(sub?.Success ?? false, sub?.Data, _ => { }, $"{symbol.Value} Trade", $"Trade subscription failed for {symbol.Value}", sub?.Error?.ToString());
+                    if (sub?.Success ?? false)
                     {
                         _subscriptions[subKey] = sub.Data;
                     }
@@ -315,13 +315,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                             });
                         }));
 
-                    SetupSubscriptionEvents(sub.Success, sub.Data, _ => { }, $"{symbol.Value} Quote", $"Quote subscription failed for {symbol.Value}", sub.Error?.ToString());
-                    if (sub.Success)
+                    SetupSubscriptionEvents(sub?.Success ?? false, sub?.Data, _ => { }, $"{symbol.Value} Quote", $"Quote subscription failed for {symbol.Value}", sub?.Error?.ToString());
+                    if (sub?.Success ?? false)
                     {
                         _subscriptions[subKey] = sub.Data;
                     }
-
-                    if (sub.Success) _subscriptions[subKey] = sub.Data;
                 }
             }
             return true;
@@ -403,12 +401,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                 var sub = RunSync(() => CreateFundingSubscriptionAsync(nativeTicker, symbol, onFundingRate));
 
-                SetupSubscriptionEvents(sub.Success, sub.Data, _ => { },
+                SetupSubscriptionEvents(sub?.Success ?? false, sub?.Data, _ => { },
                   $"MarginInterestRate {nativeTicker}",
-                  $"SubscribeMarginInterestRate failed for {symbol}: {sub.Error?.Message}",
-                  sub.Error?.ToString());
+                  $"SubscribeMarginInterestRate failed for {symbol}: {sub?.Error?.Message}",
+                  sub?.Error?.ToString());
 
-                if (sub.Success)
+                if (sub?.Success ?? false)
                 {
                     _subscriptions.TryAdd(subKey, sub.Data);
                     return true;

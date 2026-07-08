@@ -182,12 +182,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                             }));
 
                     SetupSubscriptionEvents(
-                        sub.Success,
-                        sub.Data,
+                        sub?.Success ?? false,
+                        sub?.Data,
                         (state) => _fundingUpdateConnected = state,
                         "Account log updates",
                         "Account log subscription failed",
-                        sub.Error?.ToString()
+                        sub?.Error?.ToString()
                     );
 
                     if (sub.Success)
