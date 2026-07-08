@@ -1096,8 +1096,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         // Skip orders still in Placing phase – they have no real exchange ID yet.
                         // The REST call hasn't returned; no point querying the exchange for a temp ID.
                         if (state.State == OrderLifeCycleState.Placing) continue;
-
                         var brokerId = state.BrokerId;
+                        if (string.IsNullOrEmpty(brokerId))
+                        {
+                            Log.Trace($"{Name}.ReconcileLoop: Skipping state with empty BrokerId. ClientOrderId: {state.ClientOrderId}");
+                            continue;
+                        }
 
                         var updateStillPending = state.IsUpdatePending &&
                             (DateTime.UtcNow - state.LastUpdateUtc).TotalSeconds < 10;
