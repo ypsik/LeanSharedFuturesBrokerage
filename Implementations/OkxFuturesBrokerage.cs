@@ -204,21 +204,15 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                                 if (data == null)
                                     return;
 
-                                Log.Trace($"OKX balance_and_position | EventType={data.EventType} | Time={data.Time:O}");
+                                // Nur funding_fee Events interessieren fuer diesen Diagnose-Schritt.
+                                if (!string.Equals(data.EventType, "funding_fee", StringComparison.OrdinalIgnoreCase))
+                                    return;
+
+                                Log.Trace($"OKX funding_fee | Time={data.Time:O}");
 
                                 foreach (var bal in data.BalanceData)
                                 {
                                     Log.Trace($"  BalData: Asset={bal.Asset} CashBalance={bal.CashBalance} UpdateTime={bal.UpdateTime:O}");
-                                }
-
-                                foreach (var pos in data.PositionData)
-                                {
-                                    Log.Trace($"  PosData: Symbol={pos.Symbol} Qty={pos.Quantity} AvgPx={pos.AverageOpenPrice} UTime={pos.UpdateTime:O}");
-                                }
-
-                                foreach (var trade in data.TradeData)
-                                {
-                                    Log.Trace($"  TradeRef: Symbol={trade.Symbol} TradeId={trade.TradeId}");
                                 }
                             }));
 
