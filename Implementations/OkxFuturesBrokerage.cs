@@ -485,7 +485,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 {
                     var now = data.DataTime ?? data.ReceiveTime;
                     var rate = data.Data;
-                    onFundingRate(now, rate.FundingRate, rate.NextFundingTime);
+                    onFundingRate(now, rate.NextFundingRate, rate.NextFundingTime);
                 });
         }
 
