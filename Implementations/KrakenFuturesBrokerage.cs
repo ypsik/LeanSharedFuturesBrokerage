@@ -190,7 +190,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                         sub?.Error?.ToString()
                     );
 
-                    if (sub.Success)
+                    if (sub?.Success??false)
                         _fundingUpdateSubscription = sub.Data;
                 }
 

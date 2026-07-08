@@ -49,6 +49,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         private OKXSocketClient _socketClient;
         private OKXSocketClient _socketClientExData;
 
+        private readonly object _fundingUpdateLock = new();
+        private bool _fundingUpdateConnected = false;
+        private UpdateSubscription _fundingUpdateSubscription;
+
         // OKX instrument type used for symbol discovery.
         // SWAP    = true perpetuals (Global/US accounts).
         // FUTURES = X-Perps (EU/EEA MiFID-regulated, 5-year expiry with funding rate).
@@ -178,13 +182,65 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         // Fills are available via the "orders" channel which includes fillSz, fillPx, fee etc.
         public override bool ExchangeSupportsUserTradeStream => false;
 
+        // TEMP DIAGNOSTIC (Absprache 2026-07-08): Subscribed auf den balance_and_position-Channel
+        // ausschließlich zu Logging-Zwecken. Ziel: empirisch pruefen, ob OKXBalanceUpdate.CashBalance
+        // bei eventType="funding_fee" tatsaechlich ein Delta ist (Doku nennt es "cashBal" = absoluter
+        // Stand, das koennte aber falsch dokumentiert sein - siehe Diskussion). Es findet HIER NOCH
+        // KEINE CashBook-Buchung statt, kein FundingBrokerageMessageEvent, kein IsConnected-Gating auf
+        // _fundingUpdateConnected. Sobald klar ist ob Delta oder Cash-Stand, wird die echte Funding-
+        // Verbuchung nachgezogen (entweder direkt aus dem Delta, oder als Trigger fuer einen REST-Call
+        // gegen GetFundingBillDetailsAsync, der garantiert ein Delta/balChg-Feld hat).
         public override void Connect()
         {
+            lock (_fundingUpdateLock)
+            {
+                if (_fundingUpdateSubscription == null && _socketClient != null)
+                {
+                    var sub = RunSync(() =>
+                        _socketClient.UnifiedApi.Account.SubscribeToBalanceAndPositionUpdatesAsync(
+                            update =>
+                            {
+                                var data = update?.Data;
+                                if (data == null)
+                                    return;
+
+                                Log.Trace($"OKX balance_and_position | EventType={data.EventType} | Time={data.Time:O}");
+
+                                foreach (var bal in data.BalanceData)
+                                {
+                                    Log.Trace($"  BalData: Asset={bal.Asset} CashBalance={bal.CashBalance} UpdateTime={bal.UpdateTime:O}");
+                                }
+
+                                foreach (var pos in data.PositionData)
+                                {
+                                    Log.Trace($"  PosData: Symbol={pos.Symbol} Qty={pos.Quantity} AvgPx={pos.AverageOpenPrice} UTime={pos.UpdateTime:O}");
+                                }
+
+                                foreach (var trade in data.TradeData)
+                                {
+                                    Log.Trace($"  TradeRef: Symbol={trade.Symbol} TradeId={trade.TradeId}");
+                                }
+                            }));
+
+                    SetupSubscriptionEvents(
+                        sub?.Success ?? false,
+                        sub?.Data,
+                        (state) => { _fundingUpdateConnected = state; },
+                        "Balance/Position updates",
+                        "Balance/Position updates subscription failed",
+                        sub?.Error?.ToString());
+
+                    if (sub?.Success ?? false)
+                    {
+                        _fundingUpdateSubscription = sub.Data;
+                    }
+                }
+            }
             base.Connect();
         }
-
         public override void Disconnect()
         {
+            RunSync(() => _fundingUpdateSubscription?.CloseAsync() ?? Task.CompletedTask);
             _socketClientExData?.Dispose();
             base.Disconnect();
         }

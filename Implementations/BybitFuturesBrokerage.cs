@@ -157,15 +157,15 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
 
                     SetupSubscriptionEvents(
-                                    sub.Success,
-                                    sub.Data,
+                                    sub?.Success ?? false,
+                                    sub?.Data,
                                     (state) => _fundingUpdateConnected = state,
                                     "Wallet updates",
                                     "Wallet updates subscription failed",
-                                    sub.Error?.ToString()                                
+                                    sub?.Error?.ToString()                                
                                 );
 
-                    if (sub.Success)
+                    if (sub?.Success ?? false)
                     {
                         _fundingUpdateSubscription = sub.Data;
                     }
