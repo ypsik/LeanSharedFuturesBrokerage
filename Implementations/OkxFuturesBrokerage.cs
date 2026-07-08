@@ -483,8 +483,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 nativeTicker,
                 data =>
                 {
+                    var now = data.DataTime ?? data.ReceiveTime;
                     var rate = data.Data;
-                    onFundingRate(rate.FundingTime, rate.FundingRate, rate.NextFundingTime);
+                    onFundingRate(now, rate.FundingRate, rate.NextFundingTime);
                 });
         }
 
