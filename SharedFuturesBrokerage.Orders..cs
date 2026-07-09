@@ -403,6 +403,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 }
             }
 
+                state.IsUpdatePending = true;
+            }
+
+
             var res = RunSync(() => ExecuteUpdateOrderAsync(order, price, quantity));
 
             if (res?.Success != true)
