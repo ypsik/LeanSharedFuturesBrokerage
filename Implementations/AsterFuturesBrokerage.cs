@@ -103,8 +103,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                     marketTicker: symbol.Name
                 );
 
-                _spdb.SetEntry(Name, symbol.BaseAsset + symbol.QuoteAsset, SecurityType.CryptoFuture, symbolProperties);
-                _spdb.SetEntry(Name, symbol.BaseAsset + symbol.QuoteAsset, SecurityType.Crypto, symbolProperties);
+                _spdb.SetEntry(Name, symbol.BaseAsset + symbol.QuoteAsset, QuantConnect.SecurityType.CryptoFuture, symbolProperties);
+                _spdb.SetEntry(Name, symbol.BaseAsset + symbol.QuoteAsset, QuantConnect.SecurityType.Crypto, symbolProperties);
             }
         }
 
