@@ -182,59 +182,21 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         // Fills are available via the "orders" channel which includes fillSz, fillPx, fee etc.
         public override bool ExchangeSupportsUserTradeStream => false;
 
-        // TEMP DIAGNOSTIC (Absprache 2026-07-08): Subscribed auf den balance_and_position-Channel
-        // ausschließlich zu Logging-Zwecken. Ziel: empirisch pruefen, ob OKXBalanceUpdate.CashBalance
-        // bei eventType="funding_fee" tatsaechlich ein Delta ist (Doku nennt es "cashBal" = absoluter
-        // Stand, das koennte aber falsch dokumentiert sein - siehe Diskussion). Es findet HIER NOCH
-        // KEINE CashBook-Buchung statt, kein FundingBrokerageMessageEvent, kein IsConnected-Gating auf
-        // _fundingUpdateConnected. Sobald klar ist ob Delta oder Cash-Stand, wird die echte Funding-
-        // Verbuchung nachgezogen (entweder direkt aus dem Delta, oder als Trigger fuer einen REST-Call
-        // gegen GetFundingBillDetailsAsync, der garantiert ein Delta/balChg-Feld hat).
+        // Bitget-Pattern: kein eigener Funding-Balance-Socket noetig. Rollover-Erkennung laeuft
+        // bereits ueber CreateFundingSubscriptionAsync (oeffentlicher Funding-Rate-Channel pro Symbol,
+        // s.u.) - deren onFundingRate-Callback liefert true bei Rollover und triggert dort den
+        // REST-Poll gegen die Bills. _fundingUpdateConnected hier nur als einfaches Connect-Flag,
+        // analog Bitget (kein separater Socket-Health-State noetig).
+        public override bool IsConnected => base.IsConnected && _fundingUpdateConnected;
+
         public override void Connect()
         {
-            lock (_fundingUpdateLock)
-            {
-                if (_fundingUpdateSubscription == null && _socketClient != null)
-                {
-                    var sub = RunSync(() =>
-                        _socketClient.UnifiedApi.Account.SubscribeToBalanceAndPositionUpdatesAsync(
-                            update =>
-                            {
-                                var data = update?.Data;
-                                if (data == null)
-                                    return;
-
-                                // Nur funding_fee Events interessieren fuer diesen Diagnose-Schritt.
-                                if (!string.Equals(data.EventType, "funding_fee", StringComparison.OrdinalIgnoreCase))
-                                    return;
-
-                                Log.Trace($"OKX funding_fee | Time={data.Time:O}");
-
-                                foreach (var bal in data.BalanceData)
-                                {
-                                    Log.Trace($"  BalData: Asset={bal.Asset} CashBalance={bal.CashBalance} UpdateTime={bal.UpdateTime:O}");
-                                }
-                            }));
-
-                    SetupSubscriptionEvents(
-                        sub?.Success ?? false,
-                        sub?.Data,
-                        (state) => { _fundingUpdateConnected = state; },
-                        "Balance/Position updates",
-                        "Balance/Position updates subscription failed",
-                        sub?.Error?.ToString());
-
-                    if (sub?.Success ?? false)
-                    {
-                        _fundingUpdateSubscription = sub.Data;
-                    }
-                }
-            }
+            _fundingUpdateConnected = true;
             base.Connect();
         }
         public override void Disconnect()
         {
-            RunSync(() => _fundingUpdateSubscription?.CloseAsync() ?? Task.CompletedTask);
+            _fundingUpdateConnected = false;
             _socketClientExData?.Dispose();
             base.Disconnect();
         }
@@ -476,6 +438,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         // OKX has a dedicated funding-rate WebSocket channel (public, unauthenticated).
         // Pushed every minute. OKXFundingRate.NextFundingTime is DateTime (non-nullable).
+        // Bitget-Pattern: onFundingRate liefert true bei erkanntem Rollover -> REST-Poll gegen die
+        // Bills triggern (Ledger-Aequivalent bei OKX), da der WS balance_and_position-Channel nur den
+        // absoluten CashBalance liefert, kein Delta (siehe Diagnose-Logs vom 2026-07-10).
         protected override async Task<WebSocketResult<UpdateSubscription>> CreateFundingSubscriptionAsync(
             string nativeTicker, Symbol symbol, Func<DateTime, decimal?, DateTime?, bool> onFundingRate)
         {
@@ -483,10 +448,68 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 nativeTicker,
                 data =>
                 {
-                    var now = data.DataTime ?? data.ReceiveTime;
                     var rate = data.Data;
-                    onFundingRate(now, rate.FundingRate, rate.FundingTime);
+                    if (onFundingRate(rate.FundingTime, rate.FundingRate, rate.NextFundingTime))
+                    {
+                        // Rollover detected via Socket → poll bills for actual funding fees.
+                        Task.Run(async () =>
+                        {
+                            await Task.Delay(5000); // wait 5s for bill entry to appear
+                            await PollFundingFeesAsync();
+                        });
+                    }
                 });
+        }
+
+        private long _lastBillIdProcessed = 0;
+        private int _fundingPollRunning = 0;
+
+        // TODO (Absprache 2026-07-10): Methoden-/Enum-Namen (GetBillsAsync, AccountBillSubType.*)
+        // noch nicht gegen die tatsaechliche OKX.Net-Signatur verifiziert - vor dem ersten Build
+        // gegen Intellisense/Decompile pruefen. subType 173 = Funding Fee expense, 174 = Funding Fee
+        // income (offizielle OKX-Doku). Laut Doku fuer Funding Fee explizit das "pnl"-Feld verwenden,
+        // NICHT "balChg" (abweichend vom generischen Bill-Pattern anderer subTypes).
+        private async Task PollFundingFeesAsync()
+        {
+            // Only one poll at a time — multiple symbols may trigger simultaneously.
+            if (Interlocked.CompareExchange(ref _fundingPollRunning, 1, 0) != 0)
+                return;
+
+            try
+            {
+                var result = await _restClient.UnifiedApi.Account.GetBillHistoryAsync(
+                    instrumentType: _instrumentType,
+                    startTime: DateTime.UtcNow.AddMinutes(-1)
+                ).ConfigureAwait(false);
+
+                if (!result.Success || result.Data == null)
+                {
+                    Log.Error($"OKX funding fee poll failed: {result.Error}");
+                    return;
+                }
+
+                foreach (var entry in result.Data
+                    .Where(e => (e.SubType == AccountBillSubType.FundingFeeExpense
+                              || e.SubType == AccountBillSubType.FundingFeeIncome)
+                             && (e.BillId ?? 0) > _lastBillIdProcessed)
+                    .OrderBy(e => e.BillId ?? 0))
+                {
+                    var billId = entry.BillId ?? 0;
+                    var amount = entry.ProfitAndLoss ?? 0m; // laut OKX-Doku: fuer Funding Fee "pnl", nicht "balChg"
+
+                    if (amount != 0m)
+                    {
+                        _algorithm?.Portfolio?.CashBook[entry.Asset].AddAmount(amount);
+                        OnMessage(new FundingBrokerageMessageEvent(entry.Asset, amount));
+                    }
+
+                    Interlocked.Exchange(ref _lastBillIdProcessed, billId);
+                }
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _fundingPollRunning, 0);
+            }
         }
 
         // Account equity minus unrealized PnL so LEAN does not double-count open positions.
