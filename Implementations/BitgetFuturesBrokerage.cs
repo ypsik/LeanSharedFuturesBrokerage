@@ -33,6 +33,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         private BitgetSocketClient _socketClientExData;
         private bool _fundingUpdateConnected = false;
 
+        protected override bool IsRejectedUpdateError(string errorMsg) =>
+                errorMsg.Contains("40922") || errorMsg.Contains("Only work order modifications are allowed");
 
         internal BitgetFuturesBrokerage(
             IAlgorithm algorithm,
