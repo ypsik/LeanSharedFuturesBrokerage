@@ -380,28 +380,25 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     order.BrokerId.Add(state.BrokerId);
                 }
 
-                state.IsUpdatePending = true;
-            }
-
-            // Minimum notional check
-            if (MinimumOrderNotionalValue > 0m && price > 0m && quantity.HasValue)
-            {
-                decimal currentNotional = Math.Abs(quantity.Value) * price;
-
-                if (currentNotional < MinimumOrderNotionalValue)
+                // Minimum notional check
+                if (MinimumOrderNotionalValue > 0m && price > 0m && quantity.HasValue)
                 {
-                    Log.Trace($"{Name}.UpdateOrder: Rejecting update for {order.Symbol.Value}. " +
-                              $"Remaining quantity {quantity} (~{currentNotional:F2}$) " +
-                              $"is below minimum ${MinimumOrderNotionalValue}. Returning false.");
+                    decimal currentNotional = Math.Abs(quantity.Value) * price;
 
-                    OnMessage(new BrokerageMessageEvent(
-                            BrokerageMessageType.Warning,
-                            "UpdateOrderInvalid",
-                            $"Order remaining size too small ({currentNotional:F2}$). Update cancelled."));
+                    if (currentNotional < MinimumOrderNotionalValue)
+                    {
+                        Log.Trace($"{Name}.UpdateOrder: Rejecting update for {order.Symbol.Value}. " +
+                                  $"Remaining quantity {quantity} (~{currentNotional:F2}$) " +
+                                  $"is below minimum ${MinimumOrderNotionalValue}. Returning false.");
 
-                    return false;
+                        OnMessage(new BrokerageMessageEvent(
+                                BrokerageMessageType.Warning,
+                                "UpdateOrderInvalid",
+                                $"Order remaining size too small ({currentNotional:F2}$). Update cancelled."));
+
+                        return false;
+                    }
                 }
-            }
 
                 state.IsUpdatePending = true;
             }
