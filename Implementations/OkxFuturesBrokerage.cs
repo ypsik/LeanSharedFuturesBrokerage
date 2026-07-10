@@ -464,11 +464,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         private long _lastBillIdProcessed = 0;
         private int _fundingPollRunning = 0;
 
-        // TODO (Absprache 2026-07-10): Methoden-/Enum-Namen (GetBillsAsync, AccountBillSubType.*)
-        // noch nicht gegen die tatsaechliche OKX.Net-Signatur verifiziert - vor dem ersten Build
-        // gegen Intellisense/Decompile pruefen. subType 173 = Funding Fee expense, 174 = Funding Fee
-        // income (offizielle OKX-Doku). Laut Doku fuer Funding Fee explizit das "pnl"-Feld verwenden,
-        // NICHT "balChg" (abweichend vom generischen Bill-Pattern anderer subTypes).
         private async Task PollFundingFeesAsync()
         {
             // Only one poll at a time — multiple symbols may trigger simultaneously.
@@ -499,8 +494,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
                     if (amount != 0m)
                     {
-                        _algorithm?.Portfolio?.CashBook[entry.Asset].AddAmount(amount);
-                        OnMessage(new FundingBrokerageMessageEvent(entry.Asset, amount));
+                        _algorithm?.Portfolio?.CashBook[SettleAsset].AddAmount(amount);
+                        OnMessage(new FundingBrokerageMessageEvent(SettleAsset, amount));
                     }
 
                     Interlocked.Exchange(ref _lastBillIdProcessed, billId);

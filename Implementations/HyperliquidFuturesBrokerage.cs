@@ -482,15 +482,14 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         protected override async Task<HttpResult<SharedId>> ExecuteCancelOrderAsync(CxCancelOrderRequest request)
         {
-            var res = await _restClient.FuturesApi.Trading.CancelOrderAsync(
+            var res = await _socketClient.FuturesApi.Trading.CancelOrderAsync(
                 symbol: request.Symbol.SymbolName ?? request.Symbol.BaseAsset,
                 orderId: long.Parse(request.OrderId),
                 vaultAddress: _vaultAdress);
 
             if (!res.Success)
             {
-                Log.Error($"HL-Update-Error: {res.Error} | " +
-                          $"OriginalData : {res.OriginalData}");
+                Log.Error($"HL-Update-Error: {res.Error}");
 
                 return new HttpResult<SharedId>(Name, null, res.Error);
             }
