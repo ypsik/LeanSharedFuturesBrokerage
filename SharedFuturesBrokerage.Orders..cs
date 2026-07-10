@@ -673,7 +673,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 // =======================================================
                 // 🔥 RAW DIAGNOSTIC LOGGING 🔥
                 // =======================================================
-                Log.Trace($"{Name}.HandleOrderSocket RAW PAYLOAD: " +
+                Log.Trace($"{Name}.HandleUserTradeSocket RAW PAYLOAD: " +
                           $"UpdateTimeTicks='{trade.Timestamp.Ticks}', " +
                           $"OrderId='{trade.OrderId}', " +
                           $"ClientOrderId='{trade.ClientOrderId}', " +
