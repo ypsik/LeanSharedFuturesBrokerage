@@ -275,8 +275,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             return await _socketClientExData.FuturesApiV2.SubscribeToTickerUpdatesAsync(
                 BitgetProductTypeV2.UsdtFutures, nativeTicker, data =>
                 {
-                    var now = data.DataTime ?? data.ReceiveTime;
                     var ticker = data.Data.FirstOrDefault();
+                    var now = ticker?.Timestamp ?? data.DataTime ?? data.ReceiveTime;
 
                     if (onFundingRate(now, ticker?.FundingRate, ticker?.NextFundingTime))
                     {
