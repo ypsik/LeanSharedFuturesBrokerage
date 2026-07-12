@@ -453,7 +453,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
             var activeExchangeId = order.BrokerId.Last();
 
-            var res = await _socketClient.FuturesApi.Trading.EditOrderAsync(
+            var res = await _restClient.FuturesApi.Trading.EditOrderAsync(
                           symbol: ticker,
                           orderId: long.Parse(activeExchangeId),
                           clientOrderId: null,
