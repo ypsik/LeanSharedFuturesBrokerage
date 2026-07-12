@@ -36,6 +36,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         protected override string SettleAsset => "USDC";
 
+        protected override bool EmitFundingRateImmediately => true;
+
         public override bool IsConnected => base.IsConnected && _fundingUpdateConnected;
 
         // TODO: unbestaetigt - Lighter Ticker-Update liefert funding_timestamp pro Update.
@@ -268,7 +270,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                     var now = data.DataTime ?? data.ReceiveTime;
                     var ticker = data.Data.Ticker;
 
-                    onFundingRate(now, ticker.FundingRate, ticker.FundingTimestamp);
+                    onFundingRate(ticker.FundingTimestamp, ticker.FundingRate, null);
                 });
         }
 
