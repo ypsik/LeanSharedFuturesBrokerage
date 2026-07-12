@@ -62,9 +62,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         private readonly object _fundingUpdateLock = new();
         private bool _fundingUpdateConnected = false;
         private UpdateSubscription _fundingUpdateSubscription;
+        protected override int? FundingRolloverHours => null;
+
         // Kraken locked die Rate für die kommende Stunde bereits zu Stundenbeginn fix
-        // (kein 8h-TWAP-Settlement wie bei Bybit/Hyperliquid) -> sofort emittieren sobald
-        // sich der Wert ändert, statt bis zum nächsten Rollover zu puffern.
+        // (kein 8h-TWAP-Settlement wie bei Bybit/Hyperliquid) -> beim Rollover den neuen,
+        // bereits gültigen Wert melden statt den alten, jetzt abgelaufenen Wert.
         protected override bool EmitFundingRateImmediately => true;
 
         internal KrakenFuturesBrokerage(
@@ -77,8 +79,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         {
             _restClient = restClient;
             _socketClient = socketClient;
-            // Dedicated unauthenticated socket client for public ticker/funding subscriptions.
-            _socketClientExData = new KrakenSocketClient();
+            // OutputOriginalData=true: notwendig damit data.OriginalData (Raw-JSON) im Ticker-Handler
+            // verfügbar ist, für Diagnose des RelativeFundingRate-Parsing bei XBTUSDC.
+            _socketClientExData = new KrakenSocketClient(options => { options.OutputOriginalData = true; });
 
             PopulateSPDB();
 
@@ -127,7 +130,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             }
 
             if (_socketClientExData == null)
-                _socketClientExData = new KrakenSocketClient();
+                _socketClientExData = new KrakenSocketClient(options => { options.OutputOriginalData = true; });
 
             InitializeBase(
                 _restClient.FuturesApi.SharedClient,
@@ -399,7 +402,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 nativeTicker, data =>
                 {
                     var tickerData = data.Data;
-                    onFundingRate(tickerData.Timestamp, tickerData.FundingRate, tickerData.NextFundingRateTime);
+
+                    // Diagnose Raw-JSON vs. geparster Wert für XBTUSDC (vermuteter Parsing-Bug bei
+                    // hochpreisigen Symbolen, z.B. Exponent-Verlust bei wissenschaftlicher Notation).
+                    Log.Trace($"{Name} Funding Diagnostic | Parsed RelativeFundingRate: {tickerData.RelativeFundingRate} | Raw: {data.OriginalData}");
+
+                    onFundingRate(tickerData.Timestamp, tickerData.RelativeFundingRate, tickerData.NextFundingRateTime);
                 });
         }
 
