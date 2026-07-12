@@ -494,6 +494,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
                     if (amount != 0m)
                     {
+                        Log.Trace($"OKX funding bill | Symbol={entry.Symbol} BillId={billId} SubType={entry.SubType} RawPnl={entry.ProfitAndLoss} DerivedAmount={amount}");
                         _algorithm?.Portfolio?.CashBook[SettleAsset].AddAmount(amount);
                         OnMessage(new FundingBrokerageMessageEvent(SettleAsset, amount));
                     }
