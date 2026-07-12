@@ -168,8 +168,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             return await _socketClientExData.FuturesV3Api.SubscribeToMarkPriceUpdatesAsync(
                 nativeTicker, null, data =>
                 {
-                    var now = data.DataTime ?? data.ReceiveTime;
-                    onFundingRate(now, data.Data.FundingRate, data.Data.NextFundingTime);
+                    onFundingRate(data.Data.EventTime, data.Data.FundingRate, data.Data.NextFundingTime);
                 });
         }
 
