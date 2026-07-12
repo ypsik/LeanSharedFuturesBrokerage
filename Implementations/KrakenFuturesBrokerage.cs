@@ -402,11 +402,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 nativeTicker, data =>
                 {
                     var tickerData = data.Data;
-
-                    // Diagnose Raw-JSON vs. geparster Wert für XBTUSDC (vermuteter Parsing-Bug bei
-                    // hochpreisigen Symbolen, z.B. Exponent-Verlust bei wissenschaftlicher Notation).
-                    Log.Trace($"{Name} Funding Diagnostic | Parsed RelativeFundingRate: {tickerData.RelativeFundingRate} | Raw: {data.OriginalData}");
-
                     onFundingRate(tickerData.Timestamp, tickerData.RelativeFundingRate, tickerData.NextFundingRateTime);
                 });
         }
