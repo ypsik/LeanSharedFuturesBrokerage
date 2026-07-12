@@ -62,7 +62,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         private readonly object _fundingUpdateLock = new();
         private bool _fundingUpdateConnected = false;
         private UpdateSubscription _fundingUpdateSubscription;
-        protected override int? FundingRolloverHours => null;
+        // Kraken locked die Rate für die kommende Stunde bereits zu Stundenbeginn fix
+        // (kein 8h-TWAP-Settlement wie bei Bybit/Hyperliquid) -> sofort emittieren sobald
+        // sich der Wert ändert, statt bis zum nächsten Rollover zu puffern.
+        protected override bool EmitFundingRateImmediately => true;
 
         internal KrakenFuturesBrokerage(
             IAlgorithm algorithm,
@@ -190,7 +193,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                         sub?.Error?.ToString()
                     );
 
-                    if (sub?.Success??false)
+                    if (sub?.Success ?? false)
                         _fundingUpdateSubscription = sub.Data;
                 }
 
@@ -396,7 +399,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 nativeTicker, data =>
                 {
                     var tickerData = data.Data;
-                    onFundingRate(data.ReceiveTime, tickerData.RelativeFundingRate, tickerData.NextFundingRateTime);
+                    onFundingRate(tickerData.Timestamp, tickerData.FundingRate, tickerData.NextFundingRateTime);
                 });
         }
 

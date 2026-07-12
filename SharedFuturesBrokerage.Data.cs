@@ -23,6 +23,15 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         protected virtual int? FundingRolloverHours => 8;
 
+        /// <summary>
+        /// true: Rate wird sofort emittiert, sobald sich der vom Socket gelieferte Wert ändert
+        /// (z.B. Kraken: Rate steht bereits zu Stundenbeginn fix, kein Grund auf Rollover zu warten).
+        /// false (Default): Rate wird erst beim nächsten Rollover-Trigger emittiert, mit dem zuvor
+        /// gültigen (jetzt final abgeschlossenen) Wert — passend für Exchanges mit TWAP-Settlement,
+        /// bei denen die Rate erst am Ende der Periode final feststeht (z.B. Bybit, Hyperliquid).
+        /// </summary>
+        protected virtual bool EmitFundingRateImmediately => false;
+
         protected virtual int MaxHistoryLookbackMinutes => 7200;
 
         #region IDataQueueHandler
@@ -383,7 +392,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                             if ((currentNextFundingTime ?? now) > state.NextFundingTime)
                             {
                                 isRollover = true;
-                                rateToReport = state.Rate;
+                                // Default (z.B. Bybit/Hyperliquid, 8h-TWAP-Settlement): der alte,
+                                // jetzt final abgeschlossene Wert wird gemeldet, da die neue Rate
+                                // beim TWAP-Settlement-Exchange erst am Ende der Periode final feststeht.
+                                // EmitFundingRateImmediately (z.B. Kraken): die Rate steht bereits zu
+                                // Periodenbeginn fix, daher direkt den neuen (aktuell gültigen) Wert melden.
+                                rateToReport = EmitFundingRateImmediately ? (fundingRate ?? state.Rate) : state.Rate;
                                 return (currentNextFundingTime, fundingRate ?? state.Rate);
                             }
 
