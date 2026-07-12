@@ -81,7 +81,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             _socketClient = socketClient;
             // OutputOriginalData=true: notwendig damit data.OriginalData (Raw-JSON) im Ticker-Handler
             // verfügbar ist, für Diagnose des RelativeFundingRate-Parsing bei XBTUSDC.
-            _socketClientExData = new KrakenSocketClient(options => { options.OutputOriginalData = true; });
+            _socketClientExData = new KrakenSocketClient();
 
             PopulateSPDB();
 
@@ -130,7 +130,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             }
 
             if (_socketClientExData == null)
-                _socketClientExData = new KrakenSocketClient(options => { options.OutputOriginalData = true; });
+                _socketClientExData = new KrakenSocketClient();
 
             InitializeBase(
                 _restClient.FuturesApi.SharedClient,
