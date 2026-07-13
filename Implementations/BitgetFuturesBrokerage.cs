@@ -123,7 +123,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 var ticker = contract.Symbol;
 
                 var tickSize = (decimal)Math.Pow(10, -contract.PriceDecimals);
-                var lotSize = contract.MinOrderQuantity;
+                var lotSize = contract.QuantityStep;
 
                 var symbolProperties = new SymbolProperties(
                     description: $"Bitget {contract.BaseAsset} Perpetual",
