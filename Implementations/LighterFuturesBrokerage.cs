@@ -152,8 +152,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                             if (update?.Data?.FundingHistories == null || update.Data.FundingHistories.Count == 0)
                                 return;
 
-                            foreach (var funding in update.Data.FundingHistories.Values
-                                .Where(f => f != null && f.Timestamp > connectTime))
+                            foreach (var funding in update.Data.FundingHistories
+                                   .SelectMany(kvp => kvp.Value)
+                                   .Where(f => f.Timestamp > connectTime))
                             {
                                 if (_algorithm?.Portfolio?.CashBook != null)
                                 {
@@ -162,7 +163,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                                 }
                             }
 
-                            var maxTimestamp = update.Data.FundingHistories.Values.Max(f => f?.Timestamp ?? DateTime.MinValue);
+                            var maxTimestamp = update.Data.FundingHistories.SelectMany(kvp => kvp.Value).Max(h => h?.Timestamp ?? DateTime.UtcNow);
                             if (maxTimestamp > connectTime)
                                 connectTime = maxTimestamp;
                         }));
