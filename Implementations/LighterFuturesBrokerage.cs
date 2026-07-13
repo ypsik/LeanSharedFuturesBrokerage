@@ -267,7 +267,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             return await _socketClientExData.ExchangeApi.ExchangeData.SubscribeToFuturesTickerUpdatesAsync(
                 nativeTicker, data =>
                 {
-                    var now = data.DataTime ?? data.ReceiveTime;
                     var ticker = data.Data.Ticker;
 
                     onFundingRate(ticker.FundingTimestamp, ticker.FundingRate, null);
