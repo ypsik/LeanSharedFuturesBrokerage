@@ -91,7 +91,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 var tickSize = symbol.PriceFilter?.TickSize
                     ?? (decimal)Math.Pow(10, -symbol.PricePrecision);
 
-                var lotSize = symbol.LotSizeFilter?.MinQuantity
+                var lotSize = symbol.LotSizeFilter?.StepSize
                     ?? (decimal)Math.Pow(10, -symbol.QuantityPrecision);
 
                 var symbolProperties = new SymbolProperties(
@@ -244,7 +244,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 sub?.Error?.ToString()
             );
 
-            if (sub?.Success??false)
+            if (sub?.Success ?? false)
             {
                 _fundingUpdateSubscription = sub.Data;
 
@@ -355,7 +355,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             var newExchangeId = res.Data?.Id ?? 0;
             return new HttpResult<SharedId>(
                 Name,
-                new SharedId(newExchangeId.ToString()), 
+                new SharedId(newExchangeId.ToString()),
                 null
             );
         }

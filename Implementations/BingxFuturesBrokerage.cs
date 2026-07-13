@@ -83,7 +83,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
                 var tickSize = (decimal)Math.Pow(10, -contract.PricePrecision);
 
-                var lotSize = contract.MinOrderQuantity;
+                var lotSize = (decimal)Math.Pow(10, -contract.QuantityPrecision);
 
                 var symbolProperties = new SymbolProperties(
                     description: $"BingX {contract.Asset} Perpetual",
@@ -269,7 +269,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                     ct: _userStreamCts.Token));
 
             SetupSubscriptionEvents(
-                sub?.Success??false,
+                sub?.Success ?? false,
                 sub?.Data,
                 (state) => _fundingUpdateConnected = state,
                 "Wallet updates",
@@ -457,7 +457,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         protected override string GenerateClientId(int _)
         {
-            return _restClient.PerpetualFuturesApi.SharedClient.GenerateClientOrderId(); 
+            return _restClient.PerpetualFuturesApi.SharedClient.GenerateClientOrderId();
         }
 
 
@@ -562,7 +562,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             // erfolgreich war, bevor wir hier eingreifen.
 
             return new HttpResult<SharedId>(
-                Name,                
+                Name,
                 new SharedId(newExchangeId),
                 null
             );
