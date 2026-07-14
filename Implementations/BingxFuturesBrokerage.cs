@@ -41,6 +41,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         private bool _isHedgeMode = true;
 
         public override bool ExchangeSupportsUserTradeStream => false;
+        public override decimal MinimumOrderNotionalValue => 2.0m;
 
         internal BingxFuturesBrokerage(
             IAlgorithm algorithm,
