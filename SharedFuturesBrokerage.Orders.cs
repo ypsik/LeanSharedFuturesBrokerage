@@ -104,6 +104,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             public DateTime LastUpdateUtc;
             public bool IsUpdatePending;
             public decimal CumulativeFeePaid;
+            public decimal CumulativeCostFilled;
 
             public decimal Remaining => OriginalQuantity - FilledQuantity;
 
@@ -782,6 +783,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                     state.FilledQuantity += signedFill;
                     state.CumulativeFeePaid += fee;
+                    // NEU: CumulativeCostFilled mitführen. Hier nicht zwingend gebraucht (trade.Price ist
+                    // bereits der exakte Fill-Preis dieses einzelnen Trades, kein Delta nötig), aber der
+                    // Konsistenz halber trotzdem befüllt.
+                    state.CumulativeCostFilled += trade.Quantity * trade.Price;
                     state.LastUpdateUtc = DateTime.UtcNow;
 
                     var leanStatus = Math.Abs(state.FilledQuantity) >= Math.Abs(state.OriginalQuantity)
@@ -1013,6 +1018,31 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                                 fillState.FilledQuantity += signedFill;
                                 fillState.CumulativeFeePaid += fee;
+
+                                // NEU: Fill-Preis dieses einzelnen Deltas aus AveragePrice × kumulierte Menge
+                                // ableiten, statt fälschlich OrderPrice (Limit-/Original-Preis) zu nehmen.
+                                // Nur wenn die Exchange AveragePrice für dieses Event liefert (nicht für
+                                // alle Shared-Exchanges wie Aster/OKX garantiert) - sonst unverändertes
+                                // OrderPrice-Fallback-Verhalten wie vorher, CumulativeCostFilled bleibt
+                                // dann unangetastet (kein Corruption durch angenommene 0).
+                                decimal fillPrice;
+                                if (o.AveragePrice.HasValue && o.AveragePrice.Value > 0m)
+                                {
+                                    var previousCost = fillState.CumulativeCostFilled;
+                                    var newCumulativeCost = o.AveragePrice.Value * absFilled;
+                                    var deltaCost = newCumulativeCost - previousCost;
+
+                                    fillPrice = deltaCost != 0m
+                                        ? Math.Abs(deltaCost / signedFill)
+                                        : o.AveragePrice.Value;
+
+                                    fillState.CumulativeCostFilled = newCumulativeCost;
+                                }
+                                else
+                                {
+                                    fillPrice = o.OrderPrice ?? 0m;
+                                }
+
                                 fillState.LastUpdateUtc = DateTime.UtcNow;
 
                                 var leanStatus = Math.Abs(fillState.FilledQuantity) >= Math.Abs(fillState.OriginalQuantity) || o.Status == SharedOrderStatus.Filled
@@ -1029,7 +1059,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                                 OnOrderEvent(new OrderEvent(fillState.Order, DateTime.UtcNow, new OrderFee(new CashAmount(fee, o.FeeAsset ?? SettleAsset)))
                                 {
                                     Status = leanStatus,
-                                    FillPrice = o.OrderPrice ?? 0m,
+                                    FillPrice = fillPrice,
                                     FillQuantity = signedFill,
                                     Message = "Order socket stream (Execution fallback)"
                                 });
