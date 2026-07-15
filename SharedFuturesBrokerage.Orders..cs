@@ -876,6 +876,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                               $"Symbol='{o.Symbol}', " +
                               $"Status='{o.Status}', " +
                               $"Qty='{o.OrderQuantity?.QuantityInBaseAsset ?? o.OrderQuantity?.QuantityInContracts}', " +
+                              $"QtyFilled='{o.QuantityFilled?.QuantityInBaseAsset ?? o.QuantityFilled?.QuantityInContracts ?? 0m}', " +
                               $"Price='{o.OrderPrice}'" +
                               (!ExchangeSupportsUserTradeStream
                                   ? $", Fee='{o.Fee}', FeeAsset='{o.FeeAsset}', AvgPrice='{o.AveragePrice}', LastTradeFee='{o.LastTrade?.Fee}'"
