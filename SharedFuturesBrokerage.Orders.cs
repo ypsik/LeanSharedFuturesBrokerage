@@ -981,9 +981,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     // -------------------------------------------------------
                     // Dies MUSS vor dem State-Lookup passieren, damit es auch greift, 
                     // wenn der Trade-Socket die Order bereits gelöscht hat!
-                    if (o.Status == SharedOrderStatus.Filled)
+                    if (o.Status == SharedOrderStatus.Filled || o.Status == SharedOrderStatus.Open)
                     {
-                        if (ExchangeSupportsUserTradeStream)
+                        if (ExchangeSupportsUserTradeStream && o.Status == SharedOrderStatus.Filled)
                         {
                             Log.Trace($"{Name}.HandleOrderSocket: Hard-ignoring {o.Status} for {o.OrderId} in Order-Stream. Trade-Stream owns this.");
 
@@ -994,8 +994,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                             }
                             continue;
                         }
-                        // Wenn kein Trade-Stream unterstützt wird, verarbeiten wir jegliche Fills hier direkt 1:1 mit echten Fee-Daten aus dem Order-Payload
-                        else if (_orderStateManager.TryGetByExchangeId(o.OrderId, out var fillState))
+                        // Wenn kein Trade-Stream unterstützt wird ODER es sich um eine Teilfüllung handelt
+                        // (SharedOrderStatus kennt kein eigenes PartiallyFilled, siehe ParseOrderStatus in
+                        // BingX.Net → kommt hier als Open mit QuantityFilled > 0 an), verarbeiten wir den
+                        // Fill-Delta hier direkt 1:1 mit echten Fee-Daten aus dem Order-Payload.
+                        else if (!ExchangeSupportsUserTradeStream && _orderStateManager.TryGetByExchangeId(o.OrderId, out var fillState))
                         {
                             var sign = fillState.OriginalQuantity > 0 ? 1m : -1m;
                             var absFilled = HasExchangeQuantity(o.QuantityFilled)
