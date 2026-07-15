@@ -808,7 +808,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 catch (Exception ex)
                 {
                     Log.Error($"{Name}.HandleUserTradeSocket: Unhandled exception processing OrderId='{trade.OrderId}' " +
-                              $"ClientOrderId='{trade.ClientOrderId}' Symbol='{trade.Symbol}': {ex}");
+                              $"ClientOrderId='{trade.ClientOrderId}' Symbol='{trade.Symbol}': {ex.ToString()}");
                 }
             }
         }
@@ -1081,7 +1081,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 catch (Exception ex)
                 {
                     Log.Error($"{Name}.HandleOrderSocket: Unhandled exception processing OrderId='{o.OrderId}' " +
-                              $"ClientOrderId='{o.ClientOrderId}' Status='{o.Status}': {ex}");
+                              $"ClientOrderId='{o.ClientOrderId}' Status='{o.Status}': {ex.ToString()}");
                 }
             }
         }
@@ -1193,7 +1193,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 catch (OperationCanceledException) { break; }
                 catch (Exception ex)
                 {
-                    Log.Error($"{Name}.ReconcileLoop Error: {ex.Message}");
+                    Log.Error($"{Name}.ReconcileLoop Error: {ex.ToString()}");
                 }
             }
         }
