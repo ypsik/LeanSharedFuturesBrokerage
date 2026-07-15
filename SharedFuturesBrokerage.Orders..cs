@@ -670,138 +670,146 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         {
             foreach (var trade in update.Data)
             {
-                // =======================================================
-                // 🔥 RAW DIAGNOSTIC LOGGING 🔥
-                // =======================================================
-                Log.Trace($"{Name}.HandleUserTradeSocket RAW PAYLOAD: " +
-                          $"UpdateTimeTicks='{trade.Timestamp.Ticks}', " +
-                          $"OrderId='{trade.OrderId}', " +
-                          $"ClientOrderId='{trade.ClientOrderId}', " +
-                          $"Symbol='{trade.Symbol}', " +
-                          $"Qty='{trade.Quantity}', " +
-                          $"Side='{trade.Side}', " +
-                          $"Fee='{trade.Fee}', " +
-                          $"Price='{trade.Price}'");
-
-                if (string.IsNullOrEmpty(trade.OrderId)) continue;
-
-                OrderState? state = null;
-
-                // =======================================================
-                // 1. VERSUCH: O(1) Lookup via Exchange-ID (Hidden Index)
-                // =======================================================
-                if (!_orderStateManager.TryGetByExchangeId(trade.OrderId, out state))
+                try
                 {
                     // =======================================================
-                    // 2. VERSUCH: Fallback via ClientOrderId (Master-Dict)
-                    // Deckt ab:
-                    //   Fall A – Order noch im Placing-State (BrokerId = clientId, daher kein Hit oben)
-                    //   Fall B – Cancel+Replace: MapNewExchangeId noch nicht gelaufen,
-                    //            aber _statesByClientId[clientOrderId] zeigt immer auf den aktuellen State
+                    // 🔥 RAW DIAGNOSTIC LOGGING 🔥
                     // =======================================================
-                    if (!string.IsNullOrEmpty(trade.ClientOrderId))
-                    {
-                        if (_orderStateManager.TryGetValue(trade.ClientOrderId, out state))
-                        {
-                            _orderStateManager.MapNewExchangeId(trade.ClientOrderId, trade.OrderId);
+                    Log.Trace($"{Name}.HandleUserTradeSocket RAW PAYLOAD: " +
+                              $"UpdateTimeTicks='{trade.Timestamp.Ticks}', " +
+                              $"OrderId='{trade.OrderId}', " +
+                              $"ClientOrderId='{trade.ClientOrderId}', " +
+                              $"Symbol='{trade.Symbol}', " +
+                              $"Qty='{trade.Quantity}', " +
+                              $"Side='{trade.Side}', " +
+                              $"Fee='{trade.Fee}', " +
+                              $"Price='{trade.Price}'");
 
-                            // Alias-Cleanup falls neue clientOrderId (z.B. Bitget Edit)
-                            if (trade.ClientOrderId != state.ClientOrderId)
+                    if (string.IsNullOrEmpty(trade.OrderId)) continue;
+
+                    OrderState? state = null;
+
+                    // =======================================================
+                    // 1. VERSUCH: O(1) Lookup via Exchange-ID (Hidden Index)
+                    // =======================================================
+                    if (!_orderStateManager.TryGetByExchangeId(trade.OrderId, out state))
+                    {
+                        // =======================================================
+                        // 2. VERSUCH: Fallback via ClientOrderId (Master-Dict)
+                        // Deckt ab:
+                        //   Fall A – Order noch im Placing-State (BrokerId = clientId, daher kein Hit oben)
+                        //   Fall B – Cancel+Replace: MapNewExchangeId noch nicht gelaufen,
+                        //            aber _statesByClientId[clientOrderId] zeigt immer auf den aktuellen State
+                        // =======================================================
+                        if (!string.IsNullOrEmpty(trade.ClientOrderId))
+                        {
+                            if (_orderStateManager.TryGetValue(trade.ClientOrderId, out state))
                             {
-                                _orderStateManager.RemoveAlias(state.ClientOrderId);
-                                state.ClientOrderId = trade.ClientOrderId;
+                                _orderStateManager.MapNewExchangeId(trade.ClientOrderId, trade.OrderId);
+
+                                // Alias-Cleanup falls neue clientOrderId (z.B. Bitget Edit)
+                                if (trade.ClientOrderId != state.ClientOrderId)
+                                {
+                                    _orderStateManager.RemoveAlias(state.ClientOrderId);
+                                    state.ClientOrderId = trade.ClientOrderId;
+                                }
                             }
                         }
                     }
-                }
 
-                if (state == null)
-                {
                     if (state == null)
                     {
-                        state = _orderStateManager.GetAllStates().FirstOrDefault(s =>
-                            NativeTicker(s.Order.Symbol) == trade.Symbol &&
-                            (s.Order.Direction == (trade.Side == SharedOrderSide.Buy ? OrderDirection.Buy : OrderDirection.Sell)) &&
-                            (
-                                // Fall A: Reguläre neue Order im Transit (BrokerId ist leer)
-                                // JEDER erste Teil-Fill (kleiner oder gleich der Gesamtmenge) wird akzeptiert!
-                                (
-                                    (s.State == OrderLifeCycleState.Placing || s.State == OrderLifeCycleState.Submitted) &&
-                                    string.IsNullOrEmpty(s.BrokerId) &&
-                                    Math.Abs(trade.Quantity) <= Math.Abs(s.Remaining)
-                                )
-                                ||
-                                // Fall B: Schwebendes Update (IsUpdatePending ist aktiv)
-                                // JEDER Fill (egal wie groß) wird geschluckt, da Kontext eindeutig!
-                                (
-                                    s.IsUpdatePending &&
-                                    (s.State == OrderLifeCycleState.Open || s.State == OrderLifeCycleState.PartiallyFilled || s.State == OrderLifeCycleState.Submitted)
-                                )
-                            ));
-
-                        if (state != null)
+                        if (state == null)
                         {
-                            Log.Trace($"{Name}: Heuristic match successful! Linking unknown Trade {trade.OrderId} (Qty: {trade.Quantity}) to ClientOrder {state.ClientOrderId}");
+                            state = _orderStateManager.GetAllStates().FirstOrDefault(s =>
+                                NativeTicker(s.Order.Symbol) == trade.Symbol &&
+                                (s.Order.Direction == (trade.Side == SharedOrderSide.Buy ? OrderDirection.Buy : OrderDirection.Sell)) &&
+                                (
+                                    // Fall A: Reguläre neue Order im Transit (BrokerId ist leer)
+                                    // JEDER erste Teil-Fill (kleiner oder gleich der Gesamtmenge) wird akzeptiert!
+                                    (
+                                        (s.State == OrderLifeCycleState.Placing || s.State == OrderLifeCycleState.Submitted) &&
+                                        string.IsNullOrEmpty(s.BrokerId) &&
+                                        Math.Abs(trade.Quantity) <= Math.Abs(s.Remaining)
+                                    )
+                                    ||
+                                    // Fall B: Schwebendes Update (IsUpdatePending ist aktiv)
+                                    // JEDER Fill (egal wie groß) wird geschluckt, da Kontext eindeutig!
+                                    (
+                                        s.IsUpdatePending &&
+                                        (s.State == OrderLifeCycleState.Open || s.State == OrderLifeCycleState.PartiallyFilled || s.State == OrderLifeCycleState.Submitted)
+                                    )
+                                ));
 
-                            // Der Trade-Socket mappt die neue ID sofort! 
-                            // Folge-Teil-Fills laufen ab jetzt instantan über den O(1) Exchange-ID Index.
-                            _orderStateManager.MapNewExchangeId(state.ClientOrderId, trade.OrderId);
-
-                            if (state.IsUpdatePending)
+                            if (state != null)
                             {
-                                var brokerId = state.Order.BrokerId;
-                                brokerId.Add(trade.Id);
-                                OnOrderIdChangedEvent(new BrokerageOrderIdChangedEvent
+                                Log.Trace($"{Name}: Heuristic match successful! Linking unknown Trade {trade.OrderId} (Qty: {trade.Quantity}) to ClientOrder {state.ClientOrderId}");
+
+                                // Der Trade-Socket mappt die neue ID sofort! 
+                                // Folge-Teil-Fills laufen ab jetzt instantan über den O(1) Exchange-ID Index.
+                                _orderStateManager.MapNewExchangeId(state.ClientOrderId, trade.OrderId);
+
+                                if (state.IsUpdatePending)
                                 {
-                                    OrderId = state.Order.Id,
-                                    BrokerId = brokerId
-                                });
+                                    var brokerId = state.Order.BrokerId;
+                                    brokerId.Add(trade.Id);
+                                    OnOrderIdChangedEvent(new BrokerageOrderIdChangedEvent
+                                    {
+                                        OrderId = state.Order.Id,
+                                        BrokerId = brokerId
+                                    });
+                                }
+                            }
+                            else
+                            {
+                                Log.Trace($"{Name}.HandleUserTradeSocket: Ignoring trade {trade.OrderId}. Neither OrderId nor ClientOrderId {trade.ClientOrderId} found. " +
+                                    $"Active states: [{string.Join(", ", _orderStateManager.GetAllStates().Select(s => $"ClientId={s.ClientOrderId} Symbol={NativeTicker(s.Order.Symbol)} State={s.State} IsUpdatePending={s.IsUpdatePending} BrokerId={s.BrokerId}"))}]");
+                                continue;
                             }
                         }
-                        else
-                        {
-                            Log.Trace($"{Name}.HandleUserTradeSocket: Ignoring trade {trade.OrderId}. Neither OrderId nor ClientOrderId {trade.ClientOrderId} found. " +
-                                $"Active states: [{string.Join(", ", _orderStateManager.GetAllStates().Select(s => $"ClientId={s.ClientOrderId} Symbol={NativeTicker(s.Order.Symbol)} State={s.State} IsUpdatePending={s.IsUpdatePending} BrokerId={s.BrokerId}"))}]");
-                            continue;
-                        }
                     }
+
+                    // =======================================================
+                    // TRADE VERARBEITEN (Da 'state' eine Referenz ist, updaten wir das richtige Objekt!)
+                    // Hinweis: trade.Quantity wird hier bewusst NICHT über FromExchangeQuantity umgerechnet.
+                    // Dieser Pfad wird nur bei ExchangeSupportsUserTradeStream=true genutzt; alle bisher
+                    // angebundenen Exchanges mit User-Trade-Stream liefern Base-Asset-Mengen (kein Contract-
+                    // Exchange nutzt aktuell diesen Pfad, OKX z.B. hat ExchangeSupportsUserTradeStream=false).
+                    // =======================================================
+                    var sign = trade.Side == SharedOrderSide.Buy ? 1m : -1m;
+                    var signedFill = trade.Quantity * sign;
+                    var fee = trade.Fee ?? 0m;
+
+                    state.FilledQuantity += signedFill;
+                    state.CumulativeFeePaid += fee;
+                    state.LastUpdateUtc = DateTime.UtcNow;
+
+                    var leanStatus = Math.Abs(state.FilledQuantity) >= Math.Abs(state.OriginalQuantity)
+                        ? QuantConnect.Orders.OrderStatus.Filled
+                        : QuantConnect.Orders.OrderStatus.PartiallyFilled;
+
+                    state.State = leanStatus == QuantConnect.Orders.OrderStatus.Filled ? OrderLifeCycleState.Filled : OrderLifeCycleState.PartiallyFilled;
+
+                    // Wenn der Trade die Order schließt, räumen wir ab.
+                    // TryRemove bereinigt beide internen Dicts (_statesByClientId + _statesByExchangeId).
+                    if (state.IsClosed)
+                    {
+                        _orderStateManager.TryRemove(state.ClientOrderId, out _);
+                    }
+
+                    OnOrderEvent(new OrderEvent(state.Order, DateTime.UtcNow, new OrderFee(new CashAmount(fee, trade.FeeAsset ?? SettleAsset)))
+                    {
+                        Status = leanStatus,
+                        FillPrice = trade.Price,
+                        FillQuantity = signedFill,
+                        Message = "User trade socket"
+                    });
                 }
-
-                // =======================================================
-                // TRADE VERARBEITEN (Da 'state' eine Referenz ist, updaten wir das richtige Objekt!)
-                // Hinweis: trade.Quantity wird hier bewusst NICHT über FromExchangeQuantity umgerechnet.
-                // Dieser Pfad wird nur bei ExchangeSupportsUserTradeStream=true genutzt; alle bisher
-                // angebundenen Exchanges mit User-Trade-Stream liefern Base-Asset-Mengen (kein Contract-
-                // Exchange nutzt aktuell diesen Pfad, OKX z.B. hat ExchangeSupportsUserTradeStream=false).
-                // =======================================================
-                var sign = trade.Side == SharedOrderSide.Buy ? 1m : -1m;
-                var signedFill = trade.Quantity * sign;
-                var fee = trade.Fee ?? 0m;
-
-                state.FilledQuantity += signedFill;
-                state.CumulativeFeePaid += fee;
-                state.LastUpdateUtc = DateTime.UtcNow;
-
-                var leanStatus = Math.Abs(state.FilledQuantity) >= Math.Abs(state.OriginalQuantity)
-                    ? QuantConnect.Orders.OrderStatus.Filled
-                    : QuantConnect.Orders.OrderStatus.PartiallyFilled;
-
-                state.State = leanStatus == QuantConnect.Orders.OrderStatus.Filled ? OrderLifeCycleState.Filled : OrderLifeCycleState.PartiallyFilled;
-
-                // Wenn der Trade die Order schließt, räumen wir ab.
-                // TryRemove bereinigt beide internen Dicts (_statesByClientId + _statesByExchangeId).
-                if (state.IsClosed)
+                catch (Exception ex)
                 {
-                    _orderStateManager.TryRemove(state.ClientOrderId, out _);
+                    Log.Error($"{Name}.HandleUserTradeSocket: Unhandled exception processing OrderId='{trade.OrderId}' " +
+                              $"ClientOrderId='{trade.ClientOrderId}' Symbol='{trade.Symbol}': {ex}");
                 }
-
-                OnOrderEvent(new OrderEvent(state.Order, DateTime.UtcNow, new OrderFee(new CashAmount(fee, trade.FeeAsset ?? SettleAsset)))
-                {
-                    Status = leanStatus,
-                    FillPrice = trade.Price,
-                    FillQuantity = signedFill,
-                    Message = "User trade socket"
-                });
             }
         }
 
@@ -856,216 +864,224 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
             foreach (var o in cleanPayload)
             {
-                // =======================================================
-                // 🔥 RAW DIAGNOSTIC LOGGING 🔥
-                // =======================================================
-                Log.Trace($"{Name}.HandleOrderSocket RAW PAYLOAD: " +
-                          $"UpdateTimeTicks='{o.UpdateTime?.Ticks}', " +
-                          $"OrderId='{o.OrderId}', " +
-                          $"ClientOrderId='{o.ClientOrderId}', " +
-                          $"Symbol='{o.Symbol}', " +
-                          $"Status='{o.Status}', " +
-                          $"Qty='{o.OrderQuantity?.QuantityInBaseAsset ?? o.OrderQuantity?.QuantityInContracts}', " +
-                          $"Price='{o.OrderPrice}'" +
-                          (!ExchangeSupportsUserTradeStream
-                              ? $", Fee='{o.Fee}', FeeAsset='{o.FeeAsset}', AvgPrice='{o.AveragePrice}', LastTradeFee='{o.LastTrade?.Fee}'"
-                              : ""));
-
-                if (string.IsNullOrEmpty(o.OrderId)) continue;
-
-                // -------------------------------------------------------
-                // PLACING STATE: Instantaner Fill während PlaceOrder()
-                // Order liegt in _statesByClientId[clientOrderId], BrokerId = clientOrderId (temp).
-                // -------------------------------------------------------
-                if (!string.IsNullOrEmpty(o.ClientOrderId) &&
-                    _orderStateManager.TryGetValue(o.ClientOrderId, out var placingCandidate) &&
-                    placingCandidate.State == OrderLifeCycleState.Placing &&
-                    !_orderStateManager.TryGetByExchangeId(o.OrderId, out _))
+                try
                 {
-                    // 1. State-Properties aktualisieren
-                    placingCandidate.State = OrderLifeCycleState.Submitted;
-                    placingCandidate.LastUpdateUtc = DateTime.UtcNow;
+                    // =======================================================
+                    // 🔥 RAW DIAGNOSTIC LOGGING 🔥
+                    // =======================================================
+                    Log.Trace($"{Name}.HandleOrderSocket RAW PAYLOAD: " +
+                              $"UpdateTimeTicks='{o.UpdateTime?.Ticks}', " +
+                              $"OrderId='{o.OrderId}', " +
+                              $"ClientOrderId='{o.ClientOrderId}', " +
+                              $"Symbol='{o.Symbol}', " +
+                              $"Status='{o.Status}', " +
+                              $"Qty='{o.OrderQuantity?.QuantityInBaseAsset ?? o.OrderQuantity?.QuantityInContracts}', " +
+                              $"Price='{o.OrderPrice}'" +
+                              (!ExchangeSupportsUserTradeStream
+                                  ? $", Fee='{o.Fee}', FeeAsset='{o.FeeAsset}', AvgPrice='{o.AveragePrice}', LastTradeFee='{o.LastTrade?.Fee}'"
+                                  : ""));
 
-                    // 2. Exchange-ID atomar im Manager eintragen:
-                    //    - entfernt temp clientOrderId aus _statesByExchangeId
-                    //    - setzt state.BrokerId = o.OrderId
-                    //    - trägt unter o.OrderId in _statesByExchangeId ein
-                    //    - ergänzt Order.BrokerId
-                    //    - _statesByClientId[o.ClientOrderId] bleibt unverändert
-                    _orderStateManager.MapNewExchangeId(o.ClientOrderId, o.OrderId);
+                    if (string.IsNullOrEmpty(o.OrderId)) continue;
 
-                    Log.Trace($"{Name}.HandleOrderSocket: Placing→Submitted for {o.OrderId} via socket. Fill (if any) follows via trade socket.");
-
-                    OnOrderEvent(new OrderEvent(placingCandidate.Order, DateTime.UtcNow, OrderFee.Zero) { Status = QuantConnect.Orders.OrderStatus.Submitted });
-                    continue;
-                }
-
-                // -------------------------------------------------------
-                // MODIFY / REPLACEMENT DETECTION (Cancel + Replace)
-                // -------------------------------------------------------
-                if (!string.IsNullOrEmpty(o.ClientOrderId) &&
-                    _orderStateManager.TryGetValue(o.ClientOrderId, out var existingState) &&
-                    existingState.BrokerId != o.OrderId)
-                {
-                    // 🔥 THE ANTI-ZOMBIE GUARD 🔥
-                    // Verhindert Rückwärts-Swaps, falls das Cancel-Event der ALTEN Order
-                    // nach dem New-Event der NEUEN Order eintrifft.
-                    if (existingState.Order.BrokerId.Contains(o.OrderId))
+                    // -------------------------------------------------------
+                    // PLACING STATE: Instantaner Fill während PlaceOrder()
+                    // Order liegt in _statesByClientId[clientOrderId], BrokerId = clientOrderId (temp).
+                    // -------------------------------------------------------
+                    if (!string.IsNullOrEmpty(o.ClientOrderId) &&
+                        _orderStateManager.TryGetValue(o.ClientOrderId, out var placingCandidate) &&
+                        placingCandidate.State == OrderLifeCycleState.Placing &&
+                        !_orderStateManager.TryGetByExchangeId(o.OrderId, out _))
                     {
-                        Log.Trace($"{Name}.HandleOrderSocket: Ignoring backwards swap to old ID {o.OrderId}.");
-                    }
-                    else
-                    {
-                        var oldBrokerId = existingState.BrokerId;
-
                         // 1. State-Properties aktualisieren
-                        existingState.LastUpdateUtc = DateTime.UtcNow;
+                        placingCandidate.State = OrderLifeCycleState.Submitted;
+                        placingCandidate.LastUpdateUtc = DateTime.UtcNow;
 
-                        // 2. Exchange-ID atomar tauschen:
-                        //    - entfernt alte BrokerId aus _statesByExchangeId
+                        // 2. Exchange-ID atomar im Manager eintragen:
+                        //    - entfernt temp clientOrderId aus _statesByExchangeId
                         //    - setzt state.BrokerId = o.OrderId
                         //    - trägt unter o.OrderId in _statesByExchangeId ein
                         //    - ergänzt Order.BrokerId
                         //    - _statesByClientId[o.ClientOrderId] bleibt unverändert
                         _orderStateManager.MapNewExchangeId(o.ClientOrderId, o.OrderId);
 
-                        // Bitget-Style: neue clientOrderId war temporärer Alias → alten Key entfernen und State updaten
-                        if (o.ClientOrderId != existingState.ClientOrderId)
-                        {
-                            _orderStateManager.RemoveAlias(existingState.ClientOrderId);
-                            existingState.ClientOrderId = o.ClientOrderId;
-                        }
-                        existingState.IsUpdatePending = false;
-                        var prevState = existingState.State;
-                        existingState.State = existingState.FilledQuantity != 0m
-                            ? (Math.Abs(existingState.FilledQuantity) >= Math.Abs(existingState.OriginalQuantity)
-                                ? OrderLifeCycleState.Filled
-                                : OrderLifeCycleState.PartiallyFilled)
-                            : OrderLifeCycleState.Open;
+                        Log.Trace($"{Name}.HandleOrderSocket: Placing→Submitted for {o.OrderId} via socket. Fill (if any) follows via trade socket.");
 
-                        if (existingState.State == OrderLifeCycleState.Open && prevState == OrderLifeCycleState.Submitted)
-                        {
-                            OnOrderEvent(new OrderEvent(existingState.Order, DateTime.UtcNow, OrderFee.Zero)
-                            {
-                                Status = QuantConnect.Orders.OrderStatus.UpdateSubmitted,
-                                Message = "Order modified"
-                            });
-                        }
-
-                        var brokerid = existingState.Order.BrokerId;
-                        brokerid.Add(o.OrderId);
-
-                        OnOrderIdChangedEvent(new BrokerageOrderIdChangedEvent
-                        {
-                            OrderId = existingState.Order.Id,
-                            BrokerId = brokerid
-                        });
-
-                        Log.Trace($"{Name}.HandleOrderSocket: Modify mapped via Socket | Old: {oldBrokerId} → New: {o.OrderId}");
-                    }
-                }
-
-                // -------------------------------------------------------
-                // 🔥 SENSEMANN-CHECK: Fills aus dem Order-Stream vernichten 🔥
-                // -------------------------------------------------------
-                // Dies MUSS vor dem State-Lookup passieren, damit es auch greift, 
-                // wenn der Trade-Socket die Order bereits gelöscht hat!
-                if (o.Status == SharedOrderStatus.Filled)
-                {
-                    if (ExchangeSupportsUserTradeStream)
-                    {
-                        Log.Trace($"{Name}.HandleOrderSocket: Hard-ignoring {o.Status} for {o.OrderId} in Order-Stream. Trade-Stream owns this.");
-
-                        // Wir setzen nur das Pending-Flag zurück, falls die Order noch modifiziert wurde.
-                        if (_orderStateManager.TryGetByExchangeId(o.OrderId, out var pendingState))
-                        {
-                            pendingState.IsUpdatePending = false;
-                        }
-                        continue;
-                    }
-                    // Wenn kein Trade-Stream unterstützt wird, verarbeiten wir jegliche Fills hier direkt 1:1 mit echten Fee-Daten aus dem Order-Payload
-                    else if (_orderStateManager.TryGetByExchangeId(o.OrderId, out var fillState))
-                    {
-                        var sign = fillState.OriginalQuantity > 0 ? 1m : -1m;
-                        var absFilled = HasExchangeQuantity(o.QuantityFilled)
-                            ? FromExchangeQuantity(fillState.Order.Symbol, o.QuantityFilled)
-                            : (o.Status == SharedOrderStatus.Filled ? Math.Abs(fillState.OriginalQuantity) : 0m);
-                        var targetSignedFilled = absFilled * sign;
-                        var signedFill = targetSignedFilled - fillState.FilledQuantity;
-
-                        if (Math.Abs(signedFill) > 0)
-                        {
-                            var fee = o.Fee ?? 0m;
-
-                            fillState.FilledQuantity += signedFill;
-                            fillState.CumulativeFeePaid += fee;
-                            fillState.LastUpdateUtc = DateTime.UtcNow;
-
-                            var leanStatus = Math.Abs(fillState.FilledQuantity) >= Math.Abs(fillState.OriginalQuantity) || o.Status == SharedOrderStatus.Filled
-                                ? QuantConnect.Orders.OrderStatus.Filled
-                                : QuantConnect.Orders.OrderStatus.PartiallyFilled;
-
-                            fillState.State = leanStatus == QuantConnect.Orders.OrderStatus.Filled ? OrderLifeCycleState.Filled : OrderLifeCycleState.PartiallyFilled;
-
-                            if (fillState.IsClosed)
-                            {
-                                _orderStateManager.TryRemove(fillState.ClientOrderId, out _);
-                            }
-
-                            OnOrderEvent(new OrderEvent(fillState.Order, DateTime.UtcNow, new OrderFee(new CashAmount(fee, o.FeeAsset ?? SettleAsset)))
-                            {
-                                Status = leanStatus,
-                                FillPrice = o.OrderPrice ?? 0m,
-                                FillQuantity = signedFill,
-                                Message = "Order socket stream (Execution fallback)"
-                            });
-
-                            if (leanStatus == QuantConnect.Orders.OrderStatus.Filled)
-                            {
-                                continue;
-                            }
-                        }
-                    }
-                }
-
-                // -------------------------------------------------------
-                // NORMAL STATUS UPDATE (Nur für Canceled / Open etc.)
-                // -------------------------------------------------------
-                if (_orderStateManager.TryGetByExchangeId(o.OrderId, out var state))
-                {
-                    // Ignoriere Status-Events von alten, ersetzten Tickets
-                    if (o.OrderId != state.BrokerId)
-                    {
-                        Log.Trace($"{Name}.HandleOrderSocket: Ignoring status '{o.Status}' for old replaced ticket {o.OrderId}. Current active ticket is {state.BrokerId}.");
+                        OnOrderEvent(new OrderEvent(placingCandidate.Order, DateTime.UtcNow, OrderFee.Zero) { Status = QuantConnect.Orders.OrderStatus.Submitted });
                         continue;
                     }
 
-                    state.LastUpdateUtc = DateTime.UtcNow;
-                    var absFilled = FromExchangeQuantity(state.Order.Symbol, o.QuantityFilled);
-                    var leanStatus = MapStatus(o.Status, absFilled);
-
-                    if (leanStatus is QuantConnect.Orders.OrderStatus.Canceled or QuantConnect.Orders.OrderStatus.Invalid)
+                    // -------------------------------------------------------
+                    // MODIFY / REPLACEMENT DETECTION (Cancel + Replace)
+                    // -------------------------------------------------------
+                    if (!string.IsNullOrEmpty(o.ClientOrderId) &&
+                        _orderStateManager.TryGetValue(o.ClientOrderId, out var existingState) &&
+                        existingState.BrokerId != o.OrderId)
                     {
-                        if (state.IsUpdatePending)
+                        // 🔥 THE ANTI-ZOMBIE GUARD 🔥
+                        // Verhindert Rückwärts-Swaps, falls das Cancel-Event der ALTEN Order
+                        // nach dem New-Event der NEUEN Order eintrifft.
+                        if (existingState.Order.BrokerId.Contains(o.OrderId))
                         {
-                            Log.Trace($"{Name}.HandleOrderSocket: Suppressing Cancel event for {state.BrokerId} because an Update is pending.");
+                            Log.Trace($"{Name}.HandleOrderSocket: Ignoring backwards swap to old ID {o.OrderId}.");
+                        }
+                        else
+                        {
+                            var oldBrokerId = existingState.BrokerId;
+
+                            // 1. State-Properties aktualisieren
+                            existingState.LastUpdateUtc = DateTime.UtcNow;
+
+                            // 2. Exchange-ID atomar tauschen:
+                            //    - entfernt alte BrokerId aus _statesByExchangeId
+                            //    - setzt state.BrokerId = o.OrderId
+                            //    - trägt unter o.OrderId in _statesByExchangeId ein
+                            //    - ergänzt Order.BrokerId
+                            //    - _statesByClientId[o.ClientOrderId] bleibt unverändert
+                            _orderStateManager.MapNewExchangeId(o.ClientOrderId, o.OrderId);
+
+                            // Bitget-Style: neue clientOrderId war temporärer Alias → alten Key entfernen und State updaten
+                            if (o.ClientOrderId != existingState.ClientOrderId)
+                            {
+                                _orderStateManager.RemoveAlias(existingState.ClientOrderId);
+                                existingState.ClientOrderId = o.ClientOrderId;
+                            }
+                            existingState.IsUpdatePending = false;
+                            var prevState = existingState.State;
+                            existingState.State = existingState.FilledQuantity != 0m
+                                ? (Math.Abs(existingState.FilledQuantity) >= Math.Abs(existingState.OriginalQuantity)
+                                    ? OrderLifeCycleState.Filled
+                                    : OrderLifeCycleState.PartiallyFilled)
+                                : OrderLifeCycleState.Open;
+
+                            if (existingState.State == OrderLifeCycleState.Open && prevState == OrderLifeCycleState.Submitted)
+                            {
+                                OnOrderEvent(new OrderEvent(existingState.Order, DateTime.UtcNow, OrderFee.Zero)
+                                {
+                                    Status = QuantConnect.Orders.OrderStatus.UpdateSubmitted,
+                                    Message = "Order modified"
+                                });
+                            }
+
+                            var brokerid = existingState.Order.BrokerId;
+                            brokerid.Add(o.OrderId);
+
+                            OnOrderIdChangedEvent(new BrokerageOrderIdChangedEvent
+                            {
+                                OrderId = existingState.Order.Id,
+                                BrokerId = brokerid
+                            });
+
+                            Log.Trace($"{Name}.HandleOrderSocket: Modify mapped via Socket | Old: {oldBrokerId} → New: {o.OrderId}");
+                        }
+                    }
+
+                    // -------------------------------------------------------
+                    // 🔥 SENSEMANN-CHECK: Fills aus dem Order-Stream vernichten 🔥
+                    // -------------------------------------------------------
+                    // Dies MUSS vor dem State-Lookup passieren, damit es auch greift, 
+                    // wenn der Trade-Socket die Order bereits gelöscht hat!
+                    if (o.Status == SharedOrderStatus.Filled)
+                    {
+                        if (ExchangeSupportsUserTradeStream)
+                        {
+                            Log.Trace($"{Name}.HandleOrderSocket: Hard-ignoring {o.Status} for {o.OrderId} in Order-Stream. Trade-Stream owns this.");
+
+                            // Wir setzen nur das Pending-Flag zurück, falls die Order noch modifiziert wurde.
+                            if (_orderStateManager.TryGetByExchangeId(o.OrderId, out var pendingState))
+                            {
+                                pendingState.IsUpdatePending = false;
+                            }
+                            continue;
+                        }
+                        // Wenn kein Trade-Stream unterstützt wird, verarbeiten wir jegliche Fills hier direkt 1:1 mit echten Fee-Daten aus dem Order-Payload
+                        else if (_orderStateManager.TryGetByExchangeId(o.OrderId, out var fillState))
+                        {
+                            var sign = fillState.OriginalQuantity > 0 ? 1m : -1m;
+                            var absFilled = HasExchangeQuantity(o.QuantityFilled)
+                                ? FromExchangeQuantity(fillState.Order.Symbol, o.QuantityFilled)
+                                : (o.Status == SharedOrderStatus.Filled ? Math.Abs(fillState.OriginalQuantity) : 0m);
+                            var targetSignedFilled = absFilled * sign;
+                            var signedFill = targetSignedFilled - fillState.FilledQuantity;
+
+                            if (Math.Abs(signedFill) > 0)
+                            {
+                                var fee = o.Fee ?? 0m;
+
+                                fillState.FilledQuantity += signedFill;
+                                fillState.CumulativeFeePaid += fee;
+                                fillState.LastUpdateUtc = DateTime.UtcNow;
+
+                                var leanStatus = Math.Abs(fillState.FilledQuantity) >= Math.Abs(fillState.OriginalQuantity) || o.Status == SharedOrderStatus.Filled
+                                    ? QuantConnect.Orders.OrderStatus.Filled
+                                    : QuantConnect.Orders.OrderStatus.PartiallyFilled;
+
+                                fillState.State = leanStatus == QuantConnect.Orders.OrderStatus.Filled ? OrderLifeCycleState.Filled : OrderLifeCycleState.PartiallyFilled;
+
+                                if (fillState.IsClosed)
+                                {
+                                    _orderStateManager.TryRemove(fillState.ClientOrderId, out _);
+                                }
+
+                                OnOrderEvent(new OrderEvent(fillState.Order, DateTime.UtcNow, new OrderFee(new CashAmount(fee, o.FeeAsset ?? SettleAsset)))
+                                {
+                                    Status = leanStatus,
+                                    FillPrice = o.OrderPrice ?? 0m,
+                                    FillQuantity = signedFill,
+                                    Message = "Order socket stream (Execution fallback)"
+                                });
+
+                                if (leanStatus == QuantConnect.Orders.OrderStatus.Filled)
+                                {
+                                    continue;
+                                }
+                            }
+                        }
+                    }
+
+                    // -------------------------------------------------------
+                    // NORMAL STATUS UPDATE (Nur für Canceled / Open etc.)
+                    // -------------------------------------------------------
+                    if (_orderStateManager.TryGetByExchangeId(o.OrderId, out var state))
+                    {
+                        // Ignoriere Status-Events von alten, ersetzten Tickets
+                        if (o.OrderId != state.BrokerId)
+                        {
+                            Log.Trace($"{Name}.HandleOrderSocket: Ignoring status '{o.Status}' for old replaced ticket {o.OrderId}. Current active ticket is {state.BrokerId}.");
                             continue;
                         }
 
-                        state.State = OrderLifeCycleState.Canceled;
-                        // TryRemove bereinigt beide internen Dicts.
-                        _orderStateManager.TryRemove(state.ClientOrderId, out _);
+                        state.LastUpdateUtc = DateTime.UtcNow;
+                        var absFilled = FromExchangeQuantity(state.Order.Symbol, o.QuantityFilled);
+                        var leanStatus = MapStatus(o.Status, absFilled);
 
-                        OnOrderEvent(new OrderEvent(state.Order, DateTime.UtcNow, OrderFee.Zero)
+                        if (leanStatus is QuantConnect.Orders.OrderStatus.Canceled or QuantConnect.Orders.OrderStatus.Invalid)
                         {
-                            Status = leanStatus,
-                            Message = "Order socket update"
-                        });
+                            if (state.IsUpdatePending)
+                            {
+                                Log.Trace($"{Name}.HandleOrderSocket: Suppressing Cancel event for {state.BrokerId} because an Update is pending.");
+                                continue;
+                            }
+
+                            state.State = OrderLifeCycleState.Canceled;
+                            // TryRemove bereinigt beide internen Dicts.
+                            _orderStateManager.TryRemove(state.ClientOrderId, out _);
+
+                            OnOrderEvent(new OrderEvent(state.Order, DateTime.UtcNow, OrderFee.Zero)
+                            {
+                                Status = leanStatus,
+                                Message = "Order socket update"
+                            });
+                        }
+                        else if (leanStatus == QuantConnect.Orders.OrderStatus.Submitted) // SharedOrderStatus.Open ohne Fill
+                        {
+                            state.State = OrderLifeCycleState.Open;
+                        }
                     }
-                    else if (leanStatus == QuantConnect.Orders.OrderStatus.Submitted) // SharedOrderStatus.Open ohne Fill
-                    {
-                        state.State = OrderLifeCycleState.Open;
-                    }
+                }
+                catch (Exception ex)
+                {
+                    Log.Error($"{Name}.HandleOrderSocket: Unhandled exception processing OrderId='{o.OrderId}' " +
+                              $"ClientOrderId='{o.ClientOrderId}' Status='{o.Status}': {ex}");
                 }
             }
         }
