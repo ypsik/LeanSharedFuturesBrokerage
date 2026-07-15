@@ -434,6 +434,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         protected override bool HasExchangeQuantity(SharedOrderQuantity? quantity)
             => quantity?.QuantityInContracts.HasValue == true;
 
+        /// <summary>
+        /// Verifiziert per direktem Datenvergleich (OKX vs. Bitget, gleicher Zeitraum): OKX liefert
+        /// SharedKline.Volume ebenfalls in Contracts (gleiche Konvention wie Order-Quantities), daher
+        /// hier explizit auf true — Volume wird über FromExchangeQuantity (× ctVal) korrekt umgerechnet.
+        /// </summary>
+        protected override bool KlineVolumeUsesExchangeQuantityConversion => true;
+
         #endregion
 
         // OKX has a dedicated funding-rate WebSocket channel (public, unauthenticated).
