@@ -913,7 +913,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         Log.Trace($"{Name}.HandleOrderSocket: Placing→Submitted for {o.OrderId} via socket. Fill (if any) follows via trade socket.");
 
                         OnOrderEvent(new OrderEvent(placingCandidate.Order, DateTime.UtcNow, OrderFee.Zero) { Status = QuantConnect.Orders.OrderStatus.Submitted });
-                        continue;
                     }
 
                     // -------------------------------------------------------
