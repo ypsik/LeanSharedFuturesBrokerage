@@ -37,6 +37,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         protected override string SettleAsset => "USDC";
 
         protected override bool EmitFundingRateImmediately => true;
+        public override bool ExchangeModifiesOrdersInPlace => true;
 
         public override bool IsConnected => base.IsConnected && _fundingUpdateConnected;
 
