@@ -98,6 +98,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             public Order Order;
             public decimal OriginalQuantity;
             public decimal FilledQuantity;
+            // NEU: Fill-Menge nur für die AKTUELLE BrokerId-Generation. Wird von
+            // OrderStateManager.MapNewExchangeId bei jedem BrokerId-Wechsel (Cancel+Replace)
+            // auf 0 zurückgesetzt, während FilledQuantity kumulativ über die gesamte Order
+            // (über alle BrokerId-Generationen hinweg) weiterläuft. Verhindert Phantom-
+            // Fill-Events mit negativer FillQuantity direkt nach einem Replace, wenn die
+            // Exchange QuantityFilled für die neue BrokerId wieder bei 0 beginnt.
+            public decimal FilledQuantityCurrentOrder;
             public string BrokerId;
             public string ClientOrderId;
             public OrderLifeCycleState State;
@@ -178,6 +185,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     Order = order,
                     OriginalQuantity = qty,
                     FilledQuantity = filledQty,
+                    FilledQuantityCurrentOrder = filledQty,
                     BrokerId = o.OrderId,
                     ClientOrderId = o.ClientOrderId ?? string.Empty,
                     State = order.Status == QuantConnect.Orders.OrderStatus.PartiallyFilled ? OrderLifeCycleState.PartiallyFilled : OrderLifeCycleState.Open,
@@ -261,6 +269,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 Order = order,
                 OriginalQuantity = signedRoundedQuantity,
                 FilledQuantity = 0m,
+                FilledQuantityCurrentOrder = 0m,
                 ClientOrderId = clientOrderId,
                 State = OrderLifeCycleState.Placing,
                 LastUpdateUtc = DateTime.UtcNow
@@ -297,6 +306,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 //    - trägt unter res.Data.Id in _statesByExchangeId ein
                 //    - ergänzt Order.BrokerId
                 //    - _statesByClientId[clientOrderId] bleibt unverändert
+                //    - resettet FilledQuantityCurrentOrder (siehe OrderStateManager.MapNewExchangeId)
                 _orderStateManager.MapNewExchangeId(clientOrderId, res.Data.Id);
 
                 OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero) { Status = QuantConnect.Orders.OrderStatus.Submitted });
@@ -556,6 +566,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             {
                 var oldBrokerId = state.BrokerId;
 
+                // MapNewExchangeId resettet FilledQuantityCurrentOrder für die neue BrokerId-Generation.
                 _orderStateManager.MapNewExchangeId(newClientOrderId, placeRes.Data.Id);
                 _orderStateManager.RemoveAlias(state.ClientOrderId); // alte ClientOrderId-Eintragung entfernen
                 state.ClientOrderId = newClientOrderId;
@@ -628,7 +639,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                     var sign = removedState.OriginalQuantity > 0 ? 1m : -1m;
                     var finalSignedFillQty = finalFillAbsQty * sign;
-                    var remainingToFill = finalSignedFillQty - removedState.FilledQuantity;
+                    // GEÄNDERT: brokerOrder.QuantityFilled ist relativ zur AKTUELLEN BrokerId (brokerId
+                    // startet bei 0 nach jedem Replace) → gegen FilledQuantityCurrentOrder vergleichen,
+                    // nicht gegen die über alle Generationen kumulierte FilledQuantity.
+                    var remainingToFill = finalSignedFillQty - removedState.FilledQuantityCurrentOrder;
 
                     if (Math.Abs(remainingToFill) > 0)
                     {
@@ -776,12 +790,22 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     // Dieser Pfad wird nur bei ExchangeSupportsUserTradeStream=true genutzt; alle bisher
                     // angebundenen Exchanges mit User-Trade-Stream liefern Base-Asset-Mengen (kein Contract-
                     // Exchange nutzt aktuell diesen Pfad, OKX z.B. hat ExchangeSupportsUserTradeStream=false).
+                    // Hinweis FilledQuantityCurrentOrder: dieser Pfad arbeitet mit einem echten
+                    // Delta aus dem Trade selbst (kein QuantityFilled-Snapshot einer Exchange-Order).
+                    // WICHTIG: Trotzdem muss FilledQuantityCurrentOrder hier mitgeführt werden, da
+                    // MapNewExchangeId es bei jedem Replace auf 0 resettet. Würde es hier nicht
+                    // fortgeschrieben, bliebe es nach einem Replace dauerhaft bei 0, während
+                    // ReconcileLoop/ReconcileOrderImmediateAsync ihre brokerOrder.QuantityFilled
+                    // (relativ zur aktuellen BrokerId, inkl. aller bereits über diesen Trade-Socket
+                    // verarbeiteten Fills) dagegen vergleichen - das würde bereits verarbeitete
+                    // Fills doppelt zählen.
                     // =======================================================
                     var sign = trade.Side == SharedOrderSide.Buy ? 1m : -1m;
                     var signedFill = trade.Quantity * sign;
                     var fee = trade.Fee ?? 0m;
 
                     state.FilledQuantity += signedFill;
+                    state.FilledQuantityCurrentOrder += signedFill;
                     state.CumulativeFeePaid += fee;
                     // NEU: CumulativeCostFilled mitführen. Hier nicht zwingend gebraucht (trade.Price ist
                     // bereits der exakte Fill-Preis dieses einzelnen Trades, kein Delta nötig), aber der
@@ -942,6 +966,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                             //    - trägt unter o.OrderId in _statesByExchangeId ein
                             //    - ergänzt Order.BrokerId
                             //    - _statesByClientId[o.ClientOrderId] bleibt unverändert
+                            //    - resettet FilledQuantityCurrentOrder für die neue BrokerId-Generation
                             _orderStateManager.MapNewExchangeId(o.ClientOrderId, o.OrderId);
 
                             // Bitget-Style: neue clientOrderId war temporärer Alias → alten Key entfernen und State updaten
@@ -1008,13 +1033,21 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                             var absFilled = HasExchangeQuantity(o.QuantityFilled)
                                 ? FromExchangeQuantity(fillState.Order.Symbol, o.QuantityFilled)
                                 : (o.Status == SharedOrderStatus.Filled ? Math.Abs(fillState.OriginalQuantity) : 0m);
-                            var targetSignedFilled = absFilled * sign;
-                            var signedFill = targetSignedFilled - fillState.FilledQuantity;
+
+                            // GEÄNDERT: absFilled/o.QuantityFilled ist relativ zur AKTUELLEN BrokerId
+                            // (startet bei 0 nach jedem Cancel+Replace). Delta daher gegen
+                            // FilledQuantityCurrentOrder bilden, nicht gegen die über alle
+                            // BrokerId-Generationen kumulierte FilledQuantity - sonst entsteht direkt
+                            // nach einem Replace ein Phantom-Event mit negativer FillQuantity
+                            // (siehe DivideByZeroException-Fall vom 2026-07-18 14:16:00, XMRUSDT).
+                            var currentOrderSignedFilled = absFilled * sign;
+                            var signedFill = currentOrderSignedFilled - fillState.FilledQuantityCurrentOrder;
 
                             if (Math.Abs(signedFill) > 0)
                             {
                                 var fee = o.Fee ?? 0m;
 
+                                fillState.FilledQuantityCurrentOrder = currentOrderSignedFilled;
                                 fillState.FilledQuantity += signedFill;
                                 fillState.CumulativeFeePaid += fee;
 
@@ -1186,7 +1219,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                                 : Math.Abs(removedState.OriginalQuantity);
 
                             var finalSignedFillQty = finalFillAbsQty * (removedState.OriginalQuantity > 0 ? 1m : -1m);
-                            var remainingToFill = finalSignedFillQty - removedState.FilledQuantity;
+                            // GEÄNDERT: brokerOrder.QuantityFilled kommt relativ zur AKTUELLEN BrokerId
+                            // (brokerId, siehe oben) → gegen FilledQuantityCurrentOrder vergleichen,
+                            // nicht gegen die kumulierte FilledQuantity über alle Generationen.
+                            var remainingToFill = finalSignedFillQty - removedState.FilledQuantityCurrentOrder;
                             if (Math.Abs(remainingToFill) > 0)
                             {
                                 // FIX 3: Doppelbuchungen der Gebühren verhindern!

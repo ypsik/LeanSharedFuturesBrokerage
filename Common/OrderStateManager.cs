@@ -88,27 +88,24 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.Common
 
             if (_statesByClientId.TryGetValue(clientId, out var state))
             {
-                // ATOMARE SPERRE
                 lock (state)
                 {
-                    // 🔥 DOUBLE-CHECKED LOCKING 🔥
-                    // War ein anderer Thread schneller, während wir an der lock-Tür warten mussten?
                     if (state.BrokerId == newExchangeId)
                     {
-                        // Arbeit ist bereits erledigt! Nichts weiter zu tun.
                         return;
                     }
 
-                    // 1. Die primäre aktive ID im State aktualisieren
+                    // NEU: Neue BrokerId-Generation → lokaler Fill-Zähler für diese Generation resettet.
+                    // FilledQuantity (kumulativ über die gesamte Order) bleibt unverändert.
+                    state.FilledQuantityCurrentOrder = 0m;
+
                     state.BrokerId = newExchangeId;
 
-                    // 2. LEAN Liste synchronisieren
                     if (!state.Order.BrokerId.Contains(newExchangeId))
                     {
                         state.Order.BrokerId.Add(newExchangeId);
                     }
 
-                    // 3. Den neuen Key im Index registrieren
                     _statesByExchangeId[newExchangeId] = state;
                 }
             }
