@@ -184,7 +184,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         #endregion
 
         protected override async Task<WebSocketResult<UpdateSubscription>> CreateFundingSubscriptionAsync(
-           string nativeTicker, Symbol symbol, Func<DateTime, decimal?, DateTime?,  bool> onFundingRate)
+           string nativeTicker, Symbol symbol, Func<DateTime, decimal?, DateTime?, (bool ShouldEmit, bool IsFirstTick)> onFundingRate)
         {
             return await _socketClientExData.V5LinearApi.SubscribeToTickerUpdatesAsync(
                 nativeTicker, data =>

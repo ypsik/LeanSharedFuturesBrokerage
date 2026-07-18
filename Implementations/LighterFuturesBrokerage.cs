@@ -265,7 +265,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         // in Connect() (account_all Channel, FundingHistories-Feld) - Analogon zu HL's
         // SubscribeToUserFundingUpdatesAsync.
         protected override async Task<WebSocketResult<UpdateSubscription>> CreateFundingSubscriptionAsync(
-            string nativeTicker, Symbol symbol, Func<DateTime, decimal?, DateTime?, bool> onFundingRate)
+            string nativeTicker, Symbol symbol, Func<DateTime, decimal?, DateTime?, (bool ShouldEmit, bool IsFirstTick)> onFundingRate)
         {
             return await _socketClientExData.ExchangeApi.ExchangeData.SubscribeToFuturesTickerUpdatesAsync(
                 nativeTicker, data =>

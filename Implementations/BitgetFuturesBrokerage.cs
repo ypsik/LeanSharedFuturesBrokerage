@@ -270,7 +270,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
 
         protected override async Task<WebSocketResult<UpdateSubscription>> CreateFundingSubscriptionAsync(
-           string nativeTicker, Symbol symbol, Func<DateTime, decimal?, DateTime?, bool> onFundingRate)
+           string nativeTicker, Symbol symbol, Func<DateTime, decimal?, DateTime?, (bool ShouldEmit, bool IsFirstTick)> onFundingRate)
         {
             return await _socketClientExData.FuturesApiV2.SubscribeToTickerUpdatesAsync(
                 BitgetProductTypeV2.UsdtFutures, nativeTicker, data =>
@@ -278,7 +278,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                     var ticker = data.Data.FirstOrDefault();
                     var now = ticker?.Timestamp ?? data.DataTime ?? data.ReceiveTime;
 
-                    if (onFundingRate(now, ticker?.FundingRate, ticker?.NextFundingTime))
+                    if (onFundingRate(now, ticker?.FundingRate, ticker?.NextFundingTime).ShouldEmit)
                     {
                         // Rollover detected via Socket → poll ledger for actual funding fees
                         Task.Run(async () =>

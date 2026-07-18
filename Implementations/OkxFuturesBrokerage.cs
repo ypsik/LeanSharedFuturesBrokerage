@@ -449,14 +449,14 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         // Bills triggern (Ledger-Aequivalent bei OKX), da der WS balance_and_position-Channel nur den
         // absoluten CashBalance liefert, kein Delta (siehe Diagnose-Logs vom 2026-07-10).
         protected override async Task<WebSocketResult<UpdateSubscription>> CreateFundingSubscriptionAsync(
-            string nativeTicker, Symbol symbol, Func<DateTime, decimal?, DateTime?, bool> onFundingRate)
+            string nativeTicker, Symbol symbol, Func<DateTime, decimal?, DateTime?, (bool ShouldEmit, bool IsFirstTick)> onFundingRate)
         {
             return await _socketClientExData.UnifiedApi.ExchangeData.SubscribeToFundingRateUpdatesAsync(
                 nativeTicker,
                 data =>
                 {
                     var rate = data.Data;
-                    if (onFundingRate(rate.FundingTime, rate.FundingRate, rate.NextFundingTime))
+                    if (onFundingRate(rate.FundingTime, rate.FundingRate, rate.NextFundingTime).ShouldEmit)
                     {
                         // Rollover detected via Socket → poll bills for actual funding fees.
                         Task.Run(async () =>

@@ -373,7 +373,19 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                 _subRateGate.WaitToProceed();
 
-                bool onFundingRate(DateTime now, decimal? fundingRate, DateTime? nextFundingTime)
+                // Rückgabe-Tuple statt reinem bool:
+                //  - ShouldEmit:  true genau dann, wenn ein Funding-Rollover erkannt wurde und
+                //                 _aggregator.Update(...) mit der final abgeschlossenen Rate
+                //                 aufgerufen wurde (unverändertes Verhalten ggü. vorher: bool).
+                //  - IsFirstTick: true genau beim allerersten Tick nach Subscribe für dieses
+                //                 Symbol (kein Rollover, kein Aggregator-Update — reine
+                //                 Zusatzinfo für Implementierungen wie Hyperliquid, die den
+                //                 ersten Tick z.B. für einen einmaligen SPDB-Tick-Size-Fix
+                //                 nutzen wollen, ohne bei jedem Tick nachzuschauen).
+                // isFirstTick wird ohnehin bereits pro Symbol in _lastFundingState berechnet;
+                // hier wird dieser bereits vorhandene Wert nur zusätzlich durchgereicht, es
+                // entsteht kein neuer Lookup und keine neue Map.
+                (bool ShouldEmit, bool IsFirstTick) onFundingRate(DateTime now, decimal? fundingRate, DateTime? nextFundingTime)
                 {
                     bool isFirstTick = false;
                     bool isRollover = false;
@@ -417,13 +429,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                             return (state.NextFundingTime, fundingRate ?? state.Rate);
                         });
 
-                    if (isFirstTick) return false;
-                    if (!isRollover) return false;
+                    if (isFirstTick) return (false, true);
+                    if (!isRollover) return (false, false);
 
                     _aggregator.Update(new MarginInterestRate { Symbol = symbol, Time = now, InterestRate = rateToReport });
                     Log.Trace($"{Name} Funding Update: {symbol.Value} -> Rate: {rateToReport} (Rollover)");
 
-                    return true;
+                    return (true, false);
                 }
 
                 var sub = RunSync(() => CreateFundingSubscriptionAsync(nativeTicker, symbol, onFundingRate));
@@ -452,7 +464,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         }
 
         protected virtual Task<WebSocketResult<UpdateSubscription>> CreateFundingSubscriptionAsync(
-            string nativeTicker, Symbol symbol, Func<DateTime, decimal?, DateTime?, bool> onFundingRate)
+            string nativeTicker, Symbol symbol, Func<DateTime, decimal?, DateTime?, (bool ShouldEmit, bool IsFirstTick)> onFundingRate)
             => Task.FromResult(new WebSocketResult<UpdateSubscription>(Name, null, new InvalidOperationError("Funding subscription not supported by this exchange")));
 
         protected void EmitTick(Tick tick) => _aggregator?.Update(tick);

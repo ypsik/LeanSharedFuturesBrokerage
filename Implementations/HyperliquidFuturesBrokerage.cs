@@ -301,7 +301,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                                     sub?.Error?.ToString()
                                 );
 
-                    if (sub?.Success??false)
+                    if (sub?.Success ?? false)
                     {
                         _fundingUpdateSubscription = sub.Data;
                     }
@@ -347,7 +347,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         }
 
         protected override async Task<WebSocketResult<UpdateSubscription>> CreateFundingSubscriptionAsync(
-            string nativeTicker, Symbol symbol, Func<DateTime, decimal?, DateTime?, bool> onFundingRate)
+            string nativeTicker, Symbol symbol, Func<DateTime, decimal?, DateTime?, (bool ShouldEmit, bool IsFirstTick)> onFundingRate)
         {
             return await _socketClientExData.FuturesApi.ExchangeData.SubscribeToSymbolUpdatesAsync(
                 nativeTicker, data =>
@@ -355,7 +355,16 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                     var now = data.DataTime ?? data.ReceiveTime;
                     var tickerData = data.Data;
 
-                    if (!onFundingRate(now, tickerData.FundingRate ?? 0, null)) return;
+                    var (shouldEmit, isFirstTick) = onFundingRate(now, tickerData.FundingRate ?? 0, null);
+
+                    // SPDB-Tick-Size-Fix läuft:
+                    //  - einmalig beim allerersten Tick nach Subscribe (isFirstTick) — schließt
+                    //    die Lücke zwischen Warmup-Ende und dem nächsten stündlichen Rollover,
+                    //    in der PopulateSPDB()'s statischer Tick-Size-Wert aktiv war/ist, und
+                    //  - weiterhin bei jedem Funding-Rollover (shouldEmit), wie bisher.
+                    // Kein zusätzlicher Lookup pro Tick: isFirstTick wird von der Basisklasse
+                    // ohnehin schon berechnet (_lastFundingState), hier nur durchgereicht.
+                    if (!shouldEmit && !isFirstTick) return;
 
                     var oraclePrice = tickerData.OraclePrice ?? tickerData.MarkPrice;
                     if (oraclePrice > 0)
