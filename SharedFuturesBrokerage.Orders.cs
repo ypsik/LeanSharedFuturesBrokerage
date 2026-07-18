@@ -373,16 +373,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 }
                 else
                 {
-                    if (lastUpdate?.Quantity.HasValue == true)
-                    {
-                        var newTotal = lastUpdate.Quantity.Value;
-                        var sign = newTotal > 0 ? 1m : -1m;
-                        quantity = (Math.Abs(newTotal) - Math.Abs(state.FilledQuantity)) * sign;
-                    }
-                    else
-                    {
-                        quantity = state.Remaining;
-                    }
+                    quantity = lastUpdate?.Quantity ?? state.Remaining;
                 }
 
                 if (!string.IsNullOrEmpty(state.BrokerId))
