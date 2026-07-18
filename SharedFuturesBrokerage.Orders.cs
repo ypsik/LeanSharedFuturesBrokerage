@@ -556,10 +556,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "UpdateOrderReplaceFailed", errorMsg));
                 return false;
             }
-
-            // WICHTIG: OriginalQuantity nutzt die GERUNDETE Menge, analog zu PlaceOrder.
-            state.OriginalQuantity = signedRoundedQuantity;
-
             // Falls der Socket die neue ClientOrderId noch nicht selbst verarbeitet hat
             // (HandleOrderSocket-Pfad "MODIFY / REPLACEMENT DETECTION"): jetzt manuell nachziehen.
             if (state.BrokerId != placeRes.Data.Id)
