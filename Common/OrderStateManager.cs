@@ -97,6 +97,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.Common
 
                     // NEU: Neue BrokerId-Generation → lokaler Fill-Zähler für diese Generation resettet.
                     // FilledQuantity (kumulativ über die gesamte Order) bleibt unverändert.
+                    state.CumulativeCostFilledCurrentOrder = 0m;
                     state.FilledQuantityCurrentOrder = 0m;
 
                     state.BrokerId = newExchangeId;

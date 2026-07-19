@@ -111,6 +111,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             public DateTime LastUpdateUtc;
             public bool IsUpdatePending;
             public decimal CumulativeFeePaid;
+            public decimal CumulativeCostFilledCurrentOrder;
             public decimal CumulativeCostFilled;
 
             public decimal Remaining => OriginalQuantity - FilledQuantity;
@@ -794,9 +795,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     state.FilledQuantity += signedFill;
                     state.FilledQuantityCurrentOrder += signedFill;
                     state.CumulativeFeePaid += fee;
-                    // NEU: CumulativeCostFilled mitführen. Hier nicht zwingend gebraucht (trade.Price ist
-                    // bereits der exakte Fill-Preis dieses einzelnen Trades, kein Delta nötig), aber der
-                    // Konsistenz halber trotzdem befüllt.
+                    state.CumulativeCostFilledCurrentOrder += trade.Quantity * trade.Price;
                     state.CumulativeCostFilled += trade.Quantity * trade.Price;
                     state.LastUpdateUtc = DateTime.UtcNow;
 
@@ -1049,13 +1048,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                                 {
                                     var previousCost = fillState.CumulativeCostFilled;
                                     var newCumulativeCost = o.AveragePrice.Value * absFilled;
-                                    var deltaCost = newCumulativeCost - previousCost;
+                                    var deltaCost = newCumulativeCost - fillState.CumulativeCostFilledCurrentOrder;   // GEÄNDERT: nicht mehr CumulativeCostFilled
 
-                                    fillPrice = deltaCost != 0m
-                                        ? Math.Abs(deltaCost / signedFill)
-                                        : o.AveragePrice.Value;
+                                    fillPrice = deltaCost != 0m ? Math.Abs(deltaCost / signedFill) : o.AveragePrice.Value;
 
-                                    fillState.CumulativeCostFilled = newCumulativeCost;
+                                    fillState.CumulativeCostFilledCurrentOrder = newCumulativeCost;   // GEÄNDERT
+                                    fillState.CumulativeCostFilled += (deltaCost != 0m ? deltaCost : o.AveragePrice.Value * signedFill);  // Lifetime-Kumulator weiterhin korrekt fortschreiben
                                 }
                                 else
                                 {
