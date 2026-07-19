@@ -231,6 +231,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                             adjustedQuantity = -adjustedQuantity;
 
                         Log.Trace($"{Name}.PlaceOrder: Adjusting execution quantity for {order.Symbol.Value} from {executionQuantity} to {adjustedQuantity} to meet the minimum of ${MinimumOrderNotionalValue}.");
+                        OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero) { Quantity = adjustedQuantity });
                         executionQuantity = adjustedQuantity;
                     }
                 }
