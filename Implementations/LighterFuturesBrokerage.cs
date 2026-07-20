@@ -45,6 +45,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         // Muss gegen Live-Daten geprueft werden ob das ein festes Stunden-Intervall ist (wie HL)
         // oder variabel. Bis dahin auf HL-Wert (1h) belassen.
         protected override int? FundingRolloverHours => 1;
+        public override decimal MinimumOrderNotionalValue => 10m;
 
         internal LighterFuturesBrokerage(
             IAlgorithm algorithm,
