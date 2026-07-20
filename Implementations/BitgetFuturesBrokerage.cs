@@ -333,8 +333,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         {
             var res = RunSync(() => _restClient.FuturesApiV2.Account.GetBalancesAsync(Bitget.Net.Enums.BitgetProductTypeV2.UsdtFutures));
             var data = res?.Data?.FirstOrDefault();
+            if (data == null)
+            {
+                Log.Error($"Failed to retrieve cash balance: {res?.Error}");
+                return [];
+            }
+            
             var cashBalance = (data?.UsdtEquity ?? 0) - (data?.UnrealizedProfitAndLoss ?? 0);
-
             return
             [
                 new CashAmount(cashBalance, SettleAsset)

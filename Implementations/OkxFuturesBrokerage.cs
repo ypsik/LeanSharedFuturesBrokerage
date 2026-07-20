@@ -525,7 +525,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             if (!res.Success || res.Data == null)
             {
                 Log.Error($"OkxFuturesBrokerage.GetCashBalance failed: {res.Error}");
-                return new List<CashAmount> { new CashAmount(0m, SettleAsset) };
+                return [];
             }
 
             var totalEquity = res.Data.TotalEquity;

@@ -155,13 +155,15 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         public override List<CashAmount> GetCashBalance()
         {
             var res = RunSync(() => _restClient.FuturesV3Api.Account.GetAccountInfoAsync());
-            var result = new List<CashAmount>
+            if (res?.Data == null)
             {
-                new((res?.Data?.TotalMarginBalance ?? 0) - (res?.Data?.TotalCrossUnrealizedPnl ?? 0), SettleAsset)
-            };
-            return result;
+                return [];
+            }
+            return
+                [
+                    new(res.Data.TotalMarginBalance - res.Data.TotalCrossUnrealizedPnl, SettleAsset)
+                ];
         }
-
         protected override async Task<WebSocketResult<UpdateSubscription>> CreateFundingSubscriptionAsync(
             string nativeTicker, Symbol symbol, Func<DateTime, decimal?, DateTime?, (bool ShouldEmit, bool IsFirstTick)> onFundingRate)
         {

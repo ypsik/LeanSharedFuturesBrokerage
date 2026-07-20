@@ -323,8 +323,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         {
             var res = RunSync(() => _restClient.SpotApi.Account.GetBalancesAsync());
             var usdcValue = res?.Data.FirstOrDefault(x => x.Asset == SettleAsset);
+            if (usdcValue == null)
+                return [];
 
             var futuresAccountResult = RunSync(() => _restClient.FuturesApi.Account.GetAccountInfoAsync());
+            
             decimal cashBalance = usdcValue?.Total ?? 0m;
 
             if (futuresAccountResult.Success && futuresAccountResult.Data != null)
@@ -337,7 +340,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             else
             {
                 Log.Error($"Cash {futuresAccountResult.Error?.Message}");
-                return new List<CashAmount> { new CashAmount(0m, SettleAsset) };
+                return [];
             }
 
             return new List<CashAmount>

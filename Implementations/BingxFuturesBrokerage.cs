@@ -365,6 +365,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         {
             var res = RunSync(() => _restClient.PerpetualFuturesApi.Account.GetBalancesAsync());
             var balance = res?.Data?.FirstOrDefault();
+            if (balance == null)
+            {
+                return [];
+            }
             var result = new List<CashAmount>
             {
                 new(balance?.Balance ?? 0, balance?.Asset ?? SettleAsset)

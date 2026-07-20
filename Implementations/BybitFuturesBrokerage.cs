@@ -200,9 +200,15 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         public override List<CashAmount> GetCashBalance()
         {
             var res = RunSync(() => _restClient.V5Api.Account.GetBalancesAsync(Bybit.Net.Enums.AccountType.Unified));
+
+            var account = res?.Data?.List?.FirstOrDefault();
+            if (account == null)
+            {
+                return [];
+            }
             var result = new List<CashAmount>
             {
-                new((res?.Data?.List?.FirstOrDefault()?.TotalMarginBalance ?? 0) - (res?.Data?.List?.FirstOrDefault()?.TotalPerpUnrealizedPnl ?? 0), SettleAsset)
+                new((account.TotalMarginBalance ?? 0) - (account.TotalPerpUnrealizedPnl ?? 0), SettleAsset)
             };
             return result;
         }

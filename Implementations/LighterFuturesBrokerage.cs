@@ -246,7 +246,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             if (!res.Success || res.Data == null)
             {
                 Log.Error($"Cash {res.Error?.Message}");
-                return [new CashAmount(0m, SettleAsset)];
+                return [];
             }
 
             var accountIndex = _restClient.ExchangeApi.ApiCredentials?.Credential.AccountIndex;
