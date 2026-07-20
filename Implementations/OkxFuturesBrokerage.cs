@@ -532,10 +532,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             var unrealizedPnl = res.Data.UnrealizedPnl ?? 0m;
             var balance = totalEquity - unrealizedPnl;
 
-            return new List<CashAmount>
-            {
+            return
+            [
                 new CashAmount(balance, SettleAsset)
-            };
+            ];
         }
 
         protected override string GenerateClientId(int _)
