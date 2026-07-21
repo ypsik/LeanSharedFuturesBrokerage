@@ -8,6 +8,7 @@ using CryptoExchange.Net.Objects;
 using CryptoExchange.Net.Objects.Sockets;
 using CryptoExchange.Net.SharedApis;
 using QuantConnect;
+using QuantConnect.Brokerages;
 using QuantConnect.Data;
 using QuantConnect.Data.Market;
 using QuantConnect.Interfaces;
@@ -321,6 +322,91 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         {
             return _restClient.FuturesApi.SharedClient.GenerateClientOrderId();
         }
+
+        private Aster.Net.Enums.PositionSide? MapPositionSide()
+        {
+            return SharedPositionSide switch
+            {
+                CryptoExchange.Net.SharedApis.SharedPositionSide.Long => Aster.Net.Enums.PositionSide.Long,
+                CryptoExchange.Net.SharedApis.SharedPositionSide.Short => Aster.Net.Enums.PositionSide.Short,
+                _ => null
+            };
+        }
+
+        public override bool PlaceOrder(Order order)
+        {
+            if (order.Properties is Shared.Orders.ChaseOrderProperties chaseProperties)
+                return PlaceChaseOrder(order, chaseProperties);
+
+            return base.PlaceOrder(order);
+        }
+
+        public override bool UpdateOrder(Order order)
+        {
+            if (order.Properties is Shared.Orders.ChaseOrderProperties)
+            {
+                Log.Error($"{Name}.UpdateOrder: Chase orders cannot be modified.");
+                OnMessage(new BrokerageMessageEvent(
+                    BrokerageMessageType.Warning,
+                    "UpdateOrderInvalid",
+                    "Chase orders cannot be modified. Cancel and re-place instead."));
+                return false;
+            }
+
+            return base.UpdateOrder(order);
+        }
+
+        private bool PlaceChaseOrder(Order order, Shared.Orders.ChaseOrderProperties chaseProperties)
+        {
+            var executionQuantity = order.Quantity;
+            var clientOrderId = GenerateClientId(order.Id);
+
+            // Placing-State registrieren wie bei normaler PlaceOrder - Aster liefert keine orderId
+            // zurück (nur strategyId), Socket übernimmt via ClientOrderId-Match im bestehenden
+            // "Placing"-Block in HandleOrderSocket, sobald der zugrunde liegende Live-Order feuert.
+            var placingState = new OrderState
+            {
+                Order = order,
+                OriginalQuantity = executionQuantity,
+                FilledQuantity = 0m,
+                ClientOrderId = clientOrderId,
+                State = OrderLifeCycleState.Placing,
+                LastUpdateUtc = DateTime.UtcNow
+            };
+            
+            _orderStateManager.TryAdd(clientOrderId, placingState);
+
+            var res = RunSync(() => _restClient.FuturesV3Api.Trading.PlaceChaseOrderAsync(
+                  symbol: NativeTicker(order.Symbol),
+                  side: executionQuantity > 0 ? Aster.Net.Enums.OrderSide.Buy : Aster.Net.Enums.OrderSide.Sell,
+                  quantity: Math.Abs(executionQuantity),
+                  quantityUnit: QuantityUnit.Base,
+                  positionSide: MapPositionSide(),
+                  chaseOffset: chaseProperties.ChaseOffset,
+                  chaseOffsetType: MapChaseOffsetType(chaseProperties.ChaseOffsetType),
+                  maxChaseOffset: chaseProperties.MaxChaseOffset,
+                  maxChaseOffsetType: MapChaseOffsetType(chaseProperties.MaxChaseOffsetType),
+                  priceLimit: chaseProperties.PriceLimit,
+                  clientOrderId: clientOrderId));
+            if (!res.Success)
+            {
+                _orderStateManager.TryRemove(clientOrderId, out _);
+
+                var errorMsg = res.Error?.ToString() ?? "Unknown exchange error";
+                Log.Error($"{Name}.PlaceChaseOrder({order.Symbol.Value}): {errorMsg}");
+                OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "PlaceChaseOrder", errorMsg));
+                return false;
+            }
+
+            return true;
+        }
+
+        private static ChaseOffsetType? MapChaseOffsetType(Shared.Orders.ChaseOffsetType? type) => type switch
+        {
+            Shared.Orders.ChaseOffsetType.Absolute => ChaseOffsetType.Absolute,
+            Shared.Orders.ChaseOffsetType.Percentage => ChaseOffsetType.Percentage,
+            _ => null
+        };
 
         protected override async Task<HttpResult<SharedId>> ExecuteUpdateOrderAsync(
         Order order, decimal price, decimal? quantity)
