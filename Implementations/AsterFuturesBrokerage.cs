@@ -14,8 +14,10 @@ using QuantConnect.Data.Market;
 using QuantConnect.Interfaces;
 using QuantConnect.Logging;
 using QuantConnect.Orders;
+using QuantConnect.Orders.Fees;
 using QuantConnect.Securities;
 using SilverQuant.Lean.Brokerages.Futures.Shared;
+using SilverQuant.Lean.Brokerages.Futures.Shared.Orders;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -323,16 +325,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             return _restClient.FuturesApi.SharedClient.GenerateClientOrderId();
         }
 
-        private Aster.Net.Enums.PositionSide? MapPositionSide()
-        {
-            return SharedPositionSide switch
-            {
-                CryptoExchange.Net.SharedApis.SharedPositionSide.Long => Aster.Net.Enums.PositionSide.Long,
-                CryptoExchange.Net.SharedApis.SharedPositionSide.Short => Aster.Net.Enums.PositionSide.Short,
-                _ => null
-            };
-        }
-
+        
         public override bool PlaceOrder(Order order)
         {
             if (order.Properties is Shared.Orders.ChaseOrderProperties chaseProperties)
@@ -356,42 +349,60 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             return base.UpdateOrder(order);
         }
 
-        private bool PlaceChaseOrder(Order order, Shared.Orders.ChaseOrderProperties chaseProperties)
+        private bool PlaceChaseOrder(Order order, ChaseOrderProperties chaseProperties)
         {
-            var executionQuantity = order.Quantity;
-            var clientOrderId = GenerateClientId(order.Id);
+            decimal executionQuantity = order.Quantity;
 
-            // Placing-State registrieren wie bei normaler PlaceOrder - Aster liefert keine orderId
-            // zurück (nur strategyId), Socket übernimmt via ClientOrderId-Match im bestehenden
-            // "Placing"-Block in HandleOrderSocket, sobald der zugrunde liegende Live-Order feuert.
+            if (MinimumOrderNotionalValue > 0m)
+            {
+                var price = _algorithm.Securities[order.Symbol].Price;
+                if (price > 0m)
+                {
+                    var currentNotional = Math.Abs(executionQuantity * price);
+                    if (currentNotional < MinimumOrderNotionalValue && executionQuantity != 0m)
+                    {
+                        var props = _spdb.GetSymbolProperties(order.Symbol.ID.Market, order.Symbol, order.Symbol.SecurityType, SettleAsset);
+                        var baseLotSize = props?.LotSize ?? 0.01m;
+                        var minUnitsRequired = MinimumOrderNotionalValue / price;
+                        var adjustedQuantity = Math.Ceiling(minUnitsRequired / baseLotSize) * baseLotSize;
+                        if (executionQuantity < 0) adjustedQuantity = -adjustedQuantity;
+
+                        Log.Trace($"{Name}.PlaceChaseOrder: Adjusting quantity for {order.Symbol.Value} from {executionQuantity} to {adjustedQuantity} to meet minimum ${MinimumOrderNotionalValue}.");
+                        OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero) { Quantity = adjustedQuantity });
+                        executionQuantity = adjustedQuantity;
+                    }
+                }
+            }
+
+            var clientOrderId = GenerateClientId(order.Id);
+            var absQuantity = Math.Abs(executionQuantity);
+
             var placingState = new OrderState
             {
                 Order = order,
                 OriginalQuantity = executionQuantity,
-                FilledQuantity = 0m,
                 ClientOrderId = clientOrderId,
                 State = OrderLifeCycleState.Placing,
                 LastUpdateUtc = DateTime.UtcNow
             };
-            
             _orderStateManager.TryAdd(clientOrderId, placingState);
 
             var res = RunSync(() => _restClient.FuturesV3Api.Trading.PlaceChaseOrderAsync(
-                  symbol: NativeTicker(order.Symbol),
-                  side: executionQuantity > 0 ? Aster.Net.Enums.OrderSide.Buy : Aster.Net.Enums.OrderSide.Sell,
-                  quantity: Math.Abs(executionQuantity),
-                  quantityUnit: QuantityUnit.Base,
-                  positionSide: MapPositionSide(),
-                  chaseOffset: chaseProperties.ChaseOffset,
-                  chaseOffsetType: MapChaseOffsetType(chaseProperties.ChaseOffsetType),
-                  maxChaseOffset: chaseProperties.MaxChaseOffset,
-                  maxChaseOffsetType: MapChaseOffsetType(chaseProperties.MaxChaseOffsetType),
-                  priceLimit: chaseProperties.PriceLimit,
-                  clientOrderId: clientOrderId));
+                symbol: NativeTicker(order.Symbol),
+                side: executionQuantity > 0 ? Aster.Net.Enums.OrderSide.Buy : Aster.Net.Enums.OrderSide.Sell,
+                quantity: absQuantity,
+                quantityUnit: QuantityUnit.Base,
+                positionSide: MapPositionSide(),
+                chaseOffset: chaseProperties.ChaseOffset,
+                chaseOffsetType: MapChaseOffsetType(chaseProperties.ChaseOffsetType),
+                maxChaseOffset: chaseProperties.MaxChaseOffset,
+                maxChaseOffsetType: MapChaseOffsetType(chaseProperties.MaxChaseOffsetType),
+                priceLimit: chaseProperties.PriceLimit,
+                clientOrderId: clientOrderId));
+
             if (!res.Success)
             {
                 _orderStateManager.TryRemove(clientOrderId, out _);
-
                 var errorMsg = res.Error?.ToString() ?? "Unknown exchange error";
                 Log.Error($"{Name}.PlaceChaseOrder({order.Symbol.Value}): {errorMsg}");
                 OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "PlaceChaseOrder", errorMsg));
@@ -400,11 +411,20 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
             return true;
         }
-
-        private static ChaseOffsetType? MapChaseOffsetType(Shared.Orders.ChaseOffsetType? type) => type switch
+        private Aster.Net.Enums.PositionSide? MapPositionSide()
         {
-            Shared.Orders.ChaseOffsetType.Absolute => ChaseOffsetType.Absolute,
-            Shared.Orders.ChaseOffsetType.Percentage => ChaseOffsetType.Percentage,
+            return SharedPositionSide switch
+            {
+                CryptoExchange.Net.SharedApis.SharedPositionSide.Long => Aster.Net.Enums.PositionSide.Long,
+                CryptoExchange.Net.SharedApis.SharedPositionSide.Short => Aster.Net.Enums.PositionSide.Short,
+                _ => null
+            };
+        }
+
+        private static Aster.Net.Enums.ChaseOffsetType? MapChaseOffsetType(Shared.Orders.ChaseOffsetType? type) => type switch
+        {
+            Shared.Orders.ChaseOffsetType.Absolute => Aster.Net.Enums.ChaseOffsetType.Absolute,
+            Shared.Orders.ChaseOffsetType.Percentage => Aster.Net.Enums.ChaseOffsetType.Percentage,
             _ => null
         };
 
