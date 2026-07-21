@@ -394,7 +394,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 quantityUnit: QuantityUnit.Base,
                 positionSide: MapPositionSide(),
                 chaseOffset: chaseProperties.ChaseOffset,
-                chaseOffsetType: MapChaseOffsetType(chaseProperties.ChaseOffsetType),
+                chaseOffsetType: (!chaseProperties.ChaseOffset.HasValue || chaseProperties.ChaseOffset == 0m)
+                    ? Aster.Net.Enums.ChaseOffsetType.Absolute
+                    : MapChaseOffsetType(chaseProperties.ChaseOffsetType),
                 maxChaseOffset: chaseProperties.MaxChaseOffset,
                 maxChaseOffsetType: MapChaseOffsetType(chaseProperties.MaxChaseOffsetType),
                 priceLimit: chaseProperties.PriceLimit,
