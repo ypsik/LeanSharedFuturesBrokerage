@@ -112,6 +112,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             public bool IsUpdatePending;
             public decimal CumulativeFeePaid;
             public decimal CumulativeCostFilledCurrentOrder;
+            public decimal CumulativeFeePaidCurrentOrder;
             public decimal CumulativeCostFilled;
 
             public decimal Remaining => OriginalQuantity - FilledQuantity;
@@ -1032,11 +1033,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                             if (Math.Abs(signedFill) > 0)
                             {
-                                var fee = o.Fee ?? 0m;
+                                var totalFeeForCurrentOrder = o.Fee ?? 0m;
+                                var deltaFee = Math.Max(0m, totalFeeForCurrentOrder - fillState.CumulativeFeePaidCurrentOrder);
+                                fillState.CumulativeFeePaidCurrentOrder = totalFeeForCurrentOrder;
 
                                 fillState.FilledQuantityCurrentOrder = currentOrderSignedFilled;
                                 fillState.FilledQuantity += signedFill;
-                                fillState.CumulativeFeePaid += fee;
+                                fillState.CumulativeFeePaid += deltaFee;
 
                                 // NEU: Fill-Preis dieses einzelnen Deltas aus AveragePrice × kumulierte Menge
                                 // ableiten, statt fälschlich OrderPrice (Limit-/Original-Preis) zu nehmen.
@@ -1074,7 +1077,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                                     _orderStateManager.TryRemove(fillState.ClientOrderId, out _);
                                 }
 
-                                OnOrderEvent(new OrderEvent(fillState.Order, DateTime.UtcNow, new OrderFee(new CashAmount(fee, o.FeeAsset ?? SettleAsset)))
+                                OnOrderEvent(new OrderEvent(fillState.Order, DateTime.UtcNow, new OrderFee(new CashAmount(deltaFee, o.FeeAsset ?? SettleAsset)))
                                 {
                                     Status = leanStatus,
                                     FillPrice = fillPrice,

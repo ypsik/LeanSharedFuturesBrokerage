@@ -99,6 +99,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.Common
                     // FilledQuantity (kumulativ über die gesamte Order) bleibt unverändert.
                     state.CumulativeCostFilledCurrentOrder = 0m;
                     state.FilledQuantityCurrentOrder = 0m;
+                    state.CumulativeFeePaidCurrentOrder = 0m;
 
                     state.BrokerId = newExchangeId;
 
