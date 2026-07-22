@@ -116,7 +116,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                     contractMultiplier: 1m,
                     minimumPriceVariation: contract.PriceFilter.TickSize,  
                     lotSize: contract.LotSizeFilter.QuantityStep,            
-                    marketTicker: ticker
+                    marketTicker: ticker,
+                    minimumOrderSize: contract.LotSizeFilter.MinOrderQuantity
                 );
 
                 _spdb.SetEntry(Name, ticker, SecurityType.CryptoFuture, symbolProperties);
