@@ -112,10 +112,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
                 var symbolProperties = new SymbolProperties(
                     description: $"Bybit {contract.BaseAsset} Perpetual",
-                    quoteCurrency: SettleAsset,
+                    quoteCurrency: contract.QuoteAsset,
                     contractMultiplier: 1m,
-                    minimumPriceVariation: contract.PriceFilter.TickSize,   // unbestätigt
-                    lotSize: contract.LotSizeFilter.QuantityStep,               // unbestätigt
+                    minimumPriceVariation: contract.PriceFilter.TickSize,  
+                    lotSize: contract.LotSizeFilter.QuantityStep,            
                     marketTicker: ticker
                 );
 

@@ -127,7 +127,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
                 var symbolProperties = new SymbolProperties(
                     description: $"Bitget {contract.BaseAsset} Perpetual",
-                    quoteCurrency: SettleAsset,
+                    quoteCurrency: contract.QuoteAsset,
                     contractMultiplier: 1m,
                     minimumPriceVariation: tickSize,
                     lotSize: lotSize,
