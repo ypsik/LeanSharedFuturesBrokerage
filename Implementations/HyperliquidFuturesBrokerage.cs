@@ -322,7 +322,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         public override List<CashAmount> GetCashBalance()
         {
             var res = RunSync(() => _restClient.SpotApi.Account.GetBalancesAsync());
-            var usdcValue = res?.Data.FirstOrDefault(x => x.Asset == SettleAsset);
+            var usdcValue = res?.Data?.FirstOrDefault(x => x.Asset == SettleAsset);
             if (usdcValue == null)
                 return [];
 

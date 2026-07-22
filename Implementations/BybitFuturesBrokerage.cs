@@ -40,6 +40,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             _socketClient = socketClient;
             _socketClientExData = new BybitSocketClient();
 
+            PopulateSPDB();
+
             InitializeBase(
                 restClient.V5Api.SharedClient,
                 restClient.V5Api.SharedClient,
@@ -94,6 +96,32 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 aggregator,
                 _getHoldingsFunc
             );
+        }
+
+        private void PopulateSPDB()
+        {
+            var result = RunSync(() => _restClient.V5Api.ExchangeData
+                .GetLinearInverseSymbolsAsync(Bybit.Net.Enums.Category.Linear));
+
+            if (!result.Success)
+                throw new Exception($"Failed to load Bybit assets: {result.Error}");
+
+            foreach (var contract in result.Data.List.Where(c => c.Status == Bybit.Net.Enums.SymbolStatus.Trading))
+            {
+                var ticker = contract.Name;
+
+                var symbolProperties = new SymbolProperties(
+                    description: $"Bybit {contract.BaseAsset} Perpetual",
+                    quoteCurrency: SettleAsset,
+                    contractMultiplier: 1m,
+                    minimumPriceVariation: contract.PriceFilter.TickSize,   // unbestätigt
+                    lotSize: contract.LotSizeFilter.QuantityStep,               // unbestätigt
+                    marketTicker: ticker
+                );
+
+                _spdb.SetEntry(Name, ticker, SecurityType.CryptoFuture, symbolProperties);
+                _spdb.SetEntry(Name, ticker, SecurityType.Crypto, symbolProperties);
+            }
         }
 
         #region Connect
