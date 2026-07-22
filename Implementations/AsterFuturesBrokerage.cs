@@ -325,15 +325,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             return _restClient.FuturesApi.SharedClient.GenerateClientOrderId();
         }
 
-        
-        public override bool PlaceOrder(Order order)
-        {
-            if (order.Properties is Shared.Orders.ChaseOrderProperties chaseProperties)
-                return PlaceChaseOrder(order, chaseProperties);
-
-            return base.PlaceOrder(order);
-        }
-
         public override bool UpdateOrder(Order order)
         {
             if (order.Properties is Shared.Orders.ChaseOrderProperties)
@@ -348,88 +339,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
             return base.UpdateOrder(order);
         }
-
-        private bool PlaceChaseOrder(Order order, ChaseOrderProperties chaseProperties)
-        {
-            decimal executionQuantity = order.Quantity;
-
-            if (MinimumOrderNotionalValue > 0m)
-            {
-                var price = _algorithm.Securities[order.Symbol].Price;
-                if (price > 0m)
-                {
-                    var currentNotional = Math.Abs(executionQuantity * price);
-                    if (currentNotional < MinimumOrderNotionalValue && executionQuantity != 0m)
-                    {
-                        var props = _spdb.GetSymbolProperties(order.Symbol.ID.Market, order.Symbol, order.Symbol.SecurityType, SettleAsset);
-                        var baseLotSize = props?.LotSize ?? 0.01m;
-                        var minUnitsRequired = MinimumOrderNotionalValue / price;
-                        var adjustedQuantity = Math.Ceiling(minUnitsRequired / baseLotSize) * baseLotSize;
-                        if (executionQuantity < 0) adjustedQuantity = -adjustedQuantity;
-
-                        Log.Trace($"{Name}.PlaceChaseOrder: Adjusting quantity for {order.Symbol.Value} from {executionQuantity} to {adjustedQuantity} to meet minimum ${MinimumOrderNotionalValue}.");
-                        OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero) { Quantity = adjustedQuantity });
-                        executionQuantity = adjustedQuantity;
-                    }
-                }
-            }
-
-            var clientOrderId = GenerateClientId(order.Id);
-            var absQuantity = Math.Abs(executionQuantity);
-
-            var placingState = new OrderState
-            {
-                Order = order,
-                OriginalQuantity = executionQuantity,
-                ClientOrderId = clientOrderId,
-                State = OrderLifeCycleState.Placing,
-                LastUpdateUtc = DateTime.UtcNow
-            };
-            _orderStateManager.TryAdd(clientOrderId, placingState);
-
-            var res = RunSync(() => _restClient.FuturesV3Api.Trading.PlaceChaseOrderAsync(
-                symbol: NativeTicker(order.Symbol),
-                side: executionQuantity > 0 ? Aster.Net.Enums.OrderSide.Buy : Aster.Net.Enums.OrderSide.Sell,
-                quantity: absQuantity,
-                quantityUnit: QuantityUnit.Base,
-                positionSide: MapPositionSide(),
-                chaseOffset: chaseProperties.ChaseOffset,
-                chaseOffsetType: (!chaseProperties.ChaseOffset.HasValue || chaseProperties.ChaseOffset == 0m)
-                    ? Aster.Net.Enums.ChaseOffsetType.Absolute
-                    : MapChaseOffsetType(chaseProperties.ChaseOffsetType),
-                maxChaseOffset: chaseProperties.MaxChaseOffset,
-                maxChaseOffsetType: MapChaseOffsetType(chaseProperties.MaxChaseOffsetType),
-                priceLimit: chaseProperties.PriceLimit,
-                clientOrderId: clientOrderId));
-
-            if (!res.Success)
-            {
-                _orderStateManager.TryRemove(clientOrderId, out _);
-                var errorMsg = res.Error?.ToString() ?? "Unknown exchange error";
-                Log.Error($"{Name}.PlaceChaseOrder({order.Symbol.Value}): {errorMsg}");
-                OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "PlaceChaseOrder", errorMsg));
-                return false;
-            }
-
-            return true;
-        }
-        private Aster.Net.Enums.PositionSide? MapPositionSide()
-        {
-            return SharedPositionSide switch
-            {
-                CryptoExchange.Net.SharedApis.SharedPositionSide.Long => Aster.Net.Enums.PositionSide.Long,
-                CryptoExchange.Net.SharedApis.SharedPositionSide.Short => Aster.Net.Enums.PositionSide.Short,
-                _ => null
-            };
-        }
-
-        private static Aster.Net.Enums.ChaseOffsetType? MapChaseOffsetType(Shared.Orders.ChaseOffsetType? type) => type switch
-        {
-            Shared.Orders.ChaseOffsetType.Absolute => Aster.Net.Enums.ChaseOffsetType.Absolute,
-            Shared.Orders.ChaseOffsetType.Percentage => Aster.Net.Enums.ChaseOffsetType.Percentage,
-            _ => null
-        };
-
+        
         protected override async Task<HttpResult<SharedId>> ExecuteUpdateOrderAsync(
         Order order, decimal price, decimal? quantity)
         {
