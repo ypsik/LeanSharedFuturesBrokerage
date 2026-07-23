@@ -40,7 +40,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             _socketClient = socketClient;
             _socketClientExData = new BybitSocketClient();
 
-            PopulateSPDB();
+            //PopulateSPDB();
 
             InitializeBase(
                 restClient.V5Api.SharedClient,
