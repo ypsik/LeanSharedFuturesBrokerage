@@ -131,7 +131,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         public override bool ExchangeModifiesOrdersInPlace => true;
 
         protected override int? FundingRolloverHours => null;
-
+        public override decimal MinimumOrderNotionalValue => 5m;
 
         protected override ExchangeParameters OpenOrdersExchangeParameters
         {
