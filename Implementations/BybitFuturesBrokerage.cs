@@ -1,4 +1,5 @@
 ﻿using Bybit.Net.Clients;
+using Bybit.Net.Enums;
 using CryptoExchange.Net.Interfaces.Clients;
 using CryptoExchange.Net.Objects;
 using CryptoExchange.Net.Objects.Sockets;
@@ -106,7 +107,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             if (!result.Success)
                 throw new Exception($"Failed to load Bybit assets: {result.Error}");
 
-            foreach (var contract in result.Data.List.Where(c => c.Status == Bybit.Net.Enums.SymbolStatus.Trading))
+            foreach (var contract in result.Data.List.Where(c =>
+                         c.Status == SymbolStatus.Trading &&
+                         c.ContractType == ContractTypeV5.LinearPerpetual))
             {
                 var ticker = contract.Name;
 
