@@ -106,7 +106,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             do
             {
                 var result = RunSync(() => _restClient.V5Api.ExchangeData
-                    .GetLinearInverseSymbolsAsync(Bybit.Net.Enums.Category.Linear));
+                    .GetLinearInverseSymbolsAsync(Bybit.Net.Enums.Category.Linear, 
+                    limit: 1000,
+                    cursor: cursor));
 
                 if (!result.Success)
                     throw new Exception($"Failed to load Bybit assets: {result.Error}");
