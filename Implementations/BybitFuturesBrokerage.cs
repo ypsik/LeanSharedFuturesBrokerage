@@ -101,31 +101,37 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         private void PopulateSPDB()
         {
-            var result = RunSync(() => _restClient.V5Api.ExchangeData
-                .GetLinearInverseSymbolsAsync(Bybit.Net.Enums.Category.Linear));
+            string? cursor = null;
 
-            if (!result.Success)
-                throw new Exception($"Failed to load Bybit assets: {result.Error}");
-
-            foreach (var contract in result.Data.List.Where(c =>
-                         c.Status == SymbolStatus.Trading &&
-                         c.ContractType == ContractTypeV5.LinearPerpetual))
+            do
             {
-                var ticker = contract.Name;
+                var result = RunSync(() => _restClient.V5Api.ExchangeData
+                    .GetLinearInverseSymbolsAsync(Bybit.Net.Enums.Category.Linear));
 
-                var symbolProperties = new SymbolProperties(
-                    description: $"Bybit {contract.BaseAsset} Perpetual",
-                    quoteCurrency: contract.QuoteAsset,
-                    contractMultiplier: 1m,
-                    minimumPriceVariation: contract.PriceFilter.TickSize,  
-                    lotSize: contract.LotSizeFilter.QuantityStep,            
-                    marketTicker: ticker,
-                    minimumOrderSize: contract.LotSizeFilter.MinOrderQuantity
-                );
+                if (!result.Success)
+                    throw new Exception($"Failed to load Bybit assets: {result.Error}");
 
-                _spdb.SetEntry(Name, ticker, SecurityType.CryptoFuture, symbolProperties);
-                _spdb.SetEntry(Name, ticker, SecurityType.Crypto, symbolProperties);
-            }
+                foreach (var contract in result.Data.List.Where(c =>
+                             c.Status == SymbolStatus.Trading &&
+                             c.ContractType == ContractTypeV5.LinearPerpetual))
+                {
+                    var ticker = contract.Name;
+
+                    var symbolProperties = new SymbolProperties(
+                        description: $"Bybit {contract.BaseAsset} Perpetual",
+                        quoteCurrency: contract.QuoteAsset,
+                        contractMultiplier: 1m,
+                        minimumPriceVariation: contract.PriceFilter.TickSize,
+                        lotSize: contract.LotSizeFilter.QuantityStep,
+                        marketTicker: ticker,
+                        minimumOrderSize: contract.LotSizeFilter.MinOrderQuantity
+                    );
+
+                    _spdb.SetEntry(Name, ticker, SecurityType.CryptoFuture, symbolProperties);
+                    _spdb.SetEntry(Name, ticker, SecurityType.Crypto, symbolProperties);
+                }
+                cursor = result.Data.NextPageCursor;
+            } while (!string.IsNullOrEmpty(cursor));
         }
 
         #region Connect
