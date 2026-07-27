@@ -553,13 +553,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                     // Order bis zu 10s lang über updateStillPending zu blockieren.
                     state.IsUpdatePending = false;
 
-                    Log.Trace($"{Name}.ExecuteUpdateOrderAsync: Manually mapped replace (Socket ClientOrderId unavailable) | Old: {brokerId} -> New: {newExchangeId}.");
+                    Log.Trace($"{Name}.ExecuteUpdateOrderAsync: Manually mapped replace | Old: {brokerId} -> New: {newExchangeId}.");
                 }
                 else
                 {
                     // Socket hat den Alias bereits aufgelöst — vermutlich hat er IsUpdatePending
                     // im MODIFY / REPLACEMENT DETECTION-Pfad schon selbst zurückgesetzt, hier nicht anfassen.
-                    Log.Trace($"{Name}.ExecuteUpdateOrderAsync: Alias {newClientOrderId} already resolved (Socket beat us) | Old: {brokerId} -> New: {newExchangeId}.");
+                    Log.Trace($"{Name}.ExecuteUpdateOrderAsync: Alias {newClientOrderId} already resolved by socket | Old: {brokerId} -> New: {newExchangeId}.");
                 }
             }
             // else: kein verwertbarer newExchangeId vom REST-Response — Alias absichtlich NICHT
