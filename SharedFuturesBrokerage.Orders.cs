@@ -31,6 +31,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         /// </summary>
         public virtual bool ExchangeModifiesOrdersInPlace => false;
 
+        protected virtual bool RequiresExplicitCancelBeforeReplace => false;
+
         /// <summary>
         /// Gibt an, ob die Börse einen dedizierten User-Trade-Stream (Fills) unterstützt.
         /// Wenn false, werden Fills direkt im Order-Stream verarbeitet.
@@ -516,6 +518,56 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 return false;
             }
 
+            // FIX (XMR-Overfill-Incident 2026-08-08): Vorher wurde hier direkt eine neue Order
+            // platziert, während die alte (activeBrokerId) noch live im Buch lag -> beide konnten
+            // gleichzeitig matchen (Overfill). Jetzt: alte Order ZUERST canceln und den Ausgang
+            // synchron abwarten, bevor überhaupt an ein Replace gedacht wird.
+            if (RequiresExplicitCancelBeforeReplace)
+            {
+                var cancelRes = RunSync(() => ExecuteCancelOrderAsync(
+                    new CxCancelOrderRequest(GetSharedSymbol(order.Symbol), activeBrokerId, CancelFuturesOrderExchangeParameters)));
+
+                if (!cancelRes.Success)
+                {
+                    // Cancel kann fehlschlagen, weil die alte Order zwischenzeitlich schon gefüllt oder
+                    // bereits anderweitig storniert wurde (Race). Statt Fehlertexte zu raten: echten,
+                    // synchron abgewarteten Status von der Exchange holen.
+                    var finalStatus = RunSync(() => ReconcileOrderImmediateAsync(activeBrokerId, order));
+
+                    if (finalStatus == SharedOrderStatus.Filled)
+                    {
+                        // Alte Order hat inzwischen komplett/final gefüllt - Ziel-Exposure erreicht.
+                        // ReconcileOrderImmediateAsync hat den Fill bereits sauber gebucht. Keine neue
+                        // Order platzieren, sonst genau das Overfill-Risiko, das wir vermeiden wollen.
+                        Log.Trace($"{Name}.ExecuteReplaceWorkaround: Old order {activeBrokerId} turned out FILLED during cancel race. " +
+                                  $"Skipping replace for {order.Symbol.Value}, target exposure already reached.");
+                        state.IsUpdatePending = false;
+                        return true;
+                    }
+
+                    if (finalStatus != SharedOrderStatus.Canceled)
+                    {
+                        // finalStatus ist Open (Cancel hat aus unbekanntem Grund nicht gegriffen) oder
+                        // null (Status nicht zweifelsfrei bestimmbar, z.B. Request-Fehler oder Socket
+                        // parallel schon durch). In beiden Fällen: NICHT platzieren. Ein verpasster
+                        // Re-Chase kostet im schlimmsten Fall etwas Preis-Drift und wird beim nächsten
+                        // Zyklus nachgeholt - ein Overfill kostet real Geld und Risiko.
+                        Log.Error($"{Name}.ExecuteReplaceWorkaround: Could not confirm old order {activeBrokerId} is terminal " +
+                                  $"(status={finalStatus?.ToString() ?? "unknown"}). Aborting replace for {order.Symbol.Value} " +
+                                  "to avoid two simultaneously live orders.");
+                        state.IsUpdatePending = false;
+                        return false;
+                    }
+
+                    // finalStatus == Canceled -> alte Order ist sicher weg, sicher weiter unten neu platzieren.
+                    Log.Trace($"{Name}.ExecuteReplaceWorkaround: Old order {activeBrokerId} confirmed canceled via reconcile, proceeding to replace.");
+                }
+                else
+                {
+                    Log.Trace($"{Name}.ExecuteReplaceWorkaround: Old order {activeBrokerId} canceled cleanly, proceeding to replace for {order.Symbol.Value}.");
+                }
+            }
+
             var newClientOrderId = GenerateClientId(order.Id);
 
             // Alias VOR dem Place-Call registrieren, damit der Socket-Handler die neue
@@ -587,7 +639,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         /// Holt den echten Order-Status von der Exchange und feuert das korrekte LEAN-Event.
         /// Wird aufgerufen wenn UpdateOrder einen Terminal-Fehler erkennt (Order bereits filled/canceled).
         /// </summary>
-        private async Task ReconcileOrderImmediateAsync(string brokerId, Order order)
+        /// <returns>
+        /// Der final bestätigte Status der Order (Open/Filled/Canceled), damit Aufrufer wie
+        /// ExecuteReplaceWorkaround entscheiden können, ob eine neue Order gefahrlos platziert
+        /// werden darf. Null = Status konnte nicht zweifelsfrei bestimmt werden (z.B. Request-Fehler
+        /// oder Socket hat parallel bereits aufgeräumt) -> vom Aufrufer als "unsicher" zu behandeln.
+        /// </returns>
+        private async Task<SharedOrderStatus?> ReconcileOrderImmediateAsync(string brokerId, Order order)
         {
             try
             {
@@ -599,7 +657,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 if (!statusCheck.Success || statusCheck.Data == null)
                 {
                     Log.Error($"{Name}.ReconcileOrderImmediateAsync: Failed to fetch status for {brokerId}: {statusCheck.Error}");
-                    return;
+                    return null;
                 }
 
                 var brokerOrder = statusCheck.Data;
@@ -609,14 +667,17 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 if (brokerOrder.Status == SharedOrderStatus.Open)
                 {
                     Log.Trace($"{Name}.ReconcileOrderImmediateAsync: Order {brokerId} is still OPEN on exchange. Reconciler stands down.");
-                    return;
+                    return SharedOrderStatus.Open;
                 }
 
                 // Ab hier wissen wir: Die Order ist wirklich tot (Terminal). Jetzt dürfen wir sie aus dem State löschen.
                 if (!_orderStateManager.TryGetByExchangeId(brokerId, out var removedState))
                 {
                     Log.Trace($"{Name}.ReconcileOrderImmediateAsync: State for {brokerId} already removed (socket beat us).");
-                    return;
+                    // Wir wissen zwar, dass die Order terminal ist (brokerOrder.Status), aber nicht mehr
+                    // sicher, ob der Socket-Pfad bereits alles korrekt gebucht hat. Sicherheitshalber
+                    // als unbestimmt melden statt zu raten - Aufrufer muss dann konservativ reagieren.
+                    return null;
                 }
 
                 _orderStateManager.TryRemove(removedState.ClientOrderId, out _);
@@ -650,6 +711,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                             Message = "Immediate Reconcile – Fill"
                         });
                     }
+
+                    return SharedOrderStatus.Filled;
                 }
                 else
                 {
@@ -659,11 +722,14 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         Status = QuantConnect.Orders.OrderStatus.Canceled,
                         Message = "Immediate Reconcile – Cancel"
                     });
+
+                    return brokerOrder.Status;
                 }
             }
             catch (Exception ex)
             {
                 Log.Error($"{Name}.ReconcileOrderImmediateAsync Error for {brokerId}: {ex.Message}");
+                return null;
             }
         }
 
