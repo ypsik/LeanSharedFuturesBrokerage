@@ -381,12 +381,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     quantity = lastUpdate?.Quantity ?? state.Remaining;
                 }
 
-                if (!string.IsNullOrEmpty(state.BrokerId))
-                {
-                    order.BrokerId.Clear();
-                    order.BrokerId.Add(state.BrokerId);
-                }
-
                 // Minimum notional check
                 if (MinimumOrderNotionalValue > 0m && price > 0m && quantity.HasValue)
                 {
