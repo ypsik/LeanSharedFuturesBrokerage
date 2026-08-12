@@ -337,13 +337,27 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
                     if (account.Abstraction == "portfolioMargin")
                     {
-                        foreach (var dex in account.FuturesInfo?.Values ?? Enumerable.Empty<HyperLiquidFuturesAccount>())
+                        var result = account.SpotBalances?.Balances?
+                            .Where(b => b.Total > 0 && (b.Asset == SettleAsset || (b.Ltv ?? 0m) > 0))
+                            .Select(b => b.Asset == SettleAsset
+                                ? new CashAmount(b.Total, SettleAsset)
+                                : new CashAmount(b.Total * (b.Ltv ?? 0m), b.Asset))
+                            .ToList() ?? [];
+
+                        if (result.Count == 0)
+                            return [];
+
+                        var pnl = account.FuturesInfo?.Values
+                            .SelectMany(dex => dex.Positions ?? [])
+                            .Sum(p => p.Position?.UnrealizedPnl ?? 0m) ?? 0m;
+
+                        var usdcIndex = result.FindIndex(x => x.Currency == SettleAsset);
+                        if (usdcIndex >= 0)
                         {
-                            foreach (var assetPosition in dex.Positions ?? [])
-                            {
-                                cashBalance -= assetPosition.Position?.UnrealizedPnl ?? 0m;
-                            }
+                            result[usdcIndex] = new CashAmount(result[usdcIndex].Amount - pnl, SettleAsset);
                         }
+
+                        return result;
                     }
                     else // unifiedAccount
                     {
