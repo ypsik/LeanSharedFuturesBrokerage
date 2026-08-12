@@ -67,17 +67,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         protected virtual ExchangeParameters GetFundingRateHistoryParameters => new ExchangeParameters();
         protected virtual ExchangeParameters GetKlinesHistoryParameters => new ExchangeParameters();
 
-        /// <summary>
-        /// Ob SharedKline.Volume der gleichen Einheiten-Konvention wie Order-Quantities dieses Exchanges
-        /// folgt (und somit über FromExchangeQuantity umgerechnet werden darf). Default false — sicherer
-        /// Default, da für die meisten Exchanges (noch) nicht verifiziert ist, ob Kline-Volume der
-        /// gleichen Contracts/Base-Konvention wie Order-Fills folgt (siehe Kraken: Order-Quantities sind
-        /// Contracts, Kline-Volume ist aber Notional statt Contracts — Default true hätte das hier
-        /// stillschweigend falsch verrechnet). Nur explizit auf true setzen, wenn per Datenvergleich
-        /// verifiziert (aktuell: OKX, siehe OkxFuturesBrokerage).
-        /// </summary>
-        protected virtual bool KlineVolumeUsesExchangeQuantityConversion => false;
-
         public override IEnumerable<BaseData> GetHistory(QuantConnect.Data.HistoryRequest request)
         {
             var sharedSymbol = GetSharedSymbol(request.Symbol);
@@ -245,9 +234,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                                 High = bar.HighPrice,
                                 Low = bar.LowPrice,
                                 Close = bar.ClosePrice,
-                                Volume = KlineVolumeUsesExchangeQuantityConversion
-                                    ? FromExchangeQuantity(request.Symbol, new SharedOrderQuantity(baseAssetQuantity: bar.Volume, contractQuantity: bar.Volume))
-                                    : bar.Volume,
+                                Volume = bar.Volumes.QuantityInBaseAsset ?? FromExchangeQuantity(request.Symbol, bar.Volumes),
                                 Period = request.Resolution.ToTimeSpan()
                             };
                         }
@@ -307,7 +294,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                                     Time = item.Timestamp.ToUniversalTime(),
                                     TickType = TickType.Trade,
                                     Value = item.Price,
-                                    Quantity = FromExchangeQuantity(symbol, new SharedOrderQuantity(baseAssetQuantity: item.Quantity, contractQuantity: item.Quantity))
+                                    Quantity = FromExchangeQuantity(symbol, item.Quantities)
                                 });
                             }
                         }));
