@@ -321,32 +321,75 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         public override List<CashAmount> GetCashBalance()
         {
+            var subAccount2Result = RunSync(() => _restClient.FuturesApi.Account.GetSubAccounts2Async(
+                string.IsNullOrEmpty(_vaultAdress) ? null : _vaultAdress));
+
+            if (subAccount2Result.Success && subAccount2Result.Data != null)
+            {
+                var account = subAccount2Result.Data.FirstOrDefault();
+                if (account?.Abstraction == "portfolioMargin" || account?.Abstraction == "unifiedAccount")
+                {
+                    var usdcBalance = account.SpotBalances?.Balances?.FirstOrDefault(x => x.Asset == SettleAsset);
+                    if (usdcBalance == null)
+                        return [];
+
+                    decimal cashBalance = usdcBalance.Total;
+
+                    if (account.Abstraction == "portfolioMargin")
+                    {
+                        foreach (var dex in account.FuturesInfo?.Values ?? Enumerable.Empty<HyperLiquidFuturesAccount>())
+                        {
+                            foreach (var assetPosition in dex.Positions ?? [])
+                            {
+                                cashBalance -= assetPosition.Position?.UnrealizedPnl ?? 0m;
+                            }
+                        }
+                    }
+                    else // unifiedAccount
+                    {
+                        var futuresAccountResult = RunSync(() => _restClient.FuturesApi.Account.GetAccountInfoAsync());
+                        if (futuresAccountResult.Success && futuresAccountResult.Data != null)
+                        {
+                            foreach (var assetPosition in futuresAccountResult.Data.Positions)
+                            {
+                                cashBalance -= assetPosition.Position?.UnrealizedPnl ?? 0m;
+                            }
+                        }
+                        else
+                        {
+                            Log.Error($"Cash {futuresAccountResult.Error?.Message}");
+                            return [];
+                        }
+                    }
+
+                    return [new CashAmount(cashBalance, SettleAsset)];
+                }
+            }
+
+            // Fallback: normaler Account
             var res = RunSync(() => _restClient.SpotApi.Account.GetBalancesAsync());
             var usdcValue = res?.Data?.FirstOrDefault(x => x.Asset == SettleAsset);
             if (usdcValue == null)
                 return [];
 
-            var futuresAccountResult = RunSync(() => _restClient.FuturesApi.Account.GetAccountInfoAsync());
-            
-            decimal cashBalance = usdcValue?.Total ?? 0m;
+            var futuresAccountResult2 = RunSync(() => _restClient.FuturesApi.Account.GetAccountInfoAsync());
 
-            if (futuresAccountResult.Success && futuresAccountResult.Data != null)
+            decimal cashBalanceFallback = usdcValue.Total;
+
+            if (futuresAccountResult2.Success && futuresAccountResult2.Data != null)
             {
-                foreach (var assetPosition in futuresAccountResult.Data.Positions)
+                foreach (var assetPosition in futuresAccountResult2.Data.Positions)
                 {
-                    cashBalance -= assetPosition.Position?.UnrealizedPnl ?? 0m;
+                    cashBalanceFallback -= assetPosition.Position?.UnrealizedPnl ?? 0m;
                 }
             }
             else
             {
-                Log.Error($"Cash {futuresAccountResult.Error?.Message}");
+                Log.Error($"Cash {futuresAccountResult2.Error?.Message}");
                 return [];
             }
 
-            return new List<CashAmount>
-            {
-                new CashAmount(cashBalance, SettleAsset)
-            };
+            return [new CashAmount(cashBalanceFallback, SettleAsset)];
         }
 
         protected override async Task<WebSocketResult<UpdateSubscription>> CreateFundingSubscriptionAsync(
