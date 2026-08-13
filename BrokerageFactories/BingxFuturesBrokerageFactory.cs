@@ -34,6 +34,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
         {
             { "bingx-api-key", Config.Get("bingx-api-key") },
             { "bingx-api-secret",  Config.Get("bingx-api-secret")  },
+            { "bingx-hedge-mode", Config.Get("bingx-hedge-mode", "true") },
         };
 
         public override IBrokerageModel GetBrokerageModel(IOrderProvider orderProvider)
@@ -51,7 +52,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
             if (errors.Any())
                 throw new ArgumentException(string.Join(Environment.NewLine, errors));
 
-            errors = new List<string>();
+            errors = [];
 
             var credentials = new BingXCredentials(address, secret);
 
@@ -78,7 +79,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
                     .ToList();
 
             algorithm.Settings.DatabasesRefreshPeriod = TimeSpan.FromDays(36500);
-            var brokerage = new BingxFuturesBrokerage(algorithm, restClient, socketClient, aggregator, getHoldingsFunc);
+
+            var hedgeMode = Config.GetBool("bingx-hedge-mode", true);
+
+            var brokerage = new BingxFuturesBrokerage(algorithm, restClient, socketClient, aggregator, getHoldingsFunc, hedgeMode);
 
             // Register with MEF Composer so Lean reuses this instance when
             // resolving IDataQueueHandler instead of trying to construct a new one

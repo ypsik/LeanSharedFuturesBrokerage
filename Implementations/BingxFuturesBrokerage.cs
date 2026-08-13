@@ -48,12 +48,14 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             BingXRestClient restClient,
             BingXSocketClient socketClient,
             IDataAggregator aggregator,
-            Func<List<Holding>>? getHoldingsFunc = null)
+            Func<List<Holding>>? getHoldingsFunc = null,
+            bool isHedgeMode = true)
             : base(algorithm, "bingx")
         {
             _restClient = restClient;
             _socketClient = socketClient;
             _socketClientExData = new BingXSocketClient();
+            _isHedgeMode = isHedgeMode;
 
             PopulateSPDB();
 
@@ -128,6 +130,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             if (_socketClientExData == null)
             {
                 _socketClientExData = new BingXSocketClient();
+            }
+
+            // Hedge-Mode aus Job-Config lesen, Fallback bleibt true (bisheriges Verhalten)
+            if (job.BrokerageData.TryGetValue("bingx-hedge-mode", out var hedgeModeStr)
+                && bool.TryParse(hedgeModeStr, out var hedgeModeParsed))
+            {
+                _isHedgeMode = hedgeModeParsed;
             }
 
             InitializeBase(
