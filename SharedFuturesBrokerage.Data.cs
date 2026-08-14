@@ -278,6 +278,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                 if (_subscriptions.ContainsKey(subKey)) continue;
 
+                var cashBaseCurrency = _algorithm.Portfolio.CashBook.ContainsKey(shared.BaseAsset)
+                    ? shared.BaseAsset
+                    : null;
+
                 _subRateGate.WaitToProceed();
 
                 if (tickType == TickType.Trade)
@@ -322,6 +326,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                                 AskPrice = q.BestAskPrice,
                                 AskSize = FromExchangeQuantity(symbol, new SharedOrderQuantity(baseAssetQuantity: q.BestAskQuantity, contractQuantity: q.BestAskQuantity))
                             });
+                            if(cashBaseCurrency != null)
+                                RefreshCashConversionRate(cashBaseCurrency, (q.BestBidPrice + q.BestAskPrice) / 2m);
                         }));
 
                     SetupSubscriptionEvents(sub?.Success ?? false, sub?.Data, _ => { }, $"{symbol.Value} Quote", $"Quote subscription failed for {symbol.Value}", sub?.Error?.ToString());
@@ -332,6 +338,14 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 }
             }
             return true;
+        }
+
+        private void RefreshCashConversionRate(string baseCurrency, decimal price)
+        {
+            if (baseCurrency == null || price <= 0) return;
+            if (!_algorithm.Portfolio.CashBook.TryGetValue(baseCurrency, out var cash) || cash.Amount == 0) return;
+
+            _algorithm.Portfolio.CashBook.Add(baseCurrency, cash.Amount, price);
         }
 
         private bool UnsubscribeSymbols(IEnumerable<Symbol> symbols, TickType tickType)
