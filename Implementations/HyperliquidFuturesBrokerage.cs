@@ -321,89 +321,61 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         public override List<CashAmount> GetCashBalance()
         {
-            var subAccount2Result = RunSync(() => _restClient.FuturesApi.Account.GetSubAccounts2Async(
-                string.IsNullOrEmpty(_vaultAdress) ? null : _vaultAdress));
-
-            if (subAccount2Result.Success && subAccount2Result.Data != null)
+            var balancesResult = RunSync(() => _restClient.SpotApi.Account.GetBalancesAsync());
+            if (!balancesResult.Success || balancesResult.Data == null)
             {
-                var account = subAccount2Result.Data.FirstOrDefault();
-                if (account?.Abstraction == "portfolioMargin" || account?.Abstraction == "unifiedAccount")
+                Log.Error($"Cash GetBalancesAsync: {balancesResult.Error?.Message}");
+                return [];
+            }
+
+            var balances = balancesResult.Data;
+
+            if (balances.PortfolioMarginEnabled == true)
+            {
+                var result = balances.Balances
+                    .Where(b => b.Total > 0 && (b.Asset == SettleAsset || (b.Ltv ?? 0m) > 0))
+                    .Select(b => b.Asset == SettleAsset
+                        ? new CashAmount(b.Total, SettleAsset)
+                        : new CashAmount(b.Total * (b.Ltv ?? 0m), b.Asset))
+                    .ToList();
+
+                if (result.Count == 0)
+                    return [];
+
+                var futuresResult = RunSync(() => _restClient.FuturesApi.Account.GetAccountInfoAsync());
+                if (!futuresResult.Success || futuresResult.Data == null)
                 {
-                    var usdcBalance = account.SpotBalances?.Balances?.FirstOrDefault(x => x.Asset == SettleAsset);
-                    if (usdcBalance == null)
-                        return [];
-
-                    decimal cashBalance = usdcBalance.Total;
-
-                    if (account.Abstraction == "portfolioMargin")
-                    {
-                        var result = account.SpotBalances?.Balances?
-                            .Where(b => b.Total > 0 && (b.Asset == SettleAsset || (b.Ltv ?? 0m) > 0))
-                            .Select(b => b.Asset == SettleAsset
-                                ? new CashAmount(b.Total, SettleAsset)
-                                : new CashAmount(b.Total * (b.Ltv ?? 0m), b.Asset))
-                            .ToList() ?? [];
-
-                        if (result.Count == 0)
-                            return [];
-
-                        var pnl = account.FuturesInfo?.Values
-                            .SelectMany(dex => dex.Positions ?? [])
-                            .Sum(p => p.Position?.UnrealizedPnl ?? 0m) ?? 0m;
-
-                        var usdcIndex = result.FindIndex(x => x.Currency == SettleAsset);
-                        if (usdcIndex >= 0)
-                        {
-                            result[usdcIndex] = new CashAmount(result[usdcIndex].Amount - pnl, SettleAsset);
-                        }
-
-                        return result;
-                    }
-                    else // unifiedAccount
-                    {
-                        var futuresAccountResult = RunSync(() => _restClient.FuturesApi.Account.GetAccountInfoAsync());
-                        if (futuresAccountResult.Success && futuresAccountResult.Data != null)
-                        {
-                            foreach (var assetPosition in futuresAccountResult.Data.Positions)
-                            {
-                                cashBalance -= assetPosition.Position?.UnrealizedPnl ?? 0m;
-                            }
-                        }
-                        else
-                        {
-                            Log.Error($"Cash {futuresAccountResult.Error?.Message}");
-                            return [];
-                        }
-                    }
-
-                    return [new CashAmount(cashBalance, SettleAsset)];
+                    Log.Error($"Cash GetAccountInfoAsync: {futuresResult.Error?.Message}");
+                    return [];
                 }
+
+                var pnl = futuresResult.Data.Positions
+                    .Sum(p => p.Position?.UnrealizedPnl ?? 0m);
+
+                var usdcIndex = result.FindIndex(x => x.Currency == SettleAsset);
+                if (usdcIndex >= 0)
+                    result[usdcIndex] = new CashAmount(result[usdcIndex].Amount - pnl, SettleAsset);
+
+                return result;
             }
 
             // Fallback: normaler Account
-            var res = RunSync(() => _restClient.SpotApi.Account.GetBalancesAsync());
-            var usdcValue = res?.Data?.FirstOrDefault(x => x.Asset == SettleAsset);
+            var usdcValue = balances.Balances.FirstOrDefault(x => x.Asset == SettleAsset);
             if (usdcValue == null)
                 return [];
 
-            var futuresAccountResult2 = RunSync(() => _restClient.FuturesApi.Account.GetAccountInfoAsync());
-
-            decimal cashBalanceFallback = usdcValue.Total;
-
-            if (futuresAccountResult2.Success && futuresAccountResult2.Data != null)
+            var futuresAccountResult = RunSync(() => _restClient.FuturesApi.Account.GetAccountInfoAsync());
+            if (!futuresAccountResult.Success || futuresAccountResult.Data == null)
             {
-                foreach (var assetPosition in futuresAccountResult2.Data.Positions)
-                {
-                    cashBalanceFallback -= assetPosition.Position?.UnrealizedPnl ?? 0m;
-                }
-            }
-            else
-            {
-                Log.Error($"Cash {futuresAccountResult2.Error?.Message}");
+                Log.Error($"Cash {futuresAccountResult.Error?.Message}");
                 return [];
             }
 
-            return [new CashAmount(cashBalanceFallback, SettleAsset)];
+            decimal cashBalance = usdcValue.Total;
+            foreach (var assetPosition in futuresAccountResult.Data.Positions)
+                cashBalance -= assetPosition.Position?.UnrealizedPnl ?? 0m;
+
+            return [new CashAmount(cashBalance, SettleAsset)];
         }
 
         protected override async Task<WebSocketResult<UpdateSubscription>> CreateFundingSubscriptionAsync(
