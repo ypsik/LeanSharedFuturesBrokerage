@@ -554,7 +554,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             if (request == null)
                 throw new ArgumentNullException("request");
 
-            var res = await _restClient.FuturesApi.Trading.CancelOrderAsync(
+            if(request.Symbol == null)
+                throw new ArgumentNullException("request.Symbol");
+
+            var res = await _socketClient.FuturesApi.Trading.CancelOrderAsync(
                 symbol: request.Symbol.SymbolName ?? request.Symbol.BaseAsset,
                 orderId: long.Parse(request.OrderId),
                 vaultAddress: _vaultAdress);

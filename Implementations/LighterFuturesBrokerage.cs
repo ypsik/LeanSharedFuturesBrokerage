@@ -318,7 +318,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             // WICHTIG: Lighter's EditOrderAsync existiert nicht im IFuturesOrderRestClient Shared-Interface
             // (nur PlaceFuturesOrderAsync/CancelFuturesOrderAsync sind gemappt) - deshalb direkter Trading-Call.
             // Anders als HL: kein side/orderType Parameter noetig, nur quantity/price/triggerPrice.
-            var res = await _restClient.ExchangeApi.Trading.EditOrderAsync(
+            var res = await _socketClient.ExchangeApi.Trading.EditOrderAsync(
                 symbol: ticker,
                 orderIndex: orderIndex,
                 quantity: editQuantity,
