@@ -298,7 +298,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                                     Time = item.Timestamp.ToUniversalTime(),
                                     TickType = TickType.Trade,
                                     Value = item.Price,
-                                    Quantity = FromExchangeQuantity(symbol, item.Quantities)
+                                    Quantity = item.Quantities.QuantityInBaseAsset ?? FromExchangeQuantity(symbol, item.Quantities)
                                 });
                             }
                         }));
