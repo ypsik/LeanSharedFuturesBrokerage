@@ -29,17 +29,21 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         private bool _fundingUpdateConnected = false;
         private UpdateSubscription _fundingUpdateSubscription;
 
+        private bool _isHedgeMode = false;
+
         internal BybitFuturesBrokerage(
             IAlgorithm algorithm,
             BybitRestClient restClient,
             BybitSocketClient socketClient,
             IDataAggregator aggregator,
-            Func<List<Holding>>? getHoldingsFunc = null)
+            Func<List<Holding>>? getHoldingsFunc = null,
+            bool isHedgeMode = false)
             : base(algorithm, "bybit")
         {
             _restClient = restClient;
             _socketClient = socketClient;
             _socketClientExData = new BybitSocketClient();
+            _isHedgeMode = isHedgeMode;
 
             PopulateSPDB();
 
@@ -85,6 +89,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 _socketClientExData = new BybitSocketClient();
             }
 
+            // Hedge-Mode aus Job-Config lesen, Fallback bleibt false (bisheriges Verhalten: kein Hedge)
+            if (job.BrokerageData.TryGetValue("bybit-hedge-mode", out var hedgeModeStr)
+                && bool.TryParse(hedgeModeStr, out var hedgeModeParsed))
+            {
+                _isHedgeMode = hedgeModeParsed;
+            }
+
             InitializeBase(
                 _restClient.V5Api.SharedClient,
                 _restClient.V5Api.SharedClient,
@@ -106,7 +117,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             do
             {
                 var result = RunSync(() => _restClient.V5Api.ExchangeData
-                    .GetLinearInverseSymbolsAsync(Bybit.Net.Enums.Category.Linear, 
+                    .GetLinearInverseSymbolsAsync(Bybit.Net.Enums.Category.Linear,
                     limit: 1000,
                     cursor: cursor));
 
@@ -143,6 +154,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         protected override int? FundingRolloverHours => null;
         public override decimal MinimumOrderNotionalValue => 5m;
+
+        protected override SharedPositionSide? SharedPositionSide => _isHedgeMode ? CryptoExchange.Net.SharedApis.SharedPositionSide.Long : null;
 
         protected override ExchangeParameters OpenOrdersExchangeParameters
         {
@@ -190,7 +203,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                                 {
                                     var fundings = -fundingsRecord.Fee ?? 0m;
                                     _algorithm.Portfolio.CashBook[SettleAsset].AddAmount(fundings);
-                                    OnMessage(new FundingBrokerageMessageEvent(fundingsRecord.FeeAsset??SettleAsset, fundings));
+                                    OnMessage(new FundingBrokerageMessageEvent(fundingsRecord.FeeAsset ?? SettleAsset, fundings));
                                 }
                             }
                         }));
@@ -202,7 +215,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                                     (state) => _fundingUpdateConnected = state,
                                     "Wallet updates",
                                     "Wallet updates subscription failed",
-                                    sub?.Error?.ToString()                                
+                                    sub?.Error?.ToString()
                                 );
 
                     if (sub?.Success ?? false)

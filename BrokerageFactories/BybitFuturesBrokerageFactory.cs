@@ -26,6 +26,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
         {
             { "bybit-api-key", Config.Get("bybit-api-key") },
             { "bybit-api-secret",  Config.Get("bybit-api-secret")  },
+            { "bybit-hedge-mode", Config.Get("bybit-hedge-mode", "false") },
         };
 
         public override IBrokerageModel GetBrokerageModel(IOrderProvider orderProvider)
@@ -44,7 +45,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
                 throw new ArgumentException(string.Join(Environment.NewLine, errors));
 
             errors = new List<string>();
-            
+
             var credentials = new BybitCredentials(address, secret);
 
             var restClient = new BybitRestClient(options =>
@@ -70,7 +71,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
                     .ToList();
 
             algorithm.Settings.DatabasesRefreshPeriod = TimeSpan.FromDays(36500);
-            var brokerage = new BybitFuturesBrokerage(algorithm, restClient, socketClient, aggregator, getHoldingsFunc);
+
+            var hedgeMode = Config.GetBool("bybit-hedge-mode", false);
+
+            var brokerage = new BybitFuturesBrokerage(algorithm, restClient, socketClient, aggregator, getHoldingsFunc, hedgeMode);
 
             // Register with MEF Composer so Lean reuses this instance when
             // resolving IDataQueueHandler instead of trying to construct a new one
