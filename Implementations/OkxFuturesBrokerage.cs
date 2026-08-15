@@ -53,6 +53,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         private bool _fundingUpdateConnected = false;
         private UpdateSubscription _fundingUpdateSubscription;
 
+        private bool _isHedgeMode = false;
+
         // OKX instrument type used for symbol discovery.
         // SWAP    = true perpetuals (Global/US accounts).
         // FUTURES = X-Perps (EU/EEA MiFID-regulated, 5-year expiry with funding rate).
@@ -66,6 +68,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         protected override SharedMarginMode? SharedMarginMode => CryptoExchange.Net.SharedApis.SharedMarginMode.Cross;
 
+        protected override SharedPositionSide? SharedPositionSide => _isHedgeMode ? CryptoExchange.Net.SharedApis.SharedPositionSide.Long : null;
+
 
         internal OkxFuturesBrokerage(
             IAlgorithm algorithm,
@@ -74,13 +78,15 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             IDataAggregator aggregator,
             InstrumentType instrumentType = InstrumentType.Futures,
             SymbolRuleType? ruleTypeFilter = SymbolRuleType.Perp,
-            Func<List<Holding>>? getHoldingsFunc = null)
+            Func<List<Holding>>? getHoldingsFunc = null,
+            bool isHedgeMode = false)
             : base(algorithm, "okx")
         {
             _restClient = restClient;
             _socketClient = socketClient;
             _instrumentType = instrumentType;
             _ruleTypeFilter = ruleTypeFilter;
+            _isHedgeMode = isHedgeMode;
 
             RunSync(() => _restClient.UnifiedApi.SharedClient.GetFuturesSymbolsAsync(new GetSymbolsRequest()));
 
@@ -144,6 +150,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 {
                     options.Environment = environment;
                 });
+            }
+
+            // Hedge-Mode aus Job-Config lesen, Fallback bleibt false (bisheriges Verhalten: kein Hedge)
+            if (job.BrokerageData.TryGetValue("okx-hedge-mode", out var hedgeModeStr)
+                && bool.TryParse(hedgeModeStr, out var hedgeModeParsed))
+            {
+                _isHedgeMode = hedgeModeParsed;
             }
 
             InitializeBase(

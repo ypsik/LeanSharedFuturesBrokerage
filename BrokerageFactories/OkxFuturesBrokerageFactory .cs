@@ -35,6 +35,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
             { "okx-api-secret",     Config.Get("okx-api-secret")     },
             { "okx-api-passphrase", Config.Get("okx-api-passphrase") },
             { "okx-environment",    Config.Get("okx-environment", "europe") },
+            { "okx-hedge-mode",     Config.Get("okx-hedge-mode", "false") },
         };
 
         public override IBrokerageModel GetBrokerageModel(IOrderProvider orderProvider)
@@ -85,12 +86,15 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
 
             algorithm.Settings.DatabasesRefreshPeriod = TimeSpan.FromDays(36500);
 
+            var hedgeMode = Config.GetBool("okx-hedge-mode", false);
+
             var brokerage = new OkxFuturesBrokerage(
                 algorithm,
                 restClient,
                 socketClient,
                 aggregator,
-                getHoldingsFunc: getHoldingsFunc);
+                getHoldingsFunc: getHoldingsFunc,
+                isHedgeMode: hedgeMode);
 
             Composer.Instance.AddPart<IDataQueueHandler>(brokerage);
 
