@@ -33,6 +33,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         private BitgetSocketClient _socketClientExData;
         private bool _fundingUpdateConnected = false;
 
+        private bool _isHedgeMode = false;
+
         protected override bool RequiresExplicitCancelBeforeReplace => true;
 
         protected override bool IsRejectedUpdateError(string errorMsg) =>
@@ -43,12 +45,14 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             BitgetRestClient restClient,
             BitgetSocketClient socketClient,
             IDataAggregator aggregator,
-            Func<List<Holding>>? getHoldingsFunc = null)
+            Func<List<Holding>>? getHoldingsFunc = null,
+            bool isHedgeMode = false)
             : base(algorithm, "bitget")
         {
             _restClient = restClient;
             _socketClient = socketClient;
             _socketClientExData = new BitgetSocketClient();
+            _isHedgeMode = isHedgeMode;
 
             PopulateSPDB();
 
@@ -98,6 +102,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 _socketClientExData = new BitgetSocketClient();
             }
 
+            // Hedge-Mode aus Job-Config lesen, Fallback bleibt false (bisheriges Verhalten: kein Hedge)
+            if (job.BrokerageData.TryGetValue("bitget-hedge-mode", out var hedgeModeStr)
+                && bool.TryParse(hedgeModeStr, out var hedgeModeParsed))
+            {
+                _isHedgeMode = hedgeModeParsed;
+            }
+
             InitializeBase(
                 _restClient.FuturesApiV2.SharedClient,
                 _restClient.FuturesApiV2.SharedClient,
@@ -145,6 +156,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         public override decimal MinimumOrderNotionalValue => 5m;
         protected override int? FundingRolloverHours => null;
 
+        protected override SharedPositionSide? SharedPositionSide => _isHedgeMode ? CryptoExchange.Net.SharedApis.SharedPositionSide.Long : null;
 
         protected override ExchangeParameters PlaceFuturesOrderExchangeParameters
         {
@@ -341,7 +353,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 Log.Error($"Failed to retrieve cash balance: {res?.Error}");
                 return [];
             }
-            
+
             var cashBalance = (data?.UsdtEquity ?? 0) - (data?.UnrealizedProfitAndLoss ?? 0);
             return
             [

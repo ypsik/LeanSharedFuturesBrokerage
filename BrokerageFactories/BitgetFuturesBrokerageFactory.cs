@@ -33,6 +33,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
             { "bitget-api-key", Config.Get("bitget-api-key") },
             { "bitget-api-secret",  Config.Get("bitget-api-secret")  },
             { "bitget-api-pass",  Config.Get("bitget-api-pass")  },
+            { "bitget-hedge-mode", Config.Get("bitget-hedge-mode", "false") },
         };
 
         public override IBrokerageModel GetBrokerageModel(IOrderProvider orderProvider)
@@ -78,7 +79,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
                     .ToList();
 
             algorithm.Settings.DatabasesRefreshPeriod = TimeSpan.FromDays(36500);
-            var brokerage = new BitgetFuturesBrokerage(algorithm, restClient, socketClient, aggregator, getHoldingsFunc);
+
+            var hedgeMode = Config.GetBool("bitget-hedge-mode", false);
+
+            var brokerage = new BitgetFuturesBrokerage(algorithm, restClient, socketClient, aggregator, getHoldingsFunc, hedgeMode);
 
             // Register with MEF Composer so Lean reuses this instance when
             // resolving IDataQueueHandler instead of trying to construct a new one
