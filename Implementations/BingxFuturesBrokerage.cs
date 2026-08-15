@@ -38,7 +38,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         private CancellationTokenSource? _userStreamCts;
         private string _listenKey;
 
-        private bool _isHedgeMode = true;
+        private bool _isHedgeMode = false;
 
         public override bool ExchangeSupportsUserTradeStream => false;
         public override decimal MinimumOrderNotionalValue => 2.0m;

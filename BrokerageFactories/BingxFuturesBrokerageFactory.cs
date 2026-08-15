@@ -34,7 +34,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
         {
             { "bingx-api-key", Config.Get("bingx-api-key") },
             { "bingx-api-secret",  Config.Get("bingx-api-secret")  },
-            { "bingx-hedge-mode", Config.Get("bingx-hedge-mode", "true") },
+            { "bingx-hedge-mode", Config.Get("bingx-hedge-mode", "false") },
         };
 
         public override IBrokerageModel GetBrokerageModel(IOrderProvider orderProvider)
@@ -80,7 +80,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
 
             algorithm.Settings.DatabasesRefreshPeriod = TimeSpan.FromDays(36500);
 
-            var hedgeMode = Config.GetBool("bingx-hedge-mode", true);
+            var hedgeMode = Config.GetBool("bingx-hedge-mode", false);
 
             var brokerage = new BingxFuturesBrokerage(algorithm, restClient, socketClient, aggregator, getHoldingsFunc, hedgeMode);
 
