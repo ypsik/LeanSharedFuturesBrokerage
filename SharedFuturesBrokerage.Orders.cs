@@ -248,6 +248,23 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
             var clientOrderId = GenerateClientId(order.Id);
 
+            // Chase-Orders: Einstiegspreis passiv über dieselbe GetAggressivePrice/ApplyCrossGuard-
+            // Logik wie beim Reprice berechnen, statt den vom Aufrufer übergebenen (ggf. crossing)
+            // Preis unverändert zu senden - sonst matcht die Order sofort als Taker, noch bevor der
+            // ChaseOrderLoop überhaupt einmal laufen konnte.
+            decimal chaseInitialBid = 0m, chaseInitialAsk = 0m;
+            if (order.Properties is Orders.ChaseOrderProperties initialChaseProps && order.Type == OrderType.Limit
+                && _quoteCache.TryGetValue(order.Symbol, out var initialQuote) && initialQuote.Bid != 0m && initialQuote.Ask != 0m)
+            {
+                chaseInitialBid = initialQuote.Bid;
+                chaseInitialAsk = initialQuote.Ask;
+
+                bool isBuyInit = order.Quantity > 0;
+                decimal initialPrice = GetAggressivePrice(order.Symbol, isBuyInit, initialChaseProps.Aggression, initialQuote.Bid, initialQuote.Ask);
+                order.ApplyUpdateOrderRequest(new UpdateOrderRequest(
+                    DateTime.UtcNow, order.Id, new UpdateOrderFields { LimitPrice = initialPrice }));
+            }
+
             // Base-Menge in die von der Exchange erwartete Einheit umrechnen (BaseAsset oder Contracts).
             // roundedExecutionQuantity ist die tatsächlich gültige Base-Menge NACH Rundung auf
             // Contract-/Lot-Steps, damit die State-Machine mit der real platzierten Menge arbeitet.
@@ -333,8 +350,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 {
                     chaseState.ChaseAggression = chaseProps.Aggression;
                     chaseState.ChaseInterval = chaseProps.ChaseInterval;
-                    chaseState.LastBid = 0m;
-                    chaseState.LastAsk = 0m;
+                    chaseState.LastBid = chaseInitialBid;
+                    chaseState.LastAsk = chaseInitialAsk;
                     _ = Task.Run(() => ChaseOrderLoop(chaseState));
                 }
             }
