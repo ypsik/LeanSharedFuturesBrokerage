@@ -545,12 +545,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
                 if (aliasWasPresent)
                 {
-                    _orderStateManager.MapNewExchangeId(state.ClientOrderId, newExchangeId);
-
-                    if (!order.BrokerId.Contains(newExchangeId))
+                    if (_orderStateManager.MapNewExchangeId(state.ClientOrderId, newExchangeId))
                     {
-                        order.BrokerId.Add(newExchangeId);
-
                         OnOrderIdChangedEvent(new BrokerageOrderIdChangedEvent
                         {
                             OrderId = order.Id,

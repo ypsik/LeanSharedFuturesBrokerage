@@ -316,7 +316,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 return false;
             }
 
-            order.BrokerId.Add(res.Data.Id);
+            // KEIN order.BrokerId.Add(res.Data.Id) hier mehr - das übernimmt ausschließlich
+            // MapNewExchangeId weiter unten (bzw. HandleOrderSocket, falls der Socket schneller war).
+            // Vorher stand hier ein unconditionales Add, das bei State != Placing (Socket war
+            // schneller) zusätzlich zum Add in MapNewExchangeId lief -> res.Data.Id doppelt in
+            // Order.BrokerId.
 
             // Prüfen ob der State noch im Placing-Zustand ist.
             // Falls nicht, hat 'HandleOrderSocket' bereits übernommen, den Exchange-ID-Swap
@@ -332,12 +336,15 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 //    - entfernt temp BrokerId aus _statesByExchangeId
                 //    - setzt state.BrokerId = res.Data.Id
                 //    - trägt unter res.Data.Id in _statesByExchangeId ein
-                //    - ergänzt Order.BrokerId
+                //    - ergänzt Order.BrokerId (einzige Add-Stelle, siehe MapNewExchangeId)
                 //    - _statesByClientId[clientOrderId] bleibt unverändert
                 //    - resettet FilledQuantityCurrentOrder (siehe OrderStateManager.MapNewExchangeId)
-                _orderStateManager.MapNewExchangeId(clientOrderId, res.Data.Id);
+                var mapped = _orderStateManager.MapNewExchangeId(clientOrderId, res.Data.Id);
 
-                OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero) { Status = QuantConnect.Orders.OrderStatus.Submitted });
+                if (mapped)
+                {
+                    OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero) { Status = QuantConnect.Orders.OrderStatus.Submitted });
+                }
             }
             // else: Socket hat Placing-State bereits umgebogen + Events gefeuert
 
@@ -742,20 +749,23 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             {
                 var oldBrokerId = state.BrokerId;
 
-                // MapNewExchangeId resettet FilledQuantityCurrentOrder für die neue BrokerId-Generation.
-                _orderStateManager.MapNewExchangeId(newClientOrderId, placeRes.Data.Id);
+                // MapNewExchangeId resettet FilledQuantityCurrentOrder für die neue BrokerId-Generation
+                // und ergänzt Order.BrokerId als einzige Add-Stelle (kein separates order.BrokerId.Add
+                // mehr hier - das führte vorher garantiert zu einem Duplikat von placeRes.Data.Id).
+                var mapped = _orderStateManager.MapNewExchangeId(newClientOrderId, placeRes.Data.Id);
                 _orderStateManager.RemoveAlias(state.ClientOrderId); // alte ClientOrderId-Eintragung entfernen
                 state.ClientOrderId = newClientOrderId;
                 state.LastUpdateUtc = DateTime.UtcNow;
                 state.IsUpdatePending = false;
 
-                order.BrokerId.Add(placeRes.Data.Id);
-
-                OnOrderIdChangedEvent(new BrokerageOrderIdChangedEvent
+                if (mapped)
                 {
-                    OrderId = order.Id,
-                    BrokerId = order.BrokerId
-                });
+                    OnOrderIdChangedEvent(new BrokerageOrderIdChangedEvent
+                    {
+                        OrderId = order.Id,
+                        BrokerId = order.BrokerId
+                    });
+                }
 
                 Log.Trace($"{Name}.ExecuteReplaceWorkaround: Replace mapped manually | Old: {oldBrokerId} -> New: {placeRes.Data.Id}.");
             }
@@ -910,6 +920,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         {
                             if (_orderStateManager.TryGetValue(trade.ClientOrderId, out state))
                             {
+                                // Verhalten unverändert zu vorher (kein OnOrderIdChangedEvent hier) -
+                                // Rückgabewert aktuell ungenutzt, siehe Rückfrage zu Site 3 im Chat.
                                 _orderStateManager.MapNewExchangeId(trade.ClientOrderId, trade.OrderId);
 
                                 // Alias-Cleanup falls neue clientOrderId (z.B. Bitget Edit)
@@ -952,16 +964,19 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                                 // Der Trade-Socket mappt die neue ID sofort! 
                                 // Folge-Teil-Fills laufen ab jetzt instantan über den O(1) Exchange-ID Index.
-                                _orderStateManager.MapNewExchangeId(state.ClientOrderId, trade.OrderId);
+                                // MapNewExchangeId ergänzt Order.BrokerId bereits selbst (einzige Add-Stelle) -
+                                // kein separates brokerId.Add hier mehr. Vorher stand hier zusätzlich
+                                // brokerId.Add(trade.Id) - das war ein Bug (trade.Id ist die Execution-/
+                                // Trade-ID, NICHT die Order-ID) UND ein Doppel-Add von trade.OrderId
+                                // über MapNewExchangeId.
+                                var mapped = _orderStateManager.MapNewExchangeId(state.ClientOrderId, trade.OrderId);
 
-                                if (state.IsUpdatePending)
+                                if (mapped)
                                 {
-                                    var brokerId = state.Order.BrokerId;
-                                    brokerId.Add(trade.Id);
                                     OnOrderIdChangedEvent(new BrokerageOrderIdChangedEvent
                                     {
                                         OrderId = state.Order.Id,
-                                        BrokerId = brokerId
+                                        BrokerId = state.Order.BrokerId
                                     });
                                 }
                             }
@@ -1120,11 +1135,14 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         //    - trägt unter o.OrderId in _statesByExchangeId ein
                         //    - ergänzt Order.BrokerId
                         //    - _statesByClientId[o.ClientOrderId] bleibt unverändert
-                        _orderStateManager.MapNewExchangeId(o.ClientOrderId, o.OrderId);
+                        var mapped = _orderStateManager.MapNewExchangeId(o.ClientOrderId, o.OrderId);
 
                         Log.Trace($"{Name}.HandleOrderSocket: Placing→Submitted for {o.OrderId} via socket. Fill (if any) follows via trade socket.");
 
-                        OnOrderEvent(new OrderEvent(placingCandidate.Order, DateTime.UtcNow, OrderFee.Zero) { Status = QuantConnect.Orders.OrderStatus.Submitted });
+                        if (mapped)
+                        {
+                            OnOrderEvent(new OrderEvent(placingCandidate.Order, DateTime.UtcNow, OrderFee.Zero) { Status = QuantConnect.Orders.OrderStatus.Submitted });
+                        }
                     }
 
                     // -------------------------------------------------------
@@ -1155,7 +1173,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                             //    - ergänzt Order.BrokerId
                             //    - _statesByClientId[o.ClientOrderId] bleibt unverändert
                             //    - resettet FilledQuantityCurrentOrder für die neue BrokerId-Generation
-                            _orderStateManager.MapNewExchangeId(o.ClientOrderId, o.OrderId);
+                            var mapped = _orderStateManager.MapNewExchangeId(o.ClientOrderId, o.OrderId);
 
                             // Bitget-Style: neue clientOrderId war temporärer Alias → alten Key entfernen und State updaten
                             if (o.ClientOrderId != existingState.ClientOrderId)
@@ -1180,14 +1198,17 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                                 });
                             }
 
-                            var brokerid = existingState.Order.BrokerId;
-                            brokerid.Add(o.OrderId);
-
-                            OnOrderIdChangedEvent(new BrokerageOrderIdChangedEvent
+                            // KEIN separates brokerid.Add(o.OrderId) mehr - MapNewExchangeId hat
+                            // Order.BrokerId bereits ergänzt (einzige Add-Stelle). Vorher garantiertes
+                            // Duplikat von o.OrderId in Order.BrokerId bei jedem Durchlauf dieses Zweigs.
+                            if (mapped)
                             {
-                                OrderId = existingState.Order.Id,
-                                BrokerId = brokerid
-                            });
+                                OnOrderIdChangedEvent(new BrokerageOrderIdChangedEvent
+                                {
+                                    OrderId = existingState.Order.Id,
+                                    BrokerId = existingState.Order.BrokerId
+                                });
+                            }
 
                             Log.Trace($"{Name}.HandleOrderSocket: Modify mapped via Socket | Old: {oldBrokerId} → New: {o.OrderId}");
                         }

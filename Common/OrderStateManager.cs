@@ -82,9 +82,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.Common
         /// <summary>
         /// Wird vom Order-Socket aufgerufen, wenn die Exchange-ID endlich bekannt ist
         /// </summary>
-        public void MapNewExchangeId(string clientId, string newExchangeId)
+        public bool MapNewExchangeId(string clientId, string newExchangeId)
         {
-            if (string.IsNullOrEmpty(newExchangeId)) return;
+            if (string.IsNullOrEmpty(newExchangeId)) return false;
 
             if (_statesByClientId.TryGetValue(clientId, out var state))
             {
@@ -92,25 +92,29 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.Common
                 {
                     if (state.BrokerId == newExchangeId)
                     {
-                        return;
+                        return false;
                     }
 
-                    // NEU: Neue BrokerId-Generation → lokaler Fill-Zähler für diese Generation resettet.
-                    // FilledQuantity (kumulativ über die gesamte Order) bleibt unverändert.
                     state.CumulativeCostFilledCurrentOrder = 0m;
                     state.FilledQuantityCurrentOrder = 0m;
                     state.CumulativeFeePaidCurrentOrder = 0m;
 
                     state.BrokerId = newExchangeId;
 
+                    bool added = false;
                     if (!state.Order.BrokerId.Contains(newExchangeId))
                     {
                         state.Order.BrokerId.Add(newExchangeId);
+                        added = true;
                     }
 
                     _statesByExchangeId[newExchangeId] = state;
+
+                    return added;
                 }
             }
+
+            return false;
         }
 
         // Praktisch für Reconcile-Loops
