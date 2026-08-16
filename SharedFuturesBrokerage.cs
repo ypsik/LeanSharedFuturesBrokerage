@@ -50,6 +50,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         protected Task? _reconcileTask = null;
         protected readonly TimeSpan _reconciliationInterval = TimeSpan.FromSeconds(30);
 
+        // Ein CTS für alle laufenden ChaseOrderLoop-Tasks (siehe SharedFuturesBrokerage.Orders.cs).
+        // Wird bei Connect() neu erzeugt und bei Disconnect() gecancelt, damit keine Chase-Loops
+        // über eine Disconnect-Phase hinaus weiterlaufen.
+        protected CancellationTokenSource _chaseCts = new();
+
         protected static readonly RateGate _subRateGate = new RateGate(3, TimeSpan.FromSeconds(1));
 
         private static DateTime _startTime = DateTime.UtcNow;
@@ -104,7 +109,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             _subscriptionManager = new EventBasedDataQueueHandlerSubscriptionManager(
                 tickType => tickType.ToString() // "Trade" ≠ "Quote" → separate Channels
             );
-            
+
             _subscriptionManager.SubscribeImpl += (symbols, tickType) => SubscribeSymbols(symbols, tickType);
             _subscriptionManager.UnsubscribeImpl += (symbols, tickType) => UnsubscribeSymbols(symbols, tickType);
 
@@ -123,6 +128,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             lock (_connectLock)
             {
                 if (_balanceClient == null || _orderSocket == null || _userTradeSocket == null && ExchangeSupportsUserTradeStream) throw new InvalidOperationException("Clients not configured");
+
+                if (_chaseCts.IsCancellationRequested)
+                {
+                    _chaseCts = new CancellationTokenSource();
+                }
 
                 if (_reconcileTask == null)
                 {
@@ -157,9 +167,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 {
                     _subRateGate.WaitToProceed();
                     var sub = RunSync(() => _orderSocket.SubscribeToFuturesOrderUpdatesAsync(new SubscribeFuturesOrderRequest
-                        {
-                            ExchangeParameters = OrderUpdatesExchangeParameters                            
-                        }, 
+                    {
+                        ExchangeParameters = OrderUpdatesExchangeParameters
+                    },
                         HandleOrderSocket));
 
                     SetupSubscriptionEvents(sub?.Success ?? false, sub?.Data, state => _isConnectedOrder = state, "Order", "Order socket failed", sub?.Error?.ToString());
@@ -205,6 +215,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         public override void Disconnect()
         {
             _reconcileCts?.Cancel();
+            _chaseCts?.Cancel();
             if (_userTradeSocketSub != null) RunSync(() => _userTradeSocketSub.CloseAsync());
             if (_orderSocketSub != null) RunSync(() => _orderSocketSub.CloseAsync());
             _isConnectedUserTrade = false;

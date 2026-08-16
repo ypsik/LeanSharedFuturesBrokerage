@@ -21,6 +21,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         private readonly object _fundingLock = new();
         private readonly ConcurrentDictionary<Symbol, (DateTime? NextFundingTime, decimal Rate)> _lastFundingState = new();
 
+        /// <summary>
+        /// Letzter bekannter Bid/Ask pro Symbol, gespeist aus dem Book-Ticker-Socket. Wird von
+        /// ChaseOrderLoop (SharedFuturesBrokerage.Orders.cs) gelesen, damit das Reprice unabhängig
+        /// vom Algorithmus-OnData-Zyklus läuft.
+        /// </summary>
+        protected readonly ConcurrentDictionary<Symbol, (decimal Bid, decimal Ask)> _quoteCache = new();
+
         protected virtual int? FundingRolloverHours => 8;
 
         /// <summary>
@@ -316,6 +323,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         update =>
                         {
                             var q = update.Data;
+                            _quoteCache[symbol] = (q.BestBidPrice, q.BestAskPrice);
                             EmitTick(new Tick
                             {
                                 Symbol = symbol,
@@ -326,7 +334,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                                 AskPrice = q.BestAskPrice,
                                 AskSize = FromExchangeQuantity(symbol, new SharedOrderQuantity(baseAssetQuantity: q.BestAskQuantity, contractQuantity: q.BestAskQuantity))
                             });
-                            if(cashBaseCurrency != null)
+                            if (cashBaseCurrency != null)
                                 RefreshCashConversionRate(cashBaseCurrency, (q.BestBidPrice + q.BestAskPrice) / 2m);
                         }));
 

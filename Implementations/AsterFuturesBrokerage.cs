@@ -325,21 +325,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             return _restClient.FuturesApi.SharedClient.GenerateClientOrderId();
         }
 
-        public override bool UpdateOrder(Order order)
-        {
-            if (order.Properties is Shared.Orders.ChaseOrderProperties)
-            {
-                Log.Error($"{Name}.UpdateOrder: Chase orders cannot be modified.");
-                OnMessage(new BrokerageMessageEvent(
-                    BrokerageMessageType.Warning,
-                    "UpdateOrderInvalid",
-                    "Chase orders cannot be modified. Cancel and re-place instead."));
-                return false;
-            }
-
-            return base.UpdateOrder(order);
-        }
-        
         protected override async Task<HttpResult<SharedId>> ExecuteUpdateOrderAsync(
         Order order, decimal price, decimal? quantity)
         {

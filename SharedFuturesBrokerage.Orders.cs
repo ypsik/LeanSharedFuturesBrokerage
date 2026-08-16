@@ -117,6 +117,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             public decimal CumulativeFeePaidCurrentOrder;
             public decimal CumulativeCostFilled;
 
+            // --- Chase-Order-Tracking (portiert aus AdaptiveMacroFlowAlgorithm.AggressiveOrder) ---
+            public decimal? ChaseAggression;
+            public TimeSpan? ChaseInterval;
+            public decimal LastBid;
+            public decimal LastAsk;
+
             public decimal Remaining => OriginalQuantity - FilledQuantity;
 
             public bool IsClosed => State is OrderLifeCycleState.Filled
@@ -318,7 +324,124 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             }
             // else: Socket hat Placing-State bereits umgebogen + Events gefeuert
 
+            if (order.Properties is Orders.ChaseOrderProperties chaseProps && order.Type == OrderType.Limit)
+            {
+                // State kann inzwischen (Race mit HandleOrderSocket) unter derselben ClientOrderId
+                // bereits durch den Socket-Pfad ersetzt worden sein - daher aktuellen State ziehen,
+                // nicht den lokalen placingState-Verweis von oben verwenden.
+                if (_orderStateManager.TryGetValue(clientOrderId, out var chaseState))
+                {
+                    chaseState.ChaseAggression = chaseProps.Aggression;
+                    chaseState.ChaseInterval = chaseProps.ChaseInterval;
+                    chaseState.LastBid = 0m;
+                    chaseState.LastAsk = 0m;
+                    _ = Task.Run(() => ChaseOrderLoop(chaseState));
+                }
+            }
+
             return true;
+        }
+
+        // =====================================================================
+        // CHASE ORDERS
+        // =====================================================================
+        // Portiert 1:1 aus AdaptiveMacroFlowAlgorithm (Buy/Sell/GetAggressivePrice/ApplyCrossGuard/
+        // Reprice), nur dass hier die Brokerage selbst die Order nachführt statt der Algorithmus.
+        // Trigger ist ein eigener Task pro Order statt eines gemeinsamen Loops/Timers - das
+        // ChaseInterval aus den ChaseOrderProperties ist damit direkt der Throttle zwischen zwei
+        // Reprice-Versuchen dieser einen Order.
+
+        private async Task ChaseOrderLoop(OrderState state)
+        {
+            var order = state.Order;
+            var symbol = order.Symbol;
+
+            while (!state.IsClosed)
+            {
+                try
+                {
+                    await Task.Delay(state.ChaseInterval.Value, _chaseCts.Token);
+                }
+                catch (TaskCanceledException)
+                {
+                    return;
+                }
+
+                if (state.IsClosed) return;
+                if (state.IsUpdatePending) continue;
+
+                if (!_quoteCache.TryGetValue(symbol, out var quote) || quote.Bid == 0m || quote.Ask == 0m)
+                    continue;
+
+                // Markt hat sich seit dem letzten Reprice nicht bewegt -> nichts zu tun.
+                if (quote.Bid == state.LastBid && quote.Ask == state.LastAsk)
+                    continue;
+
+                bool isBuy = order.Quantity > 0;
+                decimal currentLimit = ((LimitOrder)order).LimitPrice;
+
+                // Bin ich noch Top of Book (am oder besser als Best Bid/Ask)? Dann kein Chase,
+                // auch wenn sich der Markt Richtung anderer Seite bewegt hat - Order bleibt stehen,
+                // solange sie noch die beste im Buch ist.
+                if (isBuy && currentLimit >= quote.Bid || !isBuy && currentLimit <= quote.Ask)
+                {
+                    state.LastBid = quote.Bid;
+                    state.LastAsk = quote.Ask;
+                    continue;
+                }
+
+                decimal targetPrice = GetAggressivePrice(symbol, isBuy, state.ChaseAggression.Value, quote.Bid, quote.Ask);
+                decimal tick = _algorithm.Securities[symbol].SymbolProperties.MinimumPriceVariation;
+
+                if (Math.Abs(currentLimit - targetPrice) > tick)
+                {
+                    // LimitPrice ist read-only - Order.ApplyUpdateOrderRequest ist der offizielle
+                    // Weg, das trotzdem zu setzen (LEAN nutzt denselben Mechanismus intern u.a.
+                    // für readonly Tag-Updates). Läuft NICHT über die OrderTicket/Transaction-
+                    // Manager-Pipeline (kein ticket.UpdateRequests-Eintrag), daher liest UpdateOrder
+                    // gleich danach den neuen Preis über den order.Price-Fallback.
+                    order.ApplyUpdateOrderRequest(new UpdateOrderRequest(
+                        DateTime.UtcNow, order.Id, new UpdateOrderFields { LimitPrice = targetPrice }));
+                    UpdateOrder(order);
+                }
+
+                state.LastBid = quote.Bid;
+                state.LastAsk = quote.Ask;
+            }
+        }
+
+        private decimal GetAggressivePrice(Symbol symbol, bool isBuy, decimal aggression, decimal bid, decimal ask)
+        {
+            if (bid == 0m || ask == 0m) return _algorithm.Securities[symbol].Price;
+
+            decimal mid = (bid + ask) / 2m;
+            decimal spread = ask - bid;
+            decimal tick = _algorithm.Securities[symbol].SymbolProperties.MinimumPriceVariation;
+
+            decimal rawPrice = isBuy
+                ? mid + aggression * spread
+                : mid - aggression * spread;
+
+            decimal roundedPrice = Math.Round(rawPrice / tick) * tick;
+
+            decimal guarded = ApplyCrossGuard(isBuy, roundedPrice, bid, ask, tick);
+            return Math.Round(guarded / tick) * tick;
+        }
+
+        private decimal ApplyCrossGuard(bool isBuy, decimal price, decimal bid, decimal ask, decimal tick)
+        {
+            if (bid == 0m || ask == 0m) return price;
+
+            if (isBuy)
+            {
+                if (price >= ask) return ask - tick;
+            }
+            else
+            {
+                if (price <= bid) return bid + tick;
+            }
+
+            return price;
         }
 
         public override bool CancelOrder(Order order)
