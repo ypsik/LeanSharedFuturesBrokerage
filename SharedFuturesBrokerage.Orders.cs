@@ -509,7 +509,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             var ticket = _orderManager.GetOrderTicket(order.Id);
             var lastUpdate = ticket?.UpdateRequests.LastOrDefault();
 
-            decimal price = lastUpdate?.LimitPrice ?? order.Price;
+            decimal price = lastUpdate?.LimitPrice ?? (order as LimitOrder)?.LimitPrice ?? order.Price;
             decimal? quantity = order.Quantity;
 
             // FIX: Suche via BrokerId statt GenerateClientId
