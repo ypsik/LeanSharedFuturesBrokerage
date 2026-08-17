@@ -516,8 +516,20 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             // GenerateClientId funktioniert nicht mehr nach Bitget-Style Modify
             // weil state.ClientOrderId auf Bitget-generierte ID umgebogen wurde.
             var activeBrokerId = order.BrokerId.LastOrDefault();
-            if (!string.IsNullOrEmpty(activeBrokerId) &&
-                _orderStateManager.TryGetByExchangeId(activeBrokerId, out var state))
+
+            if (string.IsNullOrEmpty(activeBrokerId))
+            {
+                Log.Error($"{Name}.UpdateOrder: No active BrokerId for {order.Symbol.Value} (Order Id {order.Id}). Cannot update.");
+
+                OnMessage(new BrokerageMessageEvent(
+                        BrokerageMessageType.Warning,
+                        "UpdateOrderInvalid",
+                        $"No active broker order id found for {order.Symbol.Value}. Update cancelled."));
+
+                return false;
+            }
+
+            if (_orderStateManager.TryGetByExchangeId(activeBrokerId, out var state))
             {
                 if (ExchangeModifiesOrdersInPlace)
                 {
@@ -551,7 +563,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 state.IsUpdatePending = true;
             }
 
-
             var res = RunSync(() => ExecuteUpdateOrderAsync(order, price, quantity));
 
             if (res?.Success != true)
@@ -570,8 +581,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     return ExecuteReplaceWorkaround(order, price, quantity.Value, activeBrokerId);
                 }
 
-                if (!string.IsNullOrEmpty(activeBrokerId) &&
-                    _orderStateManager.TryGetByExchangeId(activeBrokerId, out var errorState))
+                if (_orderStateManager.TryGetByExchangeId(activeBrokerId, out var errorState))
                 {
                     errorState.IsUpdatePending = false;
                 }
@@ -580,11 +590,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 {
                     Log.Trace($"{Name}.UpdateOrder: Race condition detected. Order was already filled or canceled on exchange. Suppressing LEAN ghost event.");
 
-                    var terminalBrokerId = order.BrokerId.LastOrDefault();
-                    if (terminalBrokerId != null)
-                    {
-                        _ = Task.Run(() => ReconcileOrderImmediateAsync(terminalBrokerId, order));
-                    }
+                    _ = Task.Run(() => ReconcileOrderImmediateAsync(activeBrokerId, order));
 
                     return true;
                 }
@@ -599,8 +605,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 return false;
             }
 
-            if (!string.IsNullOrEmpty(activeBrokerId) &&
-                _orderStateManager.TryGetByExchangeId(activeBrokerId, out var activeState))
+            if (_orderStateManager.TryGetByExchangeId(activeBrokerId, out var activeState))
             {
                 activeState.LastUpdateUtc = DateTime.UtcNow;
             }
