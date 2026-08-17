@@ -43,6 +43,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         protected LiveNodePacket _job;
 
         protected UpdateSubscription _orderSocketSub, _userTradeSocketSub;
+        protected UpdateSubscription? _userTradeSocketSub;
         protected readonly object _connectLock = new();
         protected readonly object _balanceUpdatesConnectLock = new();
         private bool _isConnectedOrder, _isConnectedUserTrade;
