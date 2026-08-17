@@ -380,6 +380,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             var order = state.Order;
             var symbol = order.Symbol;
 
+            Log.Trace($"{Name}.ChaseOrderLoop: started for {symbol.Value} (orderId={order.Id}, clientOrderId={state.ClientOrderId}, interval={state.ChaseInterval}, aggression={state.ChaseAggression}, startPrice={((LimitOrder)order).LimitPrice}).");
+
             while (!state.IsClosed)
             {
                 try
@@ -388,10 +390,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 }
                 catch (TaskCanceledException)
                 {
+                    Log.Trace($"{Name}.ChaseOrderLoop: cancelled for {symbol.Value} (orderId={order.Id}).");
                     return;
                 }
 
-                if (state.IsClosed) return;
+                if (state.IsClosed) break;
                 if (state.IsUpdatePending) continue;
 
                 if (!_quoteCache.TryGetValue(symbol, out var quote) || quote.Bid == 0m || quote.Ask == 0m)
@@ -419,6 +422,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                 if (Math.Abs(currentLimit - targetPrice) > tick)
                 {
+                    Log.Trace($"{Name}.ChaseOrderLoop: repricing {symbol.Value} (orderId={order.Id}) from {currentLimit} to {targetPrice} (bid={quote.Bid}, ask={quote.Ask}, remaining={state.Remaining}).");
+
                     // LimitPrice ist read-only - Order.ApplyUpdateOrderRequest ist der offizielle
                     // Weg, das trotzdem zu setzen (LEAN nutzt denselben Mechanismus intern u.a.
                     // für readonly Tag-Updates). Läuft NICHT über die OrderTicket/Transaction-
@@ -426,12 +431,18 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     // gleich danach den neuen Preis über den order.Price-Fallback.
                     order.ApplyUpdateOrderRequest(new UpdateOrderRequest(
                         DateTime.UtcNow, order.Id, new UpdateOrderFields { LimitPrice = targetPrice }));
-                    UpdateOrder(order);
+
+                    if (!UpdateOrder(order))
+                    {
+                        Log.Error($"{Name}.ChaseOrderLoop: reprice update REJECTED for {symbol.Value} (orderId={order.Id}), stayed near {currentLimit}.");
+                    }
                 }
 
                 state.LastBid = quote.Bid;
                 state.LastAsk = quote.Ask;
             }
+
+            Log.Trace($"{Name}.ChaseOrderLoop: stopped for {symbol.Value} (orderId={order.Id}), final state={state.State}, filled={state.FilledQuantity}/{state.OriginalQuantity}.");
         }
 
         private decimal GetAggressivePrice(Symbol symbol, bool isBuy, decimal aggression, decimal bid, decimal ask)
