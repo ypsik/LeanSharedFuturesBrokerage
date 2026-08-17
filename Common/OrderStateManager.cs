@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using static SilverQuant.Lean.Brokerages.Futures.Shared.SharedFuturesBrokerage;
 
@@ -37,7 +38,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.Common
             return false;
         }
 
-        public bool TryGetValue(string clientId, out OrderState? state)
+        public bool TryGetValue(string clientId, [MaybeNullWhen(false)] out OrderState state)
         {
             return _statesByClientId.TryGetValue(clientId, out state);
         }
@@ -53,7 +54,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.Common
             return _statesByClientId.TryRemove(clientId, out _);
         }
 
-        public bool TryRemove(string clientId, out OrderState? state)
+        public bool TryRemove(string clientId, [MaybeNullWhen(false)] out OrderState? state)
         {
             if (_statesByClientId.TryRemove(clientId, out state))
             {
