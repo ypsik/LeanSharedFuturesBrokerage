@@ -75,7 +75,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.Common
         /// <summary>
         /// O(1) Lichtgeschwindigkeits-Suche für den Trade-Socket
         /// </summary>
-        public bool TryGetByExchangeId(string exchangeId, out OrderState state)
+        public bool TryGetByExchangeId(string exchangeId, [MaybeNullWhen(false)] out OrderState state)
         {
             return _statesByExchangeId.TryGetValue(exchangeId, out state);
         }
