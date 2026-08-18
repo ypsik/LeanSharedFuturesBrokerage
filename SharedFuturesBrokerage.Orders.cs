@@ -331,21 +331,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
        
                 if (!String.IsNullOrEmpty(res.Data.Id) && clientOrderId != res.Data.Id)
                 {
-                    // 1. State-Properties aktualisieren
-                    placingState.State = OrderLifeCycleState.Submitted;
-                    placingState.LastUpdateUtc = DateTime.UtcNow;
-                    
-                    // 2. Exchange-ID im Manager atomar eintragen:
-                    //    - entfernt temp BrokerId aus _statesByExchangeId
-                    //    - setzt state.BrokerId = res.Data.Id
-                    //    - trägt unter res.Data.Id in _statesByExchangeId ein
-                    //    - ergänzt Order.BrokerId (einzige Add-Stelle, siehe MapNewExchangeId)
-                    //    - _statesByClientId[clientOrderId] bleibt unverändert
-                    //    - resettet FilledQuantityCurrentOrder (siehe OrderStateManager.MapNewExchangeId)
                     var mapped = _orderStateManager.MapNewExchangeId(clientOrderId, res.Data.Id);
 
                     if (mapped)
                     {
+                        placingState.State = OrderLifeCycleState.Submitted;
+                        placingState.LastUpdateUtc = DateTime.UtcNow;
                         OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero) { Status = QuantConnect.Orders.OrderStatus.Submitted });
                     }
                 }
@@ -1138,29 +1129,21 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                     // -------------------------------------------------------
                     // PLACING STATE: Instantaner Fill während PlaceOrder()
-                    // Order liegt in _statesByClientId[clientOrderId], BrokerId = clientOrderId (temp).
+                    // Order liegt in _statesByClientId[clientOrderId]
                     // -------------------------------------------------------
                     if (!string.IsNullOrEmpty(o.ClientOrderId) &&
                         _orderStateManager.TryGetValue(o.ClientOrderId, out var placingCandidate) &&
                         placingCandidate.State == OrderLifeCycleState.Placing &&
                         !_orderStateManager.TryGetByExchangeId(o.OrderId, out _))
                     {
-                        // 1. State-Properties aktualisieren
-                        placingCandidate.State = OrderLifeCycleState.Submitted;
-                        placingCandidate.LastUpdateUtc = DateTime.UtcNow;
-
-                        // 2. Exchange-ID atomar im Manager eintragen:
-                        //    - entfernt temp clientOrderId aus _statesByExchangeId
-                        //    - setzt state.BrokerId = o.OrderId
-                        //    - trägt unter o.OrderId in _statesByExchangeId ein
-                        //    - ergänzt Order.BrokerId
-                        //    - _statesByClientId[o.ClientOrderId] bleibt unverändert
                         var mapped = _orderStateManager.MapNewExchangeId(o.ClientOrderId, o.OrderId);
-
-                        Log.Trace($"{Name}.HandleOrderSocket: Placing→Submitted for {o.OrderId} via socket. Fill (if any) follows via trade socket.");
 
                         if (mapped)
                         {
+                            placingCandidate.State = OrderLifeCycleState.Submitted;
+                            placingCandidate.LastUpdateUtc = DateTime.UtcNow;
+
+                            Log.Trace($"{Name}.HandleOrderSocket: Placing→Submitted for {o.OrderId} via socket. Fill (if any) follows via trade socket.");
                             OnOrderEvent(new OrderEvent(placingCandidate.Order, DateTime.UtcNow, OrderFee.Zero) { Status = QuantConnect.Orders.OrderStatus.Submitted });
                         }
                     }
