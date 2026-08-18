@@ -403,7 +403,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
             return new HttpResult<SharedId>(
                 Name,
-                new SharedId(brokerId),
+                null,
                 null
             );
         }
