@@ -513,9 +513,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 return new HttpResult<SharedId>(Name, null, res.Error);
             }
 
-            // Nutzt die LEAN OrderId als temporären Platzhalter.
-            // Die Basisklasse ordnet sie temporär zu, bis der Socket über die ClientOrderId die neue BrokerId meldet.
-
             return new HttpResult<SharedId>(Name, null, null);
         }
 
