@@ -328,22 +328,26 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             if (_orderStateManager.TryGetValue(clientOrderId, out var currentState) &&
                 currentState.State == OrderLifeCycleState.Placing)
             {
-                // 1. State-Properties aktualisieren
-                placingState.State = OrderLifeCycleState.Submitted;
-                placingState.LastUpdateUtc = DateTime.UtcNow;
-
-                // 2. Exchange-ID im Manager atomar eintragen:
-                //    - entfernt temp BrokerId aus _statesByExchangeId
-                //    - setzt state.BrokerId = res.Data.Id
-                //    - trägt unter res.Data.Id in _statesByExchangeId ein
-                //    - ergänzt Order.BrokerId (einzige Add-Stelle, siehe MapNewExchangeId)
-                //    - _statesByClientId[clientOrderId] bleibt unverändert
-                //    - resettet FilledQuantityCurrentOrder (siehe OrderStateManager.MapNewExchangeId)
-                var mapped = _orderStateManager.MapNewExchangeId(clientOrderId, res.Data.Id);
-
-                if (mapped)
+       
+                if (!String.IsNullOrEmpty(res.Data.Id) && clientOrderId != res.Data.Id)
                 {
-                    OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero) { Status = QuantConnect.Orders.OrderStatus.Submitted });
+                    // 1. State-Properties aktualisieren
+                    placingState.State = OrderLifeCycleState.Submitted;
+                    placingState.LastUpdateUtc = DateTime.UtcNow;
+                    
+                    // 2. Exchange-ID im Manager atomar eintragen:
+                    //    - entfernt temp BrokerId aus _statesByExchangeId
+                    //    - setzt state.BrokerId = res.Data.Id
+                    //    - trägt unter res.Data.Id in _statesByExchangeId ein
+                    //    - ergänzt Order.BrokerId (einzige Add-Stelle, siehe MapNewExchangeId)
+                    //    - _statesByClientId[clientOrderId] bleibt unverändert
+                    //    - resettet FilledQuantityCurrentOrder (siehe OrderStateManager.MapNewExchangeId)
+                    var mapped = _orderStateManager.MapNewExchangeId(clientOrderId, res.Data.Id);
+
+                    if (mapped)
+                    {
+                        OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero) { Status = QuantConnect.Orders.OrderStatus.Submitted });
+                    }
                 }
             }
             // else: Socket hat Placing-State bereits umgebogen + Events gefeuert
