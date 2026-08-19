@@ -88,7 +88,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             _ruleTypeFilter = ruleTypeFilter;
             _isHedgeMode = isHedgeMode;
 
-            RunSync(() => _restClient.UnifiedApi.SharedClient.GetFuturesSymbolsAsync(new GetSymbolsRequest()));
+            var symbolsResult = RunSync(() => _restClient.UnifiedApi.SharedClient.GetFuturesSymbolsAsync(new GetSymbolsRequest()));
+            if (!symbolsResult.Success)
+                Log.Error($"{Name}: GetFuturesSymbolsAsync failed, ExchangeSymbolCache stays empty (FormatSymbolEurope will fall back to guessed instIds): {symbolsResult.Error}");
+            else
+                Log.Trace($"{Name}: GetFuturesSymbolsAsync populated ExchangeSymbolCache with {symbolsResult.Data?.Length ?? 0} symbols.");
 
             PopulateSPDB();
 
@@ -129,7 +133,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                         options.ApiCredentials = new OKXCredentials(key, secret, passphrase);
                     options.SharedApiEuropeUseXPerps = environment == OKXEnvironment.Europe;
                 });
-                RunSync(() => _restClient.UnifiedApi.SharedClient.GetFuturesSymbolsAsync(new GetSymbolsRequest()));
+                var symbolsResult = RunSync(() => _restClient.UnifiedApi.SharedClient.GetFuturesSymbolsAsync(new GetSymbolsRequest()));
+                if (!symbolsResult.Success)
+                    Log.Error($"{Name}: GetFuturesSymbolsAsync failed, ExchangeSymbolCache stays empty (FormatSymbolEurope will fall back to guessed instIds): {symbolsResult.Error}");
+                else
+                    Log.Trace($"{Name}: GetFuturesSymbolsAsync populated ExchangeSymbolCache with {symbolsResult.Data?.Length ?? 0} symbols.");
 
             }
 
