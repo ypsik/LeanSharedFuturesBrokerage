@@ -574,7 +574,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
             return new HttpResult<SharedId>(
                 Name,
-                new SharedId(newExchangeId),
+                String.IsNullOrEmpty(newExchangeId) ? null : new SharedId(newExchangeId),
                 null
             );
         }
