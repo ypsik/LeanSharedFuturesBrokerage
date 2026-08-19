@@ -368,7 +368,30 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             if (_instrumentType == InstrumentType.Futures)
                 quoteAsset = quoteAsset.Replace("USDC", "USD");
 
-            return new SharedSymbol(TradingMode.PerpetualLinear, baseAsset, quoteAsset);
+            // WORKAROUND (temporär, bis JKorf-Issue https://github.com/JKorf/OKX.Net/issues/... gefixt ist):
+            // explizites symbolName (via NativeTicker/SPDB) statt OKX.Net's FormatSymbolEurope den
+            // instId aus dem ExchangeSymbolCache raten zu lassen. Der Cache-Lookup faellt auf
+            // "{base}-{quote}-SWAP" zurueck, was fuer X-Perp-Instrumente nicht existiert (echter
+            // instId z.B. "ZEC-USD_UM_XPERP-310530") -> GetHistory/WebSocket-Subscriptions scheitern
+            // mit OKX-Fehler 51001 / 60018. NativeTicker() nutzt stattdessen unsere eigene, per
+            // PopulateSPDB() befuellte SPDB und ist unabhaengig vom kaputten Library-Cache.
+            // NativeTicker() wirft fuer Symbole, die nicht in der SPDB stehen (z.B. LEANs
+            // automatische FX-Konvertierungs-Requests wie XAUEUR/USDCEUR, die wir nicht handeln).
+            // In dem Fall kein symbolName setzen (alter Default-Konstruktor) statt zu crashen —
+            // fuer diese Symbole bricht dann wieder das urspruengliche Library-Verhalten durch,
+            // aber der Algorithmus laeuft weiter statt hart abzustuerzen.
+            string symbolName;
+            try
+            {
+                symbolName = NativeTicker(s);
+            }
+            catch (Exception ex)
+            {
+                Log.Trace($"{Name}.GetSharedSymbol: NativeTicker lookup failed for {s.Value}, falling back to default formatting: {ex.Message}");
+                return new SharedSymbol(TradingMode.PerpetualLinear, baseAsset, quoteAsset);
+            }
+
+            return new SharedSymbol(TradingMode.PerpetualLinear, baseAsset, quoteAsset, symbolName);
         }
 
         #endregion
