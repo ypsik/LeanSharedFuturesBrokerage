@@ -469,23 +469,21 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
             if (!res.Success)
             {
-                Log.Error($"HL-Update-Error: {res.Error} | " +
+                Log.Error($"{Name}.PlaceOrder-Error: {res.Error} | " +
                           $"Price: {request.Price ?? 0m} | " +
                           $"OriginalData : {res.OriginalData}");
 
                 return new HttpResult<SharedId>(Name, null, res.Error);
             }
 
-            return res.Success
-                ? new HttpResult<SharedId>(Name, new SharedId(res.Data.OrderId.ToString()), null)
-                : new HttpResult<SharedId>(Name, null, res.Error);
+            return new HttpResult<SharedId>(Name, new SharedId(res.Data.OrderId.ToString()), null);
         }
 
         protected override async Task<HttpResult<SharedId>> ExecuteUpdateOrderAsync(Order order, decimal price, decimal? quantity)
         {
             if (!quantity.HasValue)
             {
-                Log.Error($"Update error: quantity not provided");
+                Log.Error($"{Name}.Update error: quantity not provided");
                 return new HttpResult<SharedId>(Name, null, ArgumentError.Missing("Quantity"));
             }
 
@@ -509,7 +507,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
             if (!res.Success)
             {
-                Log.Error($"Hyperliquid update error: {res.Error} | Ticker: {ticker} | Price: {price}");
+                Log.Error($"{Name}.Update error: {res.Error} | Ticker: {ticker} | Price: {price}");
                 return new HttpResult<SharedId>(Name, null, res.Error);
             }
 
@@ -532,7 +530,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
             if (!res.Success)
             {
-                Log.Error($"HL-Update-Error: {res.Error}");
+                Log.Error($"{Name}.Cancel-Error: {res.Error}");
 
                 return new HttpResult<SharedId>(Name, null, res.Error);
             }
