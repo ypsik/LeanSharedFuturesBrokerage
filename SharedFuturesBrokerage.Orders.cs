@@ -80,7 +80,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             => quantity?.QuantityInBaseAsset.HasValue == true;
 
         #endregion
-    
+
 
         // --- SINGLE SOURCE OF TRUTH ---
         // Primary key: clientOrderId (permanent, never changes).
@@ -271,7 +271,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             if (_orderStateManager.TryGetValue(clientOrderId, out var currentState) &&
                 currentState.State == OrderLifeCycleState.Placing)
             {
-       
+
                 if (!String.IsNullOrEmpty(res.Data.Id) && clientOrderId != res.Data.Id)
                 {
                     var mapped = _orderStateManager.MapNewExchangeId(clientOrderId, res.Data.Id);
@@ -1222,6 +1222,16 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                                     var deltaCost = newCumulativeCost - fillState.CumulativeCostFilledCurrentOrder;   // GEÄNDERT: nicht mehr CumulativeCostFilled
 
                                     fillPrice = deltaCost != 0m ? Math.Abs(deltaCost / signedFill) : o.AveragePrice.Value;
+
+                                    // Fill-Preis kann durch die Cost-Delta-Division (deltaCost / signedFill)
+                                    // bis zu 28 signifikante Nachkommastellen bekommen (decimal-Division rundet
+                                    // in .NET nicht automatisch). Auf die Tick-Size des Symbols runden, analog
+                                    // zu GetAggressivePrice - ein Fill-Preis kann exchange-seitig ohnehin nie
+                                    // feiner als die Tick-Size sein, die Nachkommastellen sind reines Artefakt
+                                    // der Division, keine echte Präzision.
+                                    var priceTick = _algorithm.Securities[fillState.Order.Symbol].SymbolProperties.MinimumPriceVariation;
+                                    if (priceTick > 0m)
+                                        fillPrice = Math.Round(fillPrice / priceTick) * priceTick;
 
                                     fillState.CumulativeCostFilledCurrentOrder = newCumulativeCost;   // GEÄNDERT
                                     fillState.CumulativeCostFilled += (deltaCost != 0m ? deltaCost : o.AveragePrice.Value * signedFill);  // Lifetime-Kumulator weiterhin korrekt fortschreiben
