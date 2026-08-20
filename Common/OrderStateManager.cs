@@ -3,7 +3,6 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Text;
-using static SilverQuant.Lean.Brokerages.Futures.Shared.SharedFuturesBrokerage;
 
 namespace SilverQuant.Lean.Brokerages.Futures.Shared.Common
 {
