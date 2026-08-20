@@ -53,7 +53,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.Common
             return _statesByClientId.TryRemove(clientId, out _);
         }
 
-        public bool TryRemove(string clientId, [MaybeNullWhen(false)] out OrderState? state)
+        public bool TryRemove(string clientId, [MaybeNullWhen(false)] out OrderState state)
         {
             if (_statesByClientId.TryRemove(clientId, out state))
             {
