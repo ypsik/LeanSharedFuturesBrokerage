@@ -95,7 +95,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             Invalid
         }
 
-        internal sealed class OrderState
+        public sealed class OrderState
         {
             public OrderState(Order order, string clientOrderId)
             {
@@ -143,7 +143,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         // --- SINGLE SOURCE OF TRUTH ---
         // Primary key: clientOrderId (permanent, never changes).
         // Exchange ID is indexed separately via _orderStateManager for O(1) socket lookups.
-        internal readonly OrderStateManager _orderStateManager = new();
+        protected readonly OrderStateManager _orderStateManager = new();
 
 
         #region Order Management
