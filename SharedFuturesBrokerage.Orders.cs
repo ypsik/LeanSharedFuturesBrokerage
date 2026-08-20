@@ -105,8 +105,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             }
 
             public Order Order { get; }
-            public decimal OriginalQuantity { get; private set; }
-            public decimal FilledQuantity { get; private set; }
+            public decimal OriginalQuantity { get; internal set; }
+            public decimal FilledQuantity { get; internal set; }
             // NEU: Fill-Menge nur für die AKTUELLE BrokerId-Generation. Wird von
             // OrderStateManager.MapNewExchangeId bei jedem BrokerId-Wechsel (Cancel+Replace)
             // auf 0 zurückgesetzt, während FilledQuantity kumulativ über die gesamte Order
@@ -115,20 +115,20 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             // Exchange QuantityFilled für die neue BrokerId wieder bei 0 beginnt.
             public decimal FilledQuantityCurrentOrder { get; internal set; }
             public string? BrokerId { get; internal set; }
-            public string ClientOrderId { get; private set; }
-            public OrderLifeCycleState State { get; private set; }
-            public DateTime LastUpdateUtc { get; private set; }
+            public string ClientOrderId { get; internal set; }
+            public OrderLifeCycleState State { get; internal set; }
+            public DateTime LastUpdateUtc { get; internal set; }
             public bool IsUpdatePending { get; internal set; }
-            public decimal CumulativeFeePaid { get; private set; }
+            public decimal CumulativeFeePaid { get; internal set; }
             public decimal CumulativeCostFilledCurrentOrder { get; internal set; }
             public decimal CumulativeFeePaidCurrentOrder { get; internal set; }
-            public decimal CumulativeCostFilled { get; private set; }
+            public decimal CumulativeCostFilled { get; internal set; }
 
             // --- Chase-Order-Tracking (portiert aus AdaptiveMacroFlowAlgorithm.AggressiveOrder) ---
-            public decimal? ChaseAggression { get; private set; }
-            public TimeSpan? ChaseInterval { get; private set; }
-            public decimal LastBid { get; private set; }
-            public decimal LastAsk { get; private set; }
+            public decimal? ChaseAggression { get; internal set; }
+            public TimeSpan? ChaseInterval { get; internal set; }
+            public decimal LastBid { get; internal set; }
+            public decimal LastAsk { get; internal set; }
 
             public decimal Remaining => OriginalQuantity - FilledQuantity;
 
