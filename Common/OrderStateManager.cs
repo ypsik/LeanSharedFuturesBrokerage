@@ -7,7 +7,7 @@ using static SilverQuant.Lean.Brokerages.Futures.Shared.SharedFuturesBrokerage;
 
 namespace SilverQuant.Lean.Brokerages.Futures.Shared.Common
 {
-    public class OrderStateManager
+    internal class OrderStateManager
     {
         // 1. Dein Master-Dictionary (Außenwelt / LEAN / REST)
         private readonly ConcurrentDictionary<string, OrderState> _statesByClientId = new();

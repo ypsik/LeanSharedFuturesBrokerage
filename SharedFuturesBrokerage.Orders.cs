@@ -95,33 +95,40 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             Invalid
         }
 
-        public sealed class OrderState
+        internal sealed class OrderState
         {
-            public Order Order;
-            public decimal OriginalQuantity;
-            public decimal FilledQuantity;
+            public OrderState(Order order, string clientOrderId)
+            {
+                Order = order;
+                ClientOrderId = clientOrderId;
+                LastUpdateUtc = DateTime.UtcNow;
+            }
+
+            public Order Order { get; }
+            public decimal OriginalQuantity { get; private set; }
+            public decimal FilledQuantity { get; private set; }
             // NEU: Fill-Menge nur für die AKTUELLE BrokerId-Generation. Wird von
             // OrderStateManager.MapNewExchangeId bei jedem BrokerId-Wechsel (Cancel+Replace)
             // auf 0 zurückgesetzt, während FilledQuantity kumulativ über die gesamte Order
             // (über alle BrokerId-Generationen hinweg) weiterläuft. Verhindert Phantom-
             // Fill-Events mit negativer FillQuantity direkt nach einem Replace, wenn die
             // Exchange QuantityFilled für die neue BrokerId wieder bei 0 beginnt.
-            public decimal FilledQuantityCurrentOrder;
-            public string BrokerId;
-            public string ClientOrderId;
-            public OrderLifeCycleState State;
-            public DateTime LastUpdateUtc;
-            public bool IsUpdatePending;
-            public decimal CumulativeFeePaid;
-            public decimal CumulativeCostFilledCurrentOrder;
-            public decimal CumulativeFeePaidCurrentOrder;
-            public decimal CumulativeCostFilled;
+            public decimal FilledQuantityCurrentOrder { get; internal set; }
+            public string? BrokerId { get; internal set; }
+            public string ClientOrderId { get; private set; }
+            public OrderLifeCycleState State { get; private set; }
+            public DateTime LastUpdateUtc { get; private set; }
+            public bool IsUpdatePending { get; internal set; }
+            public decimal CumulativeFeePaid { get; private set; }
+            public decimal CumulativeCostFilledCurrentOrder { get; internal set; }
+            public decimal CumulativeFeePaidCurrentOrder { get; internal set; }
+            public decimal CumulativeCostFilled { get; private set; }
 
             // --- Chase-Order-Tracking (portiert aus AdaptiveMacroFlowAlgorithm.AggressiveOrder) ---
-            public decimal? ChaseAggression;
-            public TimeSpan? ChaseInterval;
-            public decimal LastBid;
-            public decimal LastAsk;
+            public decimal? ChaseAggression { get; private set; }
+            public TimeSpan? ChaseInterval { get; private set; }
+            public decimal LastBid { get; private set; }
+            public decimal LastAsk { get; private set; }
 
             public decimal Remaining => OriginalQuantity - FilledQuantity;
 
@@ -136,7 +143,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         // --- SINGLE SOURCE OF TRUTH ---
         // Primary key: clientOrderId (permanent, never changes).
         // Exchange ID is indexed separately via _orderStateManager for O(1) socket lookups.
-        protected readonly OrderStateManager _orderStateManager = new();
+        internal readonly OrderStateManager _orderStateManager = new();
 
 
         #region Order Management
@@ -190,16 +197,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 order.BrokerId.Add(o.OrderId);
                 order.Status = MapStatus(o.Status, Math.Abs(filledQty));
 
-                var state = new OrderState
+                var state = new OrderState(order, o.ClientOrderId ?? string.Empty)
                 {
-                    Order = order,
                     OriginalQuantity = qty,
                     FilledQuantity = filledQty,
                     FilledQuantityCurrentOrder = filledQty,
                     BrokerId = o.OrderId,
-                    ClientOrderId = o.ClientOrderId ?? string.Empty,
-                    State = order.Status == QuantConnect.Orders.OrderStatus.PartiallyFilled ? OrderLifeCycleState.PartiallyFilled : OrderLifeCycleState.Open,
-                    LastUpdateUtc = DateTime.UtcNow
+                    State = order.Status == QuantConnect.Orders.OrderStatus.PartiallyFilled ? OrderLifeCycleState.PartiallyFilled : OrderLifeCycleState.Open
                 };
 
                 // TryAdd: nop if clientId already registered (idempotent on reconnect).
@@ -287,20 +291,17 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             // State Machine: Order mit Placing-State registrieren bevor API-Call rausgeht.
             // Socket-Handler kann die Order damit sofort finden falls HL instantan füllt
             // und das WS-Event noch während RunSync() ankommt.
-            // BrokerId = clientOrderId (temp) → manager indexes it in _statesByExchangeId as well.
-            // No self-reference sentinel needed anymore.
+            // BrokerId bleibt null (noch keine Exchange-ID bekannt) → manager indiziert nur
+            // unter clientOrderId, bis MapNewExchangeId die Exchange-ID nachträgt.
             // WICHTIG: OriginalQuantity nutzt die GERUNDETE Menge (signedRoundedQuantity), nicht die
             // ursprüngliche executionQuantity, damit Fill-Tracking/Remaining mit der real an der
             // Exchange platzierten Menge übereinstimmt (relevant für Contract-Exchanges wie OKX).
-            var placingState = new OrderState
+            var placingState = new OrderState(order, clientOrderId)
             {
-                Order = order,
                 OriginalQuantity = signedRoundedQuantity,
                 FilledQuantity = 0m,
                 FilledQuantityCurrentOrder = 0m,
-                ClientOrderId = clientOrderId,
-                State = OrderLifeCycleState.Placing,
-                LastUpdateUtc = DateTime.UtcNow
+                State = OrderLifeCycleState.Placing
             };
             _orderStateManager.TryAdd(clientOrderId, placingState);
 
