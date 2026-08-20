@@ -1370,6 +1370,14 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         // CASE 1: FILLED
                         if (brokerOrder.Status == SharedOrderStatus.Filled)
                         {
+                            // WICHTIG: State setzen, bevor das Event gefeuert wird. Ohne das bleibt
+                            // state.IsClosed für immer false - ein ChaseOrderLoop, der noch seine
+                            // eigene Referenz auf dieses OrderState-Objekt hält, würde sonst ewig
+                            // weiterlaufen und gegen eine längst aus dem Manager entfernte Order
+                            // reprice-Versuche schicken (beobachtet: BingX, Fill kam über Reconcile
+                            // statt Socket, ChaseOrderLoop lief >20min gegen "old state missing" weiter).
+                            removedState.State = OrderLifeCycleState.Filled;
+
                             var finalFillAbsQty = HasExchangeQuantity(brokerOrder.QuantityFilled)
                                 ? FromExchangeQuantity(state.Order.Symbol, brokerOrder.QuantityFilled)
                                 : Math.Abs(removedState.OriginalQuantity);
@@ -1407,6 +1415,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         // CASE 3: CANCELED / UNKNOWN
                         else
                         {
+                            // Gleicher Grund wie bei CASE 1: State setzen, damit ein evtl. noch
+                            // laufender ChaseOrderLoop erkennt, dass die Order terminal ist.
+                            removedState.State = OrderLifeCycleState.Canceled;
+
                             OnOrderEvent(new OrderEvent(removedState.Order, DateTime.UtcNow, OrderFee.Zero)
                             {
                                 Status = QuantConnect.Orders.OrderStatus.Canceled,
