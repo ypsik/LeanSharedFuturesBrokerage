@@ -9,15 +9,15 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Bybit.Net" Version="7.4.0" />
-    <PackageReference Include="CryptoExchange.Net" Version="12.4.0" />
-    <PackageReference Include="HyperLiquid.Net" Version="5.6.0" />
-    <PackageReference Include="JK.BingX.Net" Version="4.4.0" />
-    <PackageReference Include="JK.Bitget.Net" Version="4.4.0" />
-    <PackageReference Include="JK.OKX.Net" Version="5.3.2" />
-    <PackageReference Include="Jkorf.Aster.Net" Version="4.3.1" />
-    <PackageReference Include="JKorf.Lighter.Net" Version="1.4.0" />
-    <PackageReference Include="KrakenExchange.Net" Version="8.3.0" />
+    <PackageReference Include="Bybit.Net" Version="7.5.0" />
+    <PackageReference Include="CryptoExchange.Net" Version="12.5.0" />
+    <PackageReference Include="HyperLiquid.Net" Version="5.7.0" />
+    <PackageReference Include="JK.BingX.Net" Version="4.5.0" />
+    <PackageReference Include="JK.Bitget.Net" Version="4.5.0" />
+    <PackageReference Include="JK.OKX.Net" Version="5.4.0" />
+    <PackageReference Include="Jkorf.Aster.Net" Version="4.4.0" />
+    <PackageReference Include="JKorf.Lighter.Net" Version="1.5.0" />
+    <PackageReference Include="KrakenExchange.Net" Version="8.4.0" />
     <PackageReference Include="QuantConnect.Lean.Engine" Version="2.5.17999" />
   </ItemGroup>
 
