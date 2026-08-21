@@ -76,6 +76,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         public override IEnumerable<BaseData> GetHistory(QuantConnect.Data.HistoryRequest request)
         {
+            if (request.Symbol.ID.Market != Name)
+                yield break;
+
             var sharedSymbol = GetSharedSymbol(request.Symbol);
             Log.Trace($"GetHistory called: Symbol={sharedSymbol.BaseAsset + sharedSymbol.QuoteAsset}, DataType={request.DataType.Name}, Resolution={request.Resolution}, StartUtc={request.StartTimeUtc}, EndUtc={request.EndTimeUtc}");
 
@@ -84,7 +87,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
             if (request.DataType == typeof(MarginInterestRate))
             {
-                if (_fundingRateClient == null) yield break;
+                if (_fundingRateClient == null) 
+                    yield break;
 
                 var fundingReq = new GetFundingRateHistoryRequest(sharedSymbol)
                 {
@@ -360,7 +364,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         {
             foreach (var symbol in symbols)
             {
-                var subKey = $"{NativeTicker(symbol)}_{tickType.ToString()}";
+                var subKey = $"{NativeTicker(symbol)}_{tickType}";
                 if (_subscriptions.TryRemove(subKey, out var sub))
                 {
                     RunSync(() => sub.CloseAsync());
