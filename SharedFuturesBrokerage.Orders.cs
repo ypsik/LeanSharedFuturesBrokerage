@@ -699,7 +699,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             }
             // Falls der Socket die neue ClientOrderId noch nicht selbst verarbeitet hat
             // (HandleOrderSocket-Pfad "MODIFY / REPLACEMENT DETECTION"): jetzt manuell nachziehen.
-            if (state.BrokerId != placeRes.Data.Id)
+            if (!String.IsNullOrEmpty(placeRes.Data.Id) && state.BrokerId != placeRes.Data.Id)
             {
                 var oldBrokerId = state.BrokerId;
 
