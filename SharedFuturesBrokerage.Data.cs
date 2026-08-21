@@ -262,7 +262,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         private bool SubscribeSymbols(IEnumerable<Symbol> symbols, TickType tickType)
         {
-            foreach (var symbol in symbols)
+            foreach (var symbol in symbols.Where(x=>x.ID.Market == Name))
             {
                 var shared = GetSharedSymbol(symbol);
 
@@ -275,7 +275,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 string subKey;
                 try
                 {
-                    subKey = $"{NativeTicker(symbol)}_{tickType.ToString()}";
+                    subKey = $"{NativeTicker(symbol)}_{tickType}";
                 }
                 catch (Exception ex)
                 {
