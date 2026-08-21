@@ -849,7 +849,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                               $"OrderId='{trade.OrderId}', " +
                               $"ClientOrderId='{trade.ClientOrderId}', " +
                               $"Symbol='{trade.Symbol}', " +
-                              $"Qty='{trade.Quantity}', " +
+                              $"QuantityInBaseAsset='{trade.Quantities.QuantityInBaseAsset}', " +
+                              $"QuantityInContracts='{trade.Quantities.QuantityInContracts}', " +
                               $"Side='{trade.Side}', " +
                               $"Fee='{trade.Fee}', " +
                               $"Price='{trade.Price}'");
