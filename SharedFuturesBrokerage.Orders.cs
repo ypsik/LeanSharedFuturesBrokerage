@@ -902,7 +902,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                                     (
                                         (s.State == OrderLifeCycleState.Placing || s.State == OrderLifeCycleState.Submitted) &&
                                         string.IsNullOrEmpty(s.BrokerId) &&
-                                        Math.Abs(trade.Quantity) <= Math.Abs(s.Remaining)
+                                        (!HasExchangeQuantity(trade.Quantities) || Math.Abs(trade.Quantities.QuantityInBaseAsset ?? FromExchangeQuantity(s.Order.Symbol, trade.Quantities)) <= Math.Abs(s.Remaining))
                                     )
                                     ||
                                     // Fall B: Schwebendes Update (IsUpdatePending ist aktiv)
@@ -915,7 +915,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                             if (state != null)
                             {
-                                Log.Trace($"{Name}: Heuristic match successful! Linking unknown Trade {trade.OrderId} (Qty: {trade.Quantity}) to ClientOrder {state.ClientOrderId}");
+                                Log.Trace($"{Name}: Heuristic match successful! Linking unknown Trade {trade.OrderId} (Qty: {trade.Quantities.QuantityInBaseAsset ?? FromExchangeQuantity(state.Order.Symbol, trade.Quantities)}) to ClientOrder {state.ClientOrderId}");
 
                                 // Der Trade-Socket mappt die neue ID sofort! 
                                 // Folge-Teil-Fills laufen ab jetzt instantan über den O(1) Exchange-ID Index.
@@ -946,10 +946,15 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                     // =======================================================
                     // TRADE VERARBEITEN (Da 'state' eine Referenz ist, updaten wir das richtige Objekt!)
-                    // Hinweis: trade.Quantity wird hier bewusst NICHT über FromExchangeQuantity umgerechnet.
-                    // Dieser Pfad wird nur bei ExchangeSupportsUserTradeStream=true genutzt; alle bisher
-                    // angebundenen Exchanges mit User-Trade-Stream liefern Base-Asset-Mengen (kein Contract-
-                    // Exchange nutzt aktuell diesen Pfad, OKX z.B. hat ExchangeSupportsUserTradeStream=false).
+                    // trade.Quantity (veraltetes, plain-decimal Feld) wird hier NICHT mehr genutzt.
+                    // Seit CryptoExchange.Net 12.4.0 liefert SharedUserTrade Mengen nur noch über
+                    // trade.Quantities (SharedOrderQuantity). Analog zum bestehenden Pattern in
+                    // SharedFuturesBrokerage.Data.cs (z.B. Trade-Tick-Subscription, Kline-Volume):
+                    // erst QuantityInBaseAsset direkt nutzen, falls die Exchange sie mitliefert
+                    // (manche schicken beide Werte, dann ist keine Umrechnung nötig) - erst wenn die
+                    // nicht gesetzt ist, über den HasExchangeQuantity/FromExchangeQuantity-Hook aus
+                    // QuantityInContracts umrechnen (exchange-spezifisch, z.B. OKX/Kraken). Fehlt die
+                    // Mengenangabe komplett, wird der Trade verworfen statt mit 0 falsch verbucht.
                     // Hinweis FilledQuantityCurrentOrder: dieser Pfad arbeitet mit einem echten
                     // Delta aus dem Trade selbst (kein QuantityFilled-Snapshot einer Exchange-Order).
                     // WICHTIG: Trotzdem muss FilledQuantityCurrentOrder hier mitgeführt werden, da
@@ -960,15 +965,36 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     // verarbeiteten Fills) dagegen vergleichen - das würde bereits verarbeitete
                     // Fills doppelt zählen.
                     // =======================================================
+                    // QuantityInBaseAsset hat Vorrang, falls die Exchange sie direkt mitliefert (keine
+                    // Umrechnung nötig). HasExchangeQuantity prüft je nach Exchange nur eines der beiden
+                    // Felder (Default: BaseAsset, OKX/Kraken: Contracts) - daher erst explizit auf
+                    // QuantityInBaseAsset prüfen, bevor der HasExchangeQuantity/FromExchangeQuantity-Hook
+                    // als Fallback greift.
+                    decimal tradeQuantity;
+                    if (trade.Quantities.QuantityInBaseAsset.HasValue)
+                    {
+                        tradeQuantity = trade.Quantities.QuantityInBaseAsset.Value;
+                    }
+                    else if (HasExchangeQuantity(trade.Quantities))
+                    {
+                        tradeQuantity = FromExchangeQuantity(state.Order.Symbol, trade.Quantities);
+                    }
+                    else
+                    {
+                        Log.Error($"{Name}.HandleUserTradeSocket: Trade {trade.OrderId} (ClientOrderId={state.ClientOrderId}) hat keine verwertbare Quantity " +
+                                  $"(QuantityInBaseAsset/QuantityInContracts beide leer). Trade wird verworfen, um Fehlbuchungen zu vermeiden.");
+                        continue;
+                    }
+
                     var sign = trade.Side == SharedOrderSide.Buy ? 1m : -1m;
-                    var signedFill = trade.Quantity * sign;
+                    var signedFill = tradeQuantity * sign;
                     var fee = trade.Fee ?? 0m;
 
                     state.FilledQuantity += signedFill;
                     state.FilledQuantityCurrentOrder += signedFill;
                     state.CumulativeFeePaid += fee;
-                    state.CumulativeCostFilledCurrentOrder += trade.Quantity * trade.Price;
-                    state.CumulativeCostFilled += trade.Quantity * trade.Price;
+                    state.CumulativeCostFilledCurrentOrder += tradeQuantity * trade.Price;
+                    state.CumulativeCostFilled += tradeQuantity * trade.Price;
                     state.LastUpdateUtc = DateTime.UtcNow;
 
                     var leanStatus = Math.Abs(state.FilledQuantity) >= Math.Abs(state.OriginalQuantity)
