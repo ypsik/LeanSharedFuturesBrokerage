@@ -330,9 +330,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                                 Time = DateTime.UtcNow,
                                 TickType = TickType.Quote,
                                 BidPrice = q.BestBidPrice,
-                                BidSize = FromExchangeQuantity(symbol, new SharedOrderQuantity(baseAssetQuantity: q.BestBidQuantity, contractQuantity: q.BestBidQuantity)),
+                                BidSize = q.BestBidQuantities.QuantityInBaseAsset ?? FromExchangeQuantity(symbol, q.BestBidQuantities),
                                 AskPrice = q.BestAskPrice,
-                                AskSize = FromExchangeQuantity(symbol, new SharedOrderQuantity(baseAssetQuantity: q.BestAskQuantity, contractQuantity: q.BestAskQuantity))
+                                AskSize = q.BestAskQuantities.QuantityInBaseAsset ?? FromExchangeQuantity(symbol, q.BestAskQuantities),
                             });
                             if (cashBaseCurrency != null)
                                 RefreshCashConversionRate(cashBaseCurrency, (q.BestBidPrice + q.BestAskPrice) / 2m);
