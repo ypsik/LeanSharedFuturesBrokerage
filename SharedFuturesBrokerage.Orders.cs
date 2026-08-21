@@ -946,15 +946,16 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                     // =======================================================
                     // TRADE VERARBEITEN (Da 'state' eine Referenz ist, updaten wir das richtige Objekt!)
-                    // trade.Quantity (veraltetes, plain-decimal Feld) wird hier NICHT mehr genutzt.
-                    // Seit CryptoExchange.Net 12.4.0 liefert SharedUserTrade Mengen nur noch über
-                    // trade.Quantities (SharedOrderQuantity). Analog zum bestehenden Pattern in
-                    // SharedFuturesBrokerage.Data.cs (z.B. Trade-Tick-Subscription, Kline-Volume):
-                    // erst QuantityInBaseAsset direkt nutzen, falls die Exchange sie mitliefert
-                    // (manche schicken beide Werte, dann ist keine Umrechnung nötig) - erst wenn die
-                    // nicht gesetzt ist, über den HasExchangeQuantity/FromExchangeQuantity-Hook aus
-                    // QuantityInContracts umrechnen (exchange-spezifisch, z.B. OKX/Kraken). Fehlt die
-                    // Mengenangabe komplett, wird der Trade verworfen statt mit 0 falsch verbucht.
+                    // trade.Quantity (deprecated plain-decimal field) is no longer used here.
+                    // Since CryptoExchange.Net 12.4.0, SharedUserTrade only exposes quantities via
+                    // trade.Quantities (SharedOrderQuantity). Mirrors the existing pattern in
+                    // SharedFuturesBrokerage.Data.cs (e.g. trade tick subscription, kline volume):
+                    // use QuantityInBaseAsset directly if the exchange provides it (some send both
+                    // values, no conversion needed) - only fall back to the
+                    // HasExchangeQuantity/FromExchangeQuantity hook and convert from
+                    // QuantityInContracts (exchange-specific, e.g. OKX/Kraken) if it's not set. If no
+                    // usable quantity is present at all, the trade is discarded instead of being
+                    // booked with a wrong 0.
                     // Hinweis FilledQuantityCurrentOrder: dieser Pfad arbeitet mit einem echten
                     // Delta aus dem Trade selbst (kein QuantityFilled-Snapshot einer Exchange-Order).
                     // WICHTIG: Trotzdem muss FilledQuantityCurrentOrder hier mitgeführt werden, da
@@ -981,8 +982,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     }
                     else
                     {
-                        Log.Error($"{Name}.HandleUserTradeSocket: Trade {trade.OrderId} (ClientOrderId={state.ClientOrderId}) hat keine verwertbare Quantity " +
-                                  $"(QuantityInBaseAsset/QuantityInContracts beide leer). Trade wird verworfen, um Fehlbuchungen zu vermeiden.");
+                        Log.Error($"{Name}.HandleUserTradeSocket: Trade {trade.OrderId} (ClientOrderId={state.ClientOrderId}) has no usable quantity " +
+                                  $"(QuantityInBaseAsset/QuantityInContracts both empty). Discarding trade to avoid a wrong booking.");
                         continue;
                     }
 
