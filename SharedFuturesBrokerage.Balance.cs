@@ -21,8 +21,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         {
             var res = RunSync(() => _balanceClient.GetBalancesAsync(new GetBalancesRequest()));
             return res.Success && res.Data != null
-                ? res.Data.Select(x => new CashAmount(x.Total, x.Asset ?? SettleAsset)).ToList()
-                : new List<CashAmount>();
+                ? [.. res.Data.Select(x => new CashAmount(x.Total, x.Asset ?? SettleAsset))]
+                : [];
         }
 
         protected virtual ExchangeParameters AccountHoldingsExchangeParameters => new ExchangeParameters();
@@ -40,7 +40,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             }
             else if (res.Data != null)
             {
-                return res.Data.Where(f => f.PositionSize != 0).Select(p =>
+                return [.. res.Data.Select(p =>
                 {
                     var ticker = NormalizeSymbol(p.Symbol);
                     var security = _algorithm.Securities.Values
@@ -49,27 +49,22 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                     var symbol = security?.Symbol ?? Symbol.Create(ticker, SecurityType.CryptoFuture, Name);
 
-                    // FIX: PositionSize liegt bei Exchanges mit Contract-Notation (z.B. OKX) in Contracts
-                    // vor, nicht in Base-Asset-Einheiten. Wir verpacken den rohen Wert in BEIDE Felder
-                    // (BaseAsset und Contracts) und lassen das bereits vorhandene, pro Exchange korrekt
-                    // überschriebene FromExchangeQuantity entscheiden, welches Feld tatsächlich gilt —
-                    // Default-Exchanges lesen QuantityInBaseAsset (No-Op), OKX liest QuantityInContracts
-                    // und rechnet via ContractMultiplier (ctVal) um. Ohne diese Umrechnung war Quantity
-                    // um den Faktor ContractMultiplier verzerrt (z.B. XAU: 50 Contracts statt 0.05 XAU),
-                    // was LEANs intern berechnetes UnrealizedProfit massiv verfälscht hat.
-                    var rawPositionQuantity = new SharedOrderQuantity(baseAssetQuantity: p.PositionSize, contractQuantity: p.PositionSize);
-                    var quantity = FromExchangeQuantity(symbol, rawPositionQuantity);
-                    if (p.PositionSide == CryptoExchange.Net.SharedApis.SharedPositionSide.Short)
-                    {
-                        quantity *= -1;
-                    }
+                    // PositionSizes liefert BaseAsset- und Contract-Menge getrennt (CryptoExchange.Net 12.5.0+,
+                    // ersetzt das jetzt obsolete PositionSize). Gleiches Pattern wie in HandleUserTradeSocket:
+                    // QuantityInBaseAsset hat Vorrang, falls die Exchange sie direkt mitliefert (keine Umrechnung
+                    // nötig). Sonst greift der HasExchangeQuantity/FromExchangeQuantity-Hook als Fallback (Default:
+                    // BaseAsset-Passthrough, OKX: rechnet QuantityInContracts via ContractMultiplier/ctVal um).
+                    // Einzige Stelle, an der die Menge bestimmt wird - kein separater, abweichender Filter mehr davor.
+                    decimal quantity = p.PositionSizes.QuantityInBaseAsset ?? FromExchangeQuantity(symbol, p.PositionSizes);
 
                     if (quantity == 0)
                     {
-                        return new Holding()
-                        {
-                            Symbol = symbol,
-                        };
+                        return null;
+                    }
+
+                    if (p.PositionSide == CryptoExchange.Net.SharedApis.SharedPositionSide.Short)
+                    {
+                        quantity *= -1;
                     }
 
                     var openPrice = p.AverageOpenPrice ?? 0m;
@@ -86,8 +81,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         MarketValue = Math.Abs(quantity) * marketPrice
                     };
                 })
-                .Where(h => h != null)
-                .ToList();
+                .OfType<Holding>()];
             }
 
             // Fallback auf die lokale Funktion
