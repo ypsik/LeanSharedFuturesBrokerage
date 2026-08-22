@@ -271,8 +271,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         {
             var ticker = NativeTicker(order.Symbol);
 
-            var res = await _restClient.V5Api.Trading.EditOrderAsync(
-                          category: Bybit.Net.Enums.Category.Linear,
+            var res = await _socketClient.V5PrivateApi.EditOrderAsync(
+                          category: Category.Linear,
                           symbol: ticker,
                           orderId: order.BrokerId.Last(),
                           price: price,
