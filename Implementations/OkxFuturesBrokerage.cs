@@ -30,16 +30,20 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
     /// eingefrorenem UnrealizedProfit führen (Quantity wird effektiv doppelt herunterskaliert).
     /// ContractValue (ctVal) wird stattdessen separat gespeichert, ausschließlich für unsere eigene
     /// Contract↔Base-Umrechnung beim OKX-API-Call (ToExchangeQuantity/FromExchangeQuantity).
+    /// SymbolCode wird zusätzlich gecacht, da OKX.Net ab v4.12.0 für die privaten WS-Trading-Ops
+    /// (Place/Cancel/Amend Order) ausschließlich symbolCode statt dem String-Symbol akzeptiert.
     /// </summary>
     public class OkxSymbolProperties : SymbolProperties
     {
         public decimal ContractValue { get; }
+        public long? SymbolCode { get; }
 
         public OkxSymbolProperties(string description, string quoteCurrency, decimal minimumPriceVariation,
-            decimal lotSize, string marketTicker, decimal contractValue)
+            decimal lotSize, string marketTicker, decimal contractValue, long? symbolCode)
             : base(description, quoteCurrency, 1m, minimumPriceVariation, lotSize, marketTicker)
         {
             ContractValue = contractValue;
+            SymbolCode = symbolCode;
         }
     }
 
@@ -304,7 +308,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                     minimumPriceVariation: tickSize,
                     lotSize: baseLotSize,
                     marketTicker: symbol.Symbol,   // full native instId, e.g. "ETH-USD-310404"
-                    contractValue: contractMultiplier
+                    contractValue: contractMultiplier,
+                    symbolCode: symbol.SymbolCode
                 );
 
                 _spdb.SetEntry(Name, ticker, SecurityType.CryptoFuture, symbolProperties);
@@ -419,6 +424,17 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             var props = _spdb.GetSymbolProperties(Name, symbol, SecurityType.CryptoFuture, SettleAsset) as OkxSymbolProperties;
             var multiplier = props?.ContractValue ?? 1m;
             return multiplier > 0m ? multiplier : 1m;
+        }
+
+        /// <summary>
+        /// OKX.Net erfordert ab v4.12.0 für die privaten WS-Trading-Ops (Place/Cancel/Amend Order)
+        /// symbolCode statt des String-Symbols. Lookup via _spdb, befüllt in PopulateSPDB() aus
+        /// symbol.SymbolCode (verfügbar seit OKXInstrument v3.4.0).
+        /// </summary>
+        private long? GetSymbolCode(Symbol symbol)
+        {
+            var props = _spdb.GetSymbolProperties(Name, symbol, SecurityType.CryptoFuture, SettleAsset) as OkxSymbolProperties;
+            return props?.SymbolCode;
         }
 
         /// <summary>
@@ -580,10 +596,18 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         }
 
         // OKX AmendOrder is in-place: same order ID is kept after the amendment.
+        // Läuft über den privaten Trading-Socket (_socketClient), nicht mehr REST — OKX.Net erfordert
+        // dafür ab v4.12.0 symbolCode statt des String-Symbols (aus SPDB, s. GetSymbolCode/PopulateSPDB).
         protected override async Task<HttpResult<SharedId>> ExecuteUpdateOrderAsync(
             Order order, decimal price, decimal? quantity)
         {
-            var nativeTicker = NativeTicker(order.Symbol);
+            var symbolCode = GetSymbolCode(order.Symbol);
+            if (symbolCode == null)
+            {
+                Log.Error($"OKX AmendOrder: no SymbolCode found in SPDB for {order.Symbol.Value}");
+                return new HttpResult<SharedId>(Name, null, new InvalidOperationError($"No SymbolCode found for '{order.Symbol.Value}'"));
+            }
+
             var orderIdStr = order.BrokerId.Last();
 
             if (!long.TryParse(orderIdStr, out var orderId))
@@ -592,7 +616,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 return new HttpResult<SharedId>(Name, null, new InvalidOperationError($"Invalid order ID format: '{orderIdStr}'"));
             }
 
-            // AmendOrder erwartet ebenfalls Contracts (newSz), nicht Base-Asset-Menge.
+            // AmendOrder erwartet ebenfalls Contracts (newQuantity), nicht Base-Asset-Menge.
             // Gleiche Umrechnung + Rundung wie beim initialen PlaceOrder, damit die neue
             // Restmenge auf einen gültigen Contract-Lot-Step fällt.
             decimal? newContractQuantity = null;
@@ -602,15 +626,15 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 newContractQuantity = sharedQty.QuantityInContracts;
             }
 
-            var res = await _restClient.UnifiedApi.Trading.AmendOrderAsync(
-                symbol: nativeTicker,
+            var res = await _socketClient.UnifiedApi.Trading.AmendOrderAsync(
+                symbolCode: symbolCode.Value,
                 orderId: orderId,
                 newPrice: price,
                 newQuantity: newContractQuantity);
 
             if (!res.Success)
             {
-                Log.Error($"OKX AmendOrder error: {res.Error} | OrderId: {orderId} | Price: {price} | OriginalData: {res.OriginalData}");
+                Log.Error($"OKX AmendOrder error: {res.Error} | OrderId: {orderId} | Price: {price}");
                 return new HttpResult<SharedId>(Name, null, res.Error);
             }
 
