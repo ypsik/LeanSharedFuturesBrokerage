@@ -180,7 +180,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 _restClient.UnifiedApi.SharedClient,
                 _restClient.UnifiedApi.SharedClient,
                 aggregator,
-                _getHoldingsFunc
+                _getHoldingsFunc,
+                _socketClient.UnifiedApi.SharedClient
             );
         }
 
