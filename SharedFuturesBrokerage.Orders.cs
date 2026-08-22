@@ -563,14 +563,30 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         }
 
         protected virtual ExchangeParameters PlaceFuturesOrderExchangeParameters => new ExchangeParameters();
-        protected virtual Task<HttpResult<SharedId>> ExecutePlaceOrderAsync(PlaceFuturesOrderRequest request)
-            => _orderClient.PlaceFuturesOrderAsync(request);
+        protected virtual async Task<HttpResult<SharedId>> ExecutePlaceOrderAsync(PlaceFuturesOrderRequest request)
+        {
+            if (_orderManagementSocket != null)
+            {
+                var res = await _orderManagementSocket.PlaceFuturesOrderAsync(request).ConfigureAwait(false);
+                return new HttpResult<SharedId>(Name, res.Data, res.Error);
+            }
+
+            return await _orderClient.PlaceFuturesOrderAsync(request).ConfigureAwait(false);
+        }
 
         protected virtual Task<HttpResult<SharedId>> ExecuteUpdateOrderAsync(Order order, decimal price, decimal? quantity)
             => Task.FromResult<HttpResult<SharedId>>(new HttpResult<SharedId>(Name, null, new InvalidOperationError("Update order not supported by this exchange")));
         protected virtual ExchangeParameters CancelFuturesOrderExchangeParameters => new ExchangeParameters();
-        protected virtual Task<HttpResult<SharedId>> ExecuteCancelOrderAsync(CxCancelOrderRequest request)
-            => _orderClient.CancelFuturesOrderAsync(request);
+        protected virtual async Task<HttpResult<SharedId>> ExecuteCancelOrderAsync(CxCancelOrderRequest request)
+        {
+            if (_orderManagementSocket != null)
+            {
+                var res = await _orderManagementSocket.CancelFuturesOrderAsync(request).ConfigureAwait(false);
+                return new HttpResult<SharedId>(Name, res.Data, res.Error);
+            }
+
+            return await _orderClient.CancelFuturesOrderAsync(request).ConfigureAwait(false);
+        }
 
         /// <summary>
         /// Überschreiben um exchange-spezifische "Order ist bereits terminal"-Fehler zu erkennen.

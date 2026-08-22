@@ -57,7 +57,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 restClient.V5Api.SharedClient,
                 restClient.V5Api.SharedClient,
                 aggregator,
-                getHoldingsFunc);
+                getHoldingsFunc,
+                socketClient.V5PrivateApi.SharedClient);
         }
 
         protected override void InitializeFromJob(QuantConnect.Packets.LiveNodePacket job, IDataAggregator aggregator)

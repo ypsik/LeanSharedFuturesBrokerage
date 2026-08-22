@@ -83,7 +83,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 restClient.FuturesApi.SharedClient,
                 restClient.FuturesApi.SharedClient,
                 aggregator,
-                getHoldingsFunc);
+                getHoldingsFunc,
+                socketClient.FuturesApi.SharedClient);
 
         }
 
@@ -149,7 +150,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 _restClient.FuturesApi.SharedClient,
                 _restClient.FuturesApi.SharedClient,
                 aggregator,
-                _getHoldingsFunc
+                _getHoldingsFunc,
+                _socketClient.FuturesApi.SharedClient
             );
         }
 

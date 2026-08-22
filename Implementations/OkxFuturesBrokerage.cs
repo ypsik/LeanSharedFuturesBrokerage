@@ -49,9 +49,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         private OKXSocketClient _socketClient;
         private OKXSocketClient _socketClientExData;
 
-        private readonly object _fundingUpdateLock = new();
         private bool _fundingUpdateConnected = false;
-        private UpdateSubscription _fundingUpdateSubscription;
 
         private bool _isHedgeMode = false;
 
@@ -112,7 +110,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 _restClient.UnifiedApi.SharedClient,
                 _restClient.UnifiedApi.SharedClient,
                 aggregator,
-                getHoldingsFunc);
+                getHoldingsFunc,
+                _socketClient.UnifiedApi.SharedClient);
         }
 
         protected override void InitializeFromJob(QuantConnect.Packets.LiveNodePacket job, IDataAggregator aggregator)
