@@ -478,7 +478,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 return false;
             }
 
-            if (_orderStateManager.TryGetByExchangeId(activeBrokerId, out var state))
+            OrderState? state = null;
+
+            if (_orderStateManager.TryGetByExchangeId(activeBrokerId, out state))
             {
                 if (ExchangeModifiesOrdersInPlace)
                 {
@@ -527,7 +529,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     Log.Trace($"{Name}.UpdateOrder: Exchange rejected in-place modify (would have matched immediately). " +
                               $"Falling back to Cancel+Replace workaround for {order.Symbol.Value}.");
 
-                    return ExecuteReplaceWorkaround(order, price, quantity.Value, activeBrokerId);
+                    return ExecuteReplaceWorkaround(order, price, quantity.Value, activeBrokerId, state);
                 }
 
                 if (_orderStateManager.TryGetByExchangeId(activeBrokerId, out var errorState))
@@ -621,12 +623,27 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         /// IsUpdatePending bleibt bis zum Abschluss true, damit ein eventuell nachgeliefertes
         /// Cancel-Event für die alte (jetzt tote) BrokerId unterdrückt wird.
         /// </summary>
-        private bool ExecuteReplaceWorkaround(Order order, decimal price, decimal quantity, string activeBrokerId)
+        private bool ExecuteReplaceWorkaround(Order order, decimal price, decimal quantity, string activeBrokerId, OrderState? state)
         {
-            if (!_orderStateManager.TryGetByExchangeId(activeBrokerId, out var state))
+            // state wird von UpdateOrder bereits VOR dem REST-Call erfasst (Referenztyp). Falls die
+            // Order zwischen Reprice-Request und Fehlerauswertung über den Trade-/Order-Socket komplett
+            // gefüllt oder storniert wurde (Race), mutiert der jeweilige Handler genau dieses Objekt und
+            // entfernt es danach aus dem OrderStateManager-Dictionary. Der hier mitgegebene state-Verweis
+            // bleibt davon unberührt und zeigt weiterhin den aktuellen (bereits finalen) Zustand - deshalb
+            // hier direkt prüfen statt per activeBrokerId erneut nachzuschlagen (das schlägt nach dem
+            // Entfernen aus dem Dictionary fehl, obwohl gar kein echter Fehler vorliegt).
+            if (state == null)
             {
                 Log.Error($"{Name}.ExecuteReplaceWorkaround: Old state for {activeBrokerId} not found. Aborting workaround.");
                 return false;
+            }
+
+            if (state.IsClosed)
+            {
+                Log.Trace($"{Name}.ExecuteReplaceWorkaround: Order {activeBrokerId} was already {state.State} " +
+                          $"(race between reprice and fill/cancel). Skipping replace for {order.Symbol.Value}, nothing to do.");
+                state.IsUpdatePending = false;
+                return true;
             }
 
             // FIX (XMR-Overfill-Incident 2026-08-08): Vorher wurde hier direkt eine neue Order
