@@ -523,9 +523,29 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                                 Message = "Order socket update"
                             });
                         }
-                        else if (leanStatus == QuantConnect.Orders.OrderStatus.Submitted) // SharedOrderStatus.Open ohne Fill
+                        else
                         {
-                            state.State = OrderLifeCycleState.Open;
+                            // Order ist auf der Exchange weiterhin aktiv - jedes Status-Event für die
+                            // aktuelle BrokerId (egal ob sauber auf Submitted/Open gemappt oder ein von
+                            // MapStatus nicht abgebildeter Status wie Krakens "edited"/Unknown nach einem
+                            // In-Place-Edit) bestätigt, dass ein evtl. pending Update angekommen ist.
+                            // Ohne diesen Reset bleibt IsUpdatePending bei In-Place-Edit-Exchanges
+                            // (ExchangeModifiesOrdersInPlace: Kraken, Bybit, OKX, Aster, Lighter) nach dem
+                            // ersten Reprice für immer true, weil der BrokerId-Wechsel-Zweig weiter oben
+                            // (MODIFY/REPLACEMENT DETECTION) bei gleichbleibender BrokerId nie greift -
+                            // ChaseOrderLoop würde dann jeden weiteren Tick per `if (state.IsUpdatePending)
+                            // continue;` überspringen (beobachtet: Kraken XAUTUSDC, ein Reprice und dann
+                            // stundenlang nichts mehr).
+                            if (state.IsUpdatePending)
+                            {
+                                Log.Trace($"{Name}.HandleOrderSocket: Resetting IsUpdatePending for {state.BrokerId} (RawStatus={o.Status}, LeanStatus={leanStatus}).");
+                                state.IsUpdatePending = false;
+                            }
+
+                            if (leanStatus == QuantConnect.Orders.OrderStatus.Submitted) // SharedOrderStatus.Open ohne Fill
+                            {
+                                state.State = OrderLifeCycleState.Open;
+                            }
                         }
                     }
                 }
