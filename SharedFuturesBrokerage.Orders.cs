@@ -358,6 +358,21 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 decimal targetPrice = GetAggressivePrice(symbol, isBuy, state.ChaseAggression.Value, quote.Bid, quote.Ask);
                 decimal tick = _algorithm.Securities[symbol].SymbolProperties.MinimumPriceVariation;
 
+                // Bei Cancel+Replace-Exchanges wird die Restmenge als neue Order-Größe geschickt und
+                // kann unter die Minimum-Notional-Grenze fallen -> UpdateOrder würde jeden weiteren
+                // Reprice-Versuch dauerhaft ablehnen (siehe MinimumOrderNotionalValue-Check dort).
+                // Loop dann sauber beenden statt sinnlos weiterzupollen. Bei In-Place-Edit-Exchanges
+                // wird dort nie quantity mitgeschickt (quantity = null), der Check greift also nie -
+                // dort bleibt der Chase daher unangetastet.
+                if (!ExchangeModifiesOrdersInPlace && MinimumOrderNotionalValue > 0m
+                    && Math.Abs(state.Remaining) * targetPrice < MinimumOrderNotionalValue)
+                {
+                    Log.Trace($"{Name}.ChaseOrderLoop: stopping for {symbol.Value} (orderId={order.Id}) - " +
+                              $"remaining {state.Remaining} (~{Math.Abs(state.Remaining) * targetPrice:F2}$) " +
+                              $"below minimum ${MinimumOrderNotionalValue}. Order stays resting at {currentLimit}.");
+                    return;
+                }
+
                 if (Math.Abs(currentLimit - targetPrice) > tick)
                 {
                     Log.Trace($"{Name}.ChaseOrderLoop: repricing {symbol.Value} (orderId={order.Id}) from {currentLimit} to {targetPrice} (bid={quote.Bid}, ask={quote.Ask}, remaining={state.Remaining}).");
