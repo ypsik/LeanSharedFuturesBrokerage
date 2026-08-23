@@ -15,7 +15,7 @@ All exchange clients are built on JKorf's `CryptoExchange.Net` ecosystem (`Bybit
 | BingX | ✅ Live | ListenKey user stream, hedge mode, funding rate via polling loop (not socket) |
 | Kraken | ✅ Live | USD-quoted futures. Requires dirty fix for LEAN core bug. Contract-notation quantities (see below). Described below |
 | OKX | ✅ Live | FUTURES (EU X-Perp) requires dirty fix for LEAN core bug (same as Kraken), described below. Contract-notation quantities (see below). Only tested on EU accounts (FUTURES/X-Perp) — Global (SWAP) untested. |
-| Lighter | ✅ Live | ZK-L2 DEX perpetuals. |
+| Lighter | ✅ Live | ZK-L2 DEX perpetuals, on-chain order placement/modify, in-place edit via `EditOrderAsync` |
 
 ## Architecture
 
@@ -24,7 +24,8 @@ All exchange clients are built on JKorf's `CryptoExchange.Net` ecosystem (`Bybit
 `SharedFuturesBrokerage` is an `abstract partial class` implementing both `Brokerage` and `IDataQueueHandler` — order execution and market data/history live in the same class, split across files by concern:
 
 - `SharedFuturesBrokerage.cs` — connection lifecycle, base wiring (`InitializeBase`), reconciliation timer setup
-- `SharedFuturesBrokerage.Orders.cs` — `PlaceOrder` / `UpdateOrder` / `CancelOrder`, order state machine, socket handlers, reconciliation loop
+- `SharedFuturesBrokerage.Orders.cs` — `PlaceOrder` / `UpdateOrder` / `CancelOrder`, chase-order loop, order state machine
+- `SharedFuturesBrokerage.EventStream.cs` — order/user-trade socket handlers, background reconciliation loop
 - `SharedFuturesBrokerage.Data.cs` — `Subscribe`/`Unsubscribe` (`IDataQueueHandler`), `GetHistory` (klines + funding rate history), funding-rate rollover detection
 
 Each exchange implementation (`BybitFuturesBrokerage`, `HyperliquidFuturesBrokerage`, etc.) extends `SharedFuturesBrokerage` and only overrides:
@@ -50,6 +51,12 @@ Trade matching (`HandleUserTradeSocket`) falls back through three tiers when a f
 3. Heuristic match by symbol + side + quantity, for races where a fill socket message arrives before the placing/replace REST call has returned
 
 A reconciliation loop runs every 30s, cross-checking in-memory order state against the exchange's actual open orders — catches missed socket events without continuously polling REST.
+
+### Chase orders
+
+Passive order chasing (repricing a resting limit order to track the best bid/ask, staying maker instead of crossing the spread) lives in the brokerage layer (`ChaseOrderLoop`), not in the algorithm. Enabling it is exchange-agnostic — any order placed with `ChaseOrderProperties` (aggression + chase interval) runs its own `Task`-based reprice loop, independent of the exchange-specific execution path underneath. Reprice requests on a chase-managed order are rejected if attempted externally (e.g. from the algorithm's own `Reprice()`), since the chase loop owns that order exclusively.
+
+Where the exchange exposes a dedicated order-management socket (`IFuturesOrderManagementSocketClient` / `ISpotOrderManagementSocketClient`, via `CryptoExchange.Net.SharedApis`), place/cancel calls go over that socket instead of REST, falling back to REST for exchanges that don't support it.
 
 ### Funding rate handling
 
@@ -91,13 +98,15 @@ Populated dynamically at startup from each exchange's live instrument list (tick
 - In-place `EditOrder` modify with rotating client order ID per edit
 
 **Bybit**
-- In-place order modify; exchange order ID is stable across edits
+- In-place order modify (`ExchangeModifiesOrdersInPlace = true`); exchange order ID is stable across edits
 - Funding fees extracted from the user-trade-update stream
+- Hedge mode configurable via job config (`bybit-hedge-mode`), defaults to `false` (one-way mode) if unset
+- `PopulateSPDB()` paginates the linear/inverse instrument list (`Category.Linear`) and filters to `Status == Trading && ContractType == LinearPerpetual` — the raw response mixes perpetuals in with dated futures and USDC-margined contracts, so filtering on status alone previously caused a silent (unlogged) startup crash on buy orders
 
 **BingX**
 - No native user-trade stream (`ExchangeSupportsUserTradeStream = false`) — fills handled via the order socket, like AsterDEX
 - ListenKey-based user stream with 45-minute keep-alive loop and automatic reconnect on expiry
-- Hedge mode by default, with `positionSide` (Long/Short) mapping per side
+- Hedge mode configurable via job config (`bingx-hedge-mode`), defaults to `true` if unset, with `positionSide` (Long/Short) mapping per side
 - Funding *rate* is not pushed via socket — handled by a dedicated polling loop that fetches the next funding timestamp, sleeps until settlement, then re-fetches rate + next timestamp
 - Funding *fee* settlement pushed via the account-update stream, filtered to `Trigger == "FUNDING_FEE"`
 - Order updates via `CancelReplaceOrderAsync`, which returns a new exchange order ID (cancel+replace under the hood, not a true in-place edit)
@@ -123,7 +132,15 @@ Populated dynamically at startup from each exchange's live instrument list (tick
 - **Contract notation**: OKX Futures/Swap order and position endpoints work exclusively in contracts (`sz`), not base-asset units — a "contract" is `ctVal` units of the underlying (e.g. 1 XAU contract = 0.001 XAU, 1 HYPE contract = 0.1 HYPE), and the exchange additionally enforces a minimum contract lot step (`lotSz`, e.g. 10 contracts) that quantities must round to. `ctVal` and `lotSz` are tracked internally via a small `OkxSymbolProperties : SymbolProperties` subclass (extra `ContractValue` field, separate from LEAN's own `ContractMultiplier`) and converted transparently at the boundary (`ToExchangeQuantity`/`FromExchangeQuantity`/`HasExchangeQuantity` overrides) — order placement, amendment, fills, open-orders, and account holdings all round-trip through base-asset units, so strategies and LEAN's own P&L/margin math never need to know contracts exist. Only the raw REST/WS payloads sent to and received from OKX are in contracts. `ContractMultiplier` itself is kept fixed at `1` since LEAN's internal `UnrealizedProfit`/`GetQuantityValue` formulas multiply by it directly and already receive base-asset quantities; setting it to `ctVal` there would double-apply the conversion and silently freeze/corrupt unrealized P&L. Kraken follows the identical pattern (see above), with `contractValueTradePrecision` playing the role OKX's `lotSz` plays.
 
 **Lighter**
-- ZK-L2 DEX perpetuals, integrated via JKorf's `Lighter.Net`
+- ZK-L2 DEX perpetuals, integrated via JKorf's `Lighter.Net`, settled in USDC
+- In-place order modify (`ExchangeModifiesOrdersInPlace = true`) — `EditOrderAsync` signs an on-chain `ModifyOrder` tx against the same order index, no new order ID is created
+- `ExecuteUpdateOrderAsync` is a custom direct trading call rather than the default REST hook, since `EditOrderAsync` isn't part of the `IFuturesOrderRestClient` shared interface (only place/cancel are mapped)
+- `PlaceOrder`/`CancelOrder` need no override — the shared client's `PlaceFuturesOrderAsync`/`CancelFuturesOrderAsync` already fit the state-machine pattern as-is. Placement is on-chain and async (only a `tx_hash` comes back synchronously, no order ID), so the swap from client order ID to the real exchange order index happens later via `HandleOrderSocket` matching on `ClientOrderId`, which Lighter echoes on every order update
+- Client order IDs are generated by the shared client itself (`GenerateClientOrderId()`) rather than the base class's default scheme
+- Funding *rate* comes from a dedicated public futures-ticker socket subscription; funding *fee* settlement is separate, delivered via `SubscribeToAccountUpdatesAsync`'s `FundingHistories` field (analogous to Hyperliquid's user-funding-updates subscription) and credited directly to the cash book
+- Funding rollover cycle is assumed fixed-hourly (`FundingRolloverHours = 1`, mirrored from Hyperliquid) — not yet confirmed against live data whether Lighter's `funding_timestamp` is actually a fixed interval or variable
+- Price/quantity decimal precision is read per-symbol from the instrument list (`SupportedPriceDecimals`/`SupportedQuantityDecimals`) rather than derived dynamically like Hyperliquid's fixed `szDecimals + pxDecimals = 5` rule
+- `MinimumOrderNotionalValue` set to $10, same as Hyperliquid
 
 ## LEAN core bug: `IsCryptoCoinFuture`
 
