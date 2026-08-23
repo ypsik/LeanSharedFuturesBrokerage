@@ -639,24 +639,21 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             }
 
             // Nur bei FILLED ist "nichts tun" sicher richtig - Zielexposure wurde erreicht, der Fill
-            // wurde bereits über HandleUserTradeSocket/ReconcileLoop korrekt gebucht. Bei Canceled/
-            // Invalid/Replaced ist die Restmenge dagegen NICHT ausgeführt; das still als Erfolg zu werten
-            // würde eine ggf. fehlende Order unbemerkt verschwinden lassen. Bleibt daher sichtbar als Error.
+            // wurde bereits über HandleUserTradeSocket korrekt gebucht (dieser Handler prüft
+            // IsUpdatePending NICHT, kommt also immer sofort durch). Für Canceled/Invalid geht es
+            // NICHT genauso, weil HandleOrderSocket Cancel-Events aktiv unterdrückt, solange
+            // IsUpdatePending true ist (siehe Kommentar oben) - state.State bleibt in diesem Fall lokal
+            // auf Open/PartiallyFilled stehen, selbst wenn die Exchange die Order längst storniert hat
+            // (z.B. Hyperliquid, das beim gescheiterten Modify die alte Order intern immer cancelt).
+            // Ein lokaler Canceled-Shortcut würde daher nie greifen und wäre irreführend - für diesen
+            // Fall bleibt der bestehende explizite Cancel+Reconcile-Roundtrip unten die einzig
+            // verlässliche Quelle.
             if (state.State == OrderLifeCycleState.Filled)
             {
                 Log.Trace($"{Name}.ExecuteReplaceWorkaround: Order {activeBrokerId} was already FILLED " +
                           $"(race between reprice and fill). Skipping replace for {order.Symbol.Value}, target exposure already reached.");
                 state.IsUpdatePending = false;
                 return true;
-            }
-
-            if (state.IsClosed)
-            {
-                Log.Error($"{Name}.ExecuteReplaceWorkaround: Order {activeBrokerId} was already {state.State} " +
-                          $"(not Filled) when the workaround ran. Aborting replace for {order.Symbol.Value} - " +
-                          "remaining quantity may not have been re-established.");
-                state.IsUpdatePending = false;
-                return false;
             }
 
             // FIX (XMR-Overfill-Incident 2026-08-08): Vorher wurde hier direkt eine neue Order
