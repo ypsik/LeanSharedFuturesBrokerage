@@ -638,12 +638,25 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 return false;
             }
 
-            if (state.IsClosed)
+            // Nur bei FILLED ist "nichts tun" sicher richtig - Zielexposure wurde erreicht, der Fill
+            // wurde bereits über HandleUserTradeSocket/ReconcileLoop korrekt gebucht. Bei Canceled/
+            // Invalid/Replaced ist die Restmenge dagegen NICHT ausgeführt; das still als Erfolg zu werten
+            // würde eine ggf. fehlende Order unbemerkt verschwinden lassen. Bleibt daher sichtbar als Error.
+            if (state.State == OrderLifeCycleState.Filled)
             {
-                Log.Trace($"{Name}.ExecuteReplaceWorkaround: Order {activeBrokerId} was already {state.State} " +
-                          $"(race between reprice and fill/cancel). Skipping replace for {order.Symbol.Value}, nothing to do.");
+                Log.Trace($"{Name}.ExecuteReplaceWorkaround: Order {activeBrokerId} was already FILLED " +
+                          $"(race between reprice and fill). Skipping replace for {order.Symbol.Value}, target exposure already reached.");
                 state.IsUpdatePending = false;
                 return true;
+            }
+
+            if (state.IsClosed)
+            {
+                Log.Error($"{Name}.ExecuteReplaceWorkaround: Order {activeBrokerId} was already {state.State} " +
+                          $"(not Filled) when the workaround ran. Aborting replace for {order.Symbol.Value} - " +
+                          "remaining quantity may not have been re-established.");
+                state.IsUpdatePending = false;
+                return false;
             }
 
             // FIX (XMR-Overfill-Incident 2026-08-08): Vorher wurde hier direkt eine neue Order
