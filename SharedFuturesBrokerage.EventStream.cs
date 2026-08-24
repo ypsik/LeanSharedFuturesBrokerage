@@ -347,6 +347,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                                 existingState.ClientOrderId = o.ClientOrderId;
                             }
                             existingState.IsUpdatePending = false;
+                            existingState.LimitPrice = o.OrderPrice ?? existingState.LimitPrice;
                             var prevState = existingState.State;
                             existingState.State = existingState.FilledQuantity != 0m
                                 ? (Math.Abs(existingState.FilledQuantity) >= Math.Abs(existingState.OriginalQuantity)
@@ -525,21 +526,35 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         }
                         else
                         {
-                            // Order ist auf der Exchange weiterhin aktiv - jedes Status-Event für die
+                            // Order ist auf der Exchange weiterhin aktiv - ein Status-Event für die
                             // aktuelle BrokerId (egal ob sauber auf Submitted/Open gemappt oder ein von
                             // MapStatus nicht abgebildeter Status wie Krakens "edited"/Unknown nach einem
-                            // In-Place-Edit) bestätigt, dass ein evtl. pending Update angekommen ist.
-                            // Ohne diesen Reset bleibt IsUpdatePending bei In-Place-Edit-Exchanges
+                            // In-Place-Edit) KANN bestätigen, dass ein evtl. pending Update angekommen
+                            // ist - muss es aber nicht: verspätete/doppelte Events können noch den alten
+                            // Preis tragen. Deshalb erst gegen state.LimitPrice (Preis VOR dem Reprice-
+                            // Request, siehe ChaseOrderLoop) prüfen: nur ein Event mit einem ANDEREN
+                            // Preis bestätigt, dass der Edit tatsächlich angekommen ist. Ohne diesen
+                            // Reset bleibt IsUpdatePending bei In-Place-Edit-Exchanges
                             // (ExchangeModifiesOrdersInPlace: Kraken, Bybit, OKX, Aster, Lighter) nach dem
                             // ersten Reprice für immer true, weil der BrokerId-Wechsel-Zweig weiter oben
                             // (MODIFY/REPLACEMENT DETECTION) bei gleichbleibender BrokerId nie greift -
                             // ChaseOrderLoop würde dann jeden weiteren Tick per `if (state.IsUpdatePending)
                             // continue;` überspringen (beobachtet: Kraken XAUTUSDC, ein Reprice und dann
                             // stundenlang nichts mehr).
-                            if (state.IsUpdatePending)
+                            if (state.IsUpdatePending
+                                && (!o.OrderPrice.HasValue || !state.LimitPrice.HasValue || o.OrderPrice.Value != state.LimitPrice.Value))
                             {
-                                Log.Trace($"{Name}.HandleOrderSocket: Resetting IsUpdatePending for {state.BrokerId} (RawStatus={o.Status}, LeanStatus={leanStatus}).");
+                                Log.Trace($"{Name}.HandleOrderSocket: Resetting IsUpdatePending for {state.BrokerId} (RawStatus={o.Status}, LeanStatus={leanStatus}, OldPrice={state.LimitPrice}, EventPrice={o.OrderPrice}).");
                                 state.IsUpdatePending = false;
+
+                                // state.LimitPrice auf den jetzt bestätigten Preis nachziehen, damit das
+                                // Feld auch außerhalb von ChaseOrderLoop (z.B. für Debugging/Logging)
+                                // jederzeit den validen, aktuell bestätigten Preis zeigt statt bis zum
+                                // nächsten Reprice-Tick auf dem alten Stand zu bleiben.
+                                if (o.OrderPrice.HasValue)
+                                {
+                                    state.LimitPrice = o.OrderPrice.Value;
+                                }
                             }
 
                             if (leanStatus == QuantConnect.Orders.OrderStatus.Submitted) // SharedOrderStatus.Open ohne Fill
@@ -656,6 +671,25 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         // CASE 2: STILL OPEN
                         else if (brokerOrder.Status == SharedOrderStatus.Open)
                         {
+                            // Falls IsUpdatePending seit >10s (Timer oben, updateStillPending) noch true
+                            // ist UND der per REST abgefragte Preis vom Preis abweicht, der vor dem
+                            // letzten Reprice-Request galt (state.LimitPrice, siehe ChaseOrderLoop), ist
+                            // das Update auf der Exchange offensichtlich angekommen - nur die
+                            // Socket-Bestätigung ist nie oder zu spät eingetroffen. Reset hier
+                            // nachholen, sonst bleibt die Order für immer im ChaseOrderLoop-Throttle
+                            // hängen (`if (state.IsUpdatePending) continue;`).
+                            if (removedState.IsUpdatePending && brokerOrder.OrderPrice.HasValue
+                                && removedState.LimitPrice.HasValue
+                                && brokerOrder.OrderPrice.Value != removedState.LimitPrice.Value)
+                            {
+                                Log.Trace($"{Name}.ReconcileLoop: Resetting IsUpdatePending for {brokerId} via REST reconcile " +
+                                          $"(OldPrice={removedState.LimitPrice}, RestPrice={brokerOrder.OrderPrice}).");
+                                removedState.IsUpdatePending = false;
+                                // state.LimitPrice auf den REST-bestätigten Preis nachziehen - siehe
+                                // gleiche Begründung wie in HandleOrderSocket.
+                                removedState.LimitPrice = brokerOrder.OrderPrice.Value;
+                            }
+
                             // Re-register: TryAdd indexes by both ClientOrderId and BrokerId (exchange ID).
                             removedState.LastUpdateUtc = DateTime.UtcNow;
                             _orderStateManager.TryAdd(removedState.ClientOrderId, removedState);
@@ -679,7 +713,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 catch (OperationCanceledException) { break; }
                 catch (Exception ex)
                 {
-                    Log.Error($"{Name}.ReconcileLoop Error: {ex.ToString()}");
+                    Log.Error($"{Name}.ReconcileLoop Error: {ex}");
                 }
             }
         }

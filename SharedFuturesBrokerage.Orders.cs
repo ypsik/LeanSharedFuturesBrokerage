@@ -145,7 +145,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     FilledQuantity = filledQty,
                     FilledQuantityCurrentOrder = filledQty,
                     BrokerId = o.OrderId,
-                    State = order.Status == QuantConnect.Orders.OrderStatus.PartiallyFilled ? OrderLifeCycleState.PartiallyFilled : OrderLifeCycleState.Open
+                    State = order.Status == QuantConnect.Orders.OrderStatus.PartiallyFilled ? OrderLifeCycleState.PartiallyFilled : OrderLifeCycleState.Open,
+                    LimitPrice = o.OrderPrice
                 };
 
                 // TryAdd: nop if clientId already registered (idempotent on reconnect).
@@ -243,7 +244,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 OriginalQuantity = signedRoundedQuantity,
                 FilledQuantity = 0m,
                 FilledQuantityCurrentOrder = 0m,
-                State = OrderLifeCycleState.Placing
+                State = OrderLifeCycleState.Placing,
+                LimitPrice = (order as LimitOrder)?.LimitPrice
             };
             _orderStateManager.TryAdd(clientOrderId, placingState);
 
@@ -376,6 +378,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 if (Math.Abs(currentLimit - targetPrice) > tick)
                 {
                     Log.Trace($"{Name}.ChaseOrderLoop: repricing {symbol.Value} (orderId={order.Id}) from {currentLimit} to {targetPrice} (bid={quote.Bid}, ask={quote.Ask}, remaining={state.Remaining}).");
+
+                    // LimitPrice VOR ApplyUpdateOrderRequest setzen, solange currentLimit noch der
+                    // aktuell bestätigte (alte) Preis ist - danach überschreibt
+                    // ApplyUpdateOrderRequest LimitPrice sofort lokal mit targetPrice.
+                    state.LimitPrice = currentLimit;
 
                     // LimitPrice ist read-only - Order.ApplyUpdateOrderRequest ist der offizielle
                     // Weg, das trotzdem zu setzen (LEAN nutzt denselben Mechanismus intern u.a.

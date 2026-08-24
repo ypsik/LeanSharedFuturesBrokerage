@@ -51,6 +51,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.Common
         public TimeSpan? ChaseInterval { get; set; }
         public decimal LastBid { get; set; }
         public decimal LastAsk { get; set; }
+        // NEU: der zuletzt AM MARKT bestätigte Limit-Preis, bevor der laufende Reprice-Request
+        // rausging (gesetzt im ChaseOrderLoop unmittelbar vor UpdateOrder()). Solange
+        // IsUpdatePending true ist, vergleicht HandleOrderSocket eingehende Preis-Updates gegen
+        // diesen Wert statt gegen (Order as LimitOrder).LimitPrice - letzterer wird von
+        // ApplyUpdateOrderRequest sofort lokal überschrieben, noch bevor die Exchange den Edit
+        // bestätigt hat, und wäre daher kein verlässlicher Vergleichswert.
+        public decimal? LimitPrice { get; set; }
         public decimal Remaining => OriginalQuantity - FilledQuantity;
 
         public bool IsClosed => State is OrderLifeCycleState.Filled
