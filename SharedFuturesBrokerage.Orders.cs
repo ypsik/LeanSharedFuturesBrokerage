@@ -430,7 +430,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             return Math.Round(guarded / tick) * tick;
         }
 
-        private decimal ApplyCrossGuard(bool isBuy, decimal price, decimal bid, decimal ask, decimal tick)
+        private static decimal ApplyCrossGuard(bool isBuy, decimal price, decimal bid, decimal ask, decimal tick)
         {
             if (bid == 0m || ask == 0m) return price;
 
@@ -485,7 +485,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 return false;
 
             var ticket = _orderManager.GetOrderTicket(order.Id);
-            var lastUpdate = ticket?.UpdateRequests.LastOrDefault();
+            var updates = ticket?.UpdateRequests;
+            var lastUpdate = updates?.Count > 0 ? updates[updates.Count - 1] : null;
 
             decimal price = lastUpdate?.LimitPrice ?? (order as LimitOrder)?.LimitPrice ?? order.Price;
             decimal? quantity = order.Quantity;
