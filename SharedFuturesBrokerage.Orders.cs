@@ -409,17 +409,18 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         {
             if (bid == 0m || ask == 0m) return _algorithm.Securities[symbol].Price;
 
-            decimal mid = (bid + ask) / 2m;
             decimal spread = ask - bid;
             decimal tick = _algorithm.Securities[symbol].SymbolProperties.MinimumPriceVariation;
 
+            // aggression=0 -> eigene Seite (bid bei Buy, ask bei Sell), aggression=1 -> Gegenseite (Cross)
             decimal rawPrice = isBuy
-                ? mid + aggression * spread
-                : mid - aggression * spread;
+                ? bid + aggression * spread
+                : ask - aggression * spread;
 
             decimal roundedPrice = Math.Round(rawPrice / tick) * tick;
 
-            decimal guarded = ApplyCrossGuard(isBuy, roundedPrice, bid, ask, tick);
+            // aggression=1 -> bewusst sofort crossen (quasi Market), Guard hier nicht anwenden
+            decimal guarded = aggression >= 1m ? roundedPrice : ApplyCrossGuard(isBuy, roundedPrice, bid, ask, tick);
             return Math.Round(guarded / tick) * tick;
         }
 
