@@ -267,6 +267,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             };
             return result;
         }
+        protected override string GenerateClientId(int _)
+        {
+            return (_restClient.V5Api.SharedClient as IFuturesOrderRestClient).GenerateClientOrderId();
+        }
 
         protected override async Task<HttpResult<SharedId>> ExecuteUpdateOrderAsync(Order order, decimal price, decimal? quantity)
         {

@@ -207,7 +207,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 chaseInitialAsk = initialQuote.Ask;
 
                 bool isBuyInit = order.Quantity > 0;
+                decimal originalPrice = (order as LimitOrder)?.LimitPrice ?? 0m;
                 decimal initialPrice = GetAggressivePrice(order.Symbol, isBuyInit, initialChaseProps.Aggression, initialQuote.Bid, initialQuote.Ask);
+
+                Log.Trace($"{Name}.PlaceOrder: initial chase price for {order.Symbol.Value} (orderId={order.Id}) " +
+                    $"overridden from {originalPrice} to {initialPrice} (bid={initialQuote.Bid}, ask={initialQuote.Ask}, " +
+                    $"aggression={initialChaseProps.Aggression}).");
+
                 order.ApplyUpdateOrderRequest(new UpdateOrderRequest(
                     DateTime.UtcNow, order.Id, new UpdateOrderFields { LimitPrice = initialPrice }));
             }
