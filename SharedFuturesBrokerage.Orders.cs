@@ -1,4 +1,5 @@
-﻿using CryptoExchange.Net.Objects;
+﻿using Accord.Statistics.Distributions.Univariate;
+using CryptoExchange.Net.Objects;
 using CryptoExchange.Net.Objects.Sockets;
 using CryptoExchange.Net.SharedApis;
 using QuantConnect;
@@ -332,7 +333,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             {
                 try
                 {
-                    await Task.Delay(state.ChaseInterval.Value, _chaseCts.Token);
+                    await Task.Delay(state.ChaseInterval ?? TimeSpan.FromMilliseconds(1000), _chaseCts.Token);
                 }
                 catch (TaskCanceledException)
                 {
@@ -363,7 +364,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     continue;
                 }
 
-                decimal targetPrice = GetAggressivePrice(symbol, isBuy, state.ChaseAggression.Value, quote.Bid, quote.Ask);
+                decimal targetPrice = GetAggressivePrice(symbol, isBuy, state.ChaseAggression ?? 0, quote.Bid, quote.Ask);
                 decimal tick = _algorithm.Securities[symbol].SymbolProperties.MinimumPriceVariation;
 
                 // Bei Cancel+Replace-Exchanges wird die Restmenge als neue Order-Größe geschickt und
