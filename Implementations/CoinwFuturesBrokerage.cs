@@ -51,13 +51,20 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         private CoinWSocketClient _socketClientExData;
 
         private bool _fundingUpdateConnected = false;
-        private bool _isHedgeMode = false;
+        // CoinW hat kein echtes One-Way-Mode-Konzept - Long und Short sind laut Doku strukturell
+        // immer getrennte Buecher (kein "Net"/"Both" wie bei OKX/BingX).
+        // V1-SCOPE: fix Long (Buy oeffnet/erweitert die Long-Position, Sell schliesst/reduziert sie).
+        // V2-TODO: Short-Support geplant - braucht dann echtes Bestands-basiertes PositionSide-
+        // Routing (aktuelles Holding pro Symbol ansehen: Buy bei bestehendem Short -> Short
+        // reduzieren (PositionSide=Short); Buy bei flach/Long -> Long eroeffnen/erweitern
+        // (PositionSide=Long); analog fuer Sell). Betrifft SharedPositionSide unten UND
+        // ExecuteUpdateOrderAsync's `side`-Variable (beide aktuell hart auf Long).
 
         protected override int? FundingRolloverHours => null; // settledPeriod variiert pro Symbol (4h/8h), kein fixer globaler Wert - Rollover-Erkennung läuft rein über den Socket-Callback, s.u.
 
         protected override SharedMarginMode? SharedMarginMode => CryptoExchange.Net.SharedApis.SharedMarginMode.Isolated;
 
-        protected override SharedPositionSide? SharedPositionSide => _isHedgeMode ? CryptoExchange.Net.SharedApis.SharedPositionSide.Long : null;
+        protected override SharedPositionSide? SharedPositionSide => CryptoExchange.Net.SharedApis.SharedPositionSide.Long;
 
         // BESTAETIGT gegen offizielle CoinW-Doku (PUT /v1/perpum/order, "Modify an Order"):
         // Response liefert originId (alte Order-ID) UND editId (neue Order-ID) als getrennte
@@ -95,13 +102,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             CoinWRestClient restClient,
             CoinWSocketClient socketClient,
             IDataAggregator aggregator,
-            Func<List<Holding>>? getHoldingsFunc = null,
-            bool isHedgeMode = false)
+            Func<List<Holding>>? getHoldingsFunc = null)
             : base(algorithm, "coinw")
         {
             _restClient = restClient;
             _socketClient = socketClient;
-            _isHedgeMode = isHedgeMode;
 
             PopulateSPDB();
 
@@ -151,12 +156,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             if (_socketClientExData == null)
             {
                 _socketClientExData = new CoinWSocketClient();
-            }
-
-            if (job.BrokerageData.TryGetValue("coinw-hedge-mode", out var hedgeModeStr)
-                && bool.TryParse(hedgeModeStr, out var hedgeModeParsed))
-            {
-                _isHedgeMode = hedgeModeParsed;
             }
 
             InitializeBase(
@@ -339,11 +338,15 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         ///     ExecuteReplaceWorkaround-Pfad der Basisklasse springt (frische Order, kein zusaetzliches
         ///     Cancel noetig da die alte laut Doku schon weg ist) statt nur passiv zu reconcilen.
         ///
-        /// ACHTUNG (noch nicht live verifiziert): welchen PositionSide-Wert CoinW bei Hedge-Mode
-        /// fuer eine Order erwartet, die eine Short-Position eroeffnet (Sell+Short), ist aus der
-        /// Doku allein nicht zweifelsfrei ableitbar - hier wird vereinfachend Direction==Buy->Long,
-        /// Direction==Sell->Short angenommen (korrekt fuer One-Way-Mode, isHedgeMode=false, dem
-        /// aktuellen Default). Vor Aktivierung von isHedgeMode=true bitte live gegenpruefen.
+        /// CoinW hat kein echtes One-Way-Mode-Konzept (Long/Short strukturell immer getrennte
+        /// Buecher, kein "Net"/"Both"). V1-SCOPE: fix Long (s. SharedPositionSide oben) - direction/
+        /// side ist daher IMMER Long, unabhaengig von order.Direction: eine Buy-Order erweitert die
+        /// Long-Position, eine Sell-Order reduziert/schliesst sie, aber in beiden Faellen ist das
+        /// betroffene Buch dasselbe (Long). Direction==Buy->Long, Direction==Sell->Short waere hier
+        /// falsch gewesen (siehe Diskussion) - eine Sell-Order zum Schliessen einer Long-Position
+        /// haette damit faelschlich eine neue Short-Position eroeffnet statt die Long-Position zu
+        /// reduzieren. V2-TODO: bei Short-Support muss `side` hier ebenso wie SharedPositionSide auf
+        /// Bestands-basiertes Routing umgestellt werden.
         /// </summary>
         protected override async Task<HttpResult<SharedId>> ExecuteUpdateOrderAsync(
             Order order, decimal price, decimal? quantity)
@@ -371,10 +374,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             var sharedQty = ToExchangeQuantity(order.Symbol, Math.Abs(quantity.Value), out _);
             var contractQuantity = sharedQty.QuantityInContracts ?? 0m;
 
-            // Doku: "To modify the direction, provide the new direction; otherwise keep it
-            // unchanged." Der Chase-Loop flippt die Seite einer laufenden Order nie - wir
-            // reichen daher immer die urspruengliche, unveraenderte Richtung erneut durch.
-            var side = order.Direction == OrderDirection.Buy ? CoinW.Net.Enums.PositionSide.Long : CoinW.Net.Enums.PositionSide.Short;
+            // Immer Long: CoinW handeln wir ausschliesslich long (s. SharedPositionSide), das
+            // betroffene Buch aendert sich nie, egal ob die Order gerade oeffnet oder schliesst.
+            var side = CoinW.Net.Enums.PositionSide.Long;
 
             // Leverage laut Doku nicht aenderbar (sonst Error 9081 + Order storniert) - aktuell
             // am Security konfigurierten Wert unveraendert erneut mitschicken.

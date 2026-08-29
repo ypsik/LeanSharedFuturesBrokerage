@@ -32,7 +32,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
         {
             { "coinw-api-key",     Config.Get("coinw-api-key")     },
             { "coinw-api-secret",  Config.Get("coinw-api-secret")  },
-            { "coinw-hedge-mode",  Config.Get("coinw-hedge-mode", "false") },
         };
 
         public override IBrokerageModel GetBrokerageModel(IOrderProvider orderProvider)
@@ -74,15 +73,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
 
             algorithm.Settings.DatabasesRefreshPeriod = TimeSpan.FromDays(36500);
 
-            var hedgeMode = Config.GetBool("coinw-hedge-mode", false);
-
             var brokerage = new CoinwFuturesBrokerage(
                 algorithm,
                 restClient,
                 socketClient,
                 aggregator,
-                getHoldingsFunc: getHoldingsFunc,
-                isHedgeMode: hedgeMode);
+                getHoldingsFunc: getHoldingsFunc);
 
             Composer.Instance.AddPart<IDataQueueHandler>(brokerage);
 
