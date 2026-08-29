@@ -20,7 +20,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
     {
         public CoinwFuturesBrokerageFactory() : base(typeof(CoinwFuturesBrokerage))
         {
-            Market.Add("coinw", 906);
+            Market.Add("coinw", 907);
 
             var mhdb = MarketHoursDatabase.FromDataFolder();
             var alwaysOpen = SecurityExchangeHours.AlwaysOpen(TimeZones.Utc);
