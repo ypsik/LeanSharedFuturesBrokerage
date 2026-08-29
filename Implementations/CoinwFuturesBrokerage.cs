@@ -114,7 +114,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 _socketClient.FuturesApi.SharedClient,
                 _socketClient.FuturesApi.SharedClient,
                 null, // kein IUserTradeSocketClient - ExchangeSupportsUserTradeStream=false, Fills laufen ueber den Order-Stream
-                _restClient.FuturesApi.SharedClient,
+                null, // kein IFundingRateRestClient - ICoinWRestClientFuturesApiShared implementiert das nicht; _fundingRateClient==null wird in SharedFuturesBrokerage.Data.cs abgefangen (nur GetHistory/MarginInterestRate betroffen, Live-Funding laeuft ueber CreateFundingSubscriptionAsync)
                 _restClient.FuturesApi.SharedClient,
                 aggregator,
                 getHoldingsFunc);
@@ -166,7 +166,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 _socketClient.FuturesApi.SharedClient,
                 _socketClient.FuturesApi.SharedClient,
                 null,
-                _restClient.FuturesApi.SharedClient,
+                null, // kein IFundingRateRestClient, s. Kommentar im Konstruktor oben
                 _restClient.FuturesApi.SharedClient,
                 aggregator,
                 _getHoldingsFunc);
@@ -374,7 +374,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             // Doku: "To modify the direction, provide the new direction; otherwise keep it
             // unchanged." Der Chase-Loop flippt die Seite einer laufenden Order nie - wir
             // reichen daher immer die urspruengliche, unveraenderte Richtung erneut durch.
-            var side = order.Direction == OrderDirection.Buy ? PositionSide.Long : PositionSide.Short;
+            var side = order.Direction == OrderDirection.Buy ? CoinW.Net.Enums.PositionSide.Long : CoinW.Net.Enums.PositionSide.Short;
 
             // Leverage laut Doku nicht aenderbar (sonst Error 9081 + Order storniert) - aktuell
             // am Security konfigurierten Wert unveraendert erneut mitschicken.
@@ -414,7 +414,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
             if (mapped)
             {
-                OnOrderIdChangedEvent(new QuantConnect.Brokerages.BrokerageOrderIdChangedEvent
+                OnOrderIdChangedEvent(new BrokerageOrderIdChangedEvent
                 {
                     OrderId = order.Id,
                     BrokerId = order.BrokerId
