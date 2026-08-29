@@ -513,6 +513,21 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             public SubscribeBookTickerOptions SubscribeBookTickerOptions { get; } =
                 new SubscribeBookTickerOptions("CoinW", false);
 
+            // IBookTickerSocketClient erbt (ueber ISharedClient) diese generischen Client-Member.
+            // Da der gewrappte _orderBookClient (CoinW's eigener Shared-Socket-Client) ISharedClient
+            // bereits vollstaendig implementiert (IOrderBookSocketClient : ISharedClient), reichen
+            // wir hier einfach 1:1 durch statt eigene Logik zu bauen.
+            public string Exchange => _orderBookClient.Exchange;
+            public TradingMode[] SupportedTradingModes => _orderBookClient.SupportedTradingModes;
+            public bool Authenticated => _orderBookClient.Authenticated;
+            public SharedClientInfo Discover() => _orderBookClient.Discover();
+            public string FormatSymbol(string baseAsset, string quoteAsset, TradingMode tradingMode, DateTime? deliverDate = null)
+                => _orderBookClient.FormatSymbol(baseAsset, quoteAsset, tradingMode, deliverDate);
+            public void SetDefaultExchangeParameter(string name, object value)
+                => _orderBookClient.SetDefaultExchangeParameter(name, value);
+            public void ResetDefaultExchangeParameters()
+                => _orderBookClient.ResetDefaultExchangeParameters();
+
             public async Task<WebSocketResult<UpdateSubscription>> SubscribeToBookTickerUpdatesAsync(
                 SubscribeBookTickerRequest request, Action<DataEvent<SharedBookTicker>> handler, CancellationToken ct = default)
             {
