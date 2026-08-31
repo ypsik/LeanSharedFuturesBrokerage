@@ -49,7 +49,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         private readonly object _fundingUpdateLock = new();
         private bool _fundingUpdateConnected = false;
-        private UpdateSubscription _fundingUpdateSubscription;
+        private UpdateSubscription? _fundingUpdateSubscription;
 
         public override decimal MinimumOrderNotionalValue => 10m;
         protected override int MaxHistoryLookbackMinutes => 5000;

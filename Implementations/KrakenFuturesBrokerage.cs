@@ -61,7 +61,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         private readonly object _fundingUpdateLock = new();
         private bool _fundingUpdateConnected = false;
-        private UpdateSubscription _fundingUpdateSubscription;
+        private UpdateSubscription? _fundingUpdateSubscription;
         protected override int? FundingRolloverHours => null;
 
         // Kraken locked die Rate für die kommende Stunde bereits zu Stundenbeginn fix
