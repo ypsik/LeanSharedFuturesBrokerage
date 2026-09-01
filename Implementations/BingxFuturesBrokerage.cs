@@ -437,7 +437,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                                 nextFundingTime.Value.Year, nextFundingTime.Value.Month, nextFundingTime.Value.Day,
                                 nextFundingTime.Value.Hour, 0, 0, DateTimeKind.Utc);
 
-                            _aggregator.Update(new MarginInterestRate
+                            _aggregator?.Update(new MarginInterestRate
                             {
                                 Symbol = symbol,
                                 Time = roundedTime,

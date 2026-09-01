@@ -46,13 +46,17 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         {
             Log.Trace($"Subscribe() called: {config.Symbol} | {config.Type.Name}");
 
-            if (!_isInitialized || config.Symbol.Value.Contains("UNMAPPED")) return null;
+            if (!_isInitialized || _aggregator == null) 
+                throw new InvalidOperationException("Not initialized.");
 
             var enumerator = _aggregator.Add(config, handler);
-            if (config.Type == typeof(MarginInterestRate))
-                SubscribeFunding(config.Symbol);
-            else
-                _subscriptionManager.Subscribe(config);
+            if (!config.Symbol.Value.Contains("UNMAPPED"))
+            {
+                if (config.Type == typeof(MarginInterestRate))
+                    SubscribeFunding(config.Symbol);
+                else
+                    _subscriptionManager.Subscribe(config);
+            }
             return enumerator;
         }
 
@@ -64,7 +68,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     UnsubscribeFunding(config.Symbol);
                 else
                     _subscriptionManager.Unsubscribe(config);
-                _aggregator.Remove(config);
+                _aggregator?.Remove(config);
             }
         }
         #endregion
@@ -445,7 +449,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     if (isFirstTick) return (false, true);
                     if (!isRollover) return (false, false);
 
-                    _aggregator.Update(new MarginInterestRate { Symbol = symbol, Time = now, InterestRate = rateToReport });
+                    _aggregator?.Update(new MarginInterestRate { Symbol = symbol, Time = now, InterestRate = rateToReport });
                     Log.Trace($"{Name} Funding Update: {symbol.Value} -> Rate: {rateToReport} (Rollover)");
 
                     return (true, false);

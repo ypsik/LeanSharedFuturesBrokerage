@@ -38,7 +38,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         protected SymbolPropertiesDatabase _spdb;
 
-        protected IDataAggregator _aggregator;
+        protected IDataAggregator? _aggregator;
         protected EventBasedDataQueueHandlerSubscriptionManager _subscriptionManager;
         protected bool _isInitialized;
         protected LiveNodePacket _job;

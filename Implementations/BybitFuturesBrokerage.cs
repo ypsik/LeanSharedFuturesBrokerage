@@ -132,6 +132,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 {
                     var ticker = contract.Name;
 
+                    if (contract.PriceFilter == null || contract.LotSizeFilter == null)
+                    {
+                        Log.Trace($"{Name}.PopulateSPDB: Skipping {ticker} - PriceFilter or LotSizeFilter is null");
+                        continue;
+                    }
+
                     var symbolProperties = new SymbolProperties(
                         description: $"Bybit {contract.BaseAsset} Perpetual",
                         quoteCurrency: contract.QuoteAsset,
