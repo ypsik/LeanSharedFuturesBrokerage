@@ -39,18 +39,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
     /// abgeleitet) — Kraken liefert stattdessen die Präzision als Dezimalstellen-Exponent statt
     /// als eigenes Lot-Size-Feld.
     /// </summary>
-    public class KrakenSymbolProperties : SymbolProperties
+    public class KrakenSymbolProperties(string description, string quoteCurrency, decimal minimumPriceVariation,
+        decimal lotSize, string marketTicker, decimal contractSize, int contractValueTradePrecision) : SymbolProperties(description, quoteCurrency, 1m, minimumPriceVariation, lotSize, marketTicker)
     {
-        public decimal ContractSize { get; }
-        public int ContractValueTradePrecision { get; }
-
-        public KrakenSymbolProperties(string description, string quoteCurrency, decimal minimumPriceVariation,
-            decimal lotSize, string marketTicker, decimal contractSize, int contractValueTradePrecision)
-            : base(description, quoteCurrency, 1m, minimumPriceVariation, lotSize, marketTicker)
-        {
-            ContractSize = contractSize;
-            ContractValueTradePrecision = contractValueTradePrecision;
-        }
+        public decimal ContractSize { get; } = contractSize;
+        public int ContractValueTradePrecision { get; } = contractValueTradePrecision;
     }
 
     public class KrakenFuturesBrokerage : SharedFuturesBrokerage

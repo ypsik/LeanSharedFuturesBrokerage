@@ -30,18 +30,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
     /// separat für unsere eigene Contract-Umrechnung (ToExchangeQuantity/FromExchangeQuantity)
     /// gehalten. ContractMultiplier bleibt fest 1m aus demselben Grund wie bei OKX (siehe dort).
     /// </summary>
-    public class CoinwSymbolProperties : SymbolProperties
+    public class CoinwSymbolProperties(string description, string quoteCurrency, decimal minimumPriceVariation,
+        decimal lotSize, string marketTicker, decimal contractSize, decimal nativeLotStep, decimal minimumOrderSize) : SymbolProperties(description, quoteCurrency, 1m, minimumPriceVariation, lotSize, marketTicker, minimumOrderSize)
     {
-        public decimal ContractSize { get; }
-        public decimal NativeLotStep { get; }
-
-        public CoinwSymbolProperties(string description, string quoteCurrency, decimal minimumPriceVariation,
-            decimal lotSize, string marketTicker, decimal contractSize, decimal nativeLotStep, decimal minimumOrderSize)
-            : base(description, quoteCurrency, 1m, minimumPriceVariation, lotSize, marketTicker, minimumOrderSize)
-        {
-            ContractSize = contractSize;
-            NativeLotStep = nativeLotStep;
-        }
+        public decimal ContractSize { get; } = contractSize;
+        public decimal NativeLotStep { get; } = nativeLotStep;
     }
 
     public class CoinwFuturesBrokerage : SharedFuturesBrokerage

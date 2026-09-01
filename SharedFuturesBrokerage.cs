@@ -131,8 +131,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         {
             lock (_connectLock)
             {
-                if (_orderSocket == null || _userTradeSocket == null && ExchangeSupportsUserTradeStream) throw new InvalidOperationException("Clients not configured");
-
                 if (_chaseCts.IsCancellationRequested)
                 {
                     _chaseCts = new CancellationTokenSource();
@@ -146,13 +144,16 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                 if (ExchangeSupportsUserTradeStream)
                 {
+                    if (_userTradeSocket == null)
+                        throw new InvalidOperationException("User trade client not properly configured");
+
                     if (!_isConnectedUserTrade)
                     {
                         _subRateGate.WaitToProceed();
 
                         var userTradeRequest = new CryptoExchange.Net.SharedApis.SubscribeUserTradeRequest
                         {
-                            ExchangeParameters = UserTradesExchangeParameters // <--- Nutzt die spezifische Property für User Trades
+                            ExchangeParameters = UserTradesExchangeParameters
                         };
 
                         var sub = RunSync(() => _userTradeSocket.SubscribeToUserTradeUpdatesAsync(userTradeRequest, HandleUserTradeSocket));
@@ -169,6 +170,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                 if (!_isConnectedOrder)
                 {
+                    if (_orderSocket == null) 
+                        throw new InvalidOperationException("Order client not properly configured");
+
                     _subRateGate.WaitToProceed();
                     var sub = RunSync(() => _orderSocket.SubscribeToFuturesOrderUpdatesAsync(new SubscribeFuturesOrderRequest
                     {

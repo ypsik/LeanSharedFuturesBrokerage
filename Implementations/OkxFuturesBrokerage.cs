@@ -33,18 +33,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
     /// SymbolCode wird zusätzlich gecacht, da OKX.Net ab v4.12.0 für die privaten WS-Trading-Ops
     /// (Place/Cancel/Amend Order) ausschließlich symbolCode statt dem String-Symbol akzeptiert.
     /// </summary>
-    public class OkxSymbolProperties : SymbolProperties
+    public class OkxSymbolProperties(string description, string quoteCurrency, decimal minimumPriceVariation,
+        decimal lotSize, string marketTicker, decimal contractValue, long? symbolCode) : SymbolProperties(description, quoteCurrency, 1m, minimumPriceVariation, lotSize, marketTicker)
     {
-        public decimal ContractValue { get; }
-        public long? SymbolCode { get; }
-
-        public OkxSymbolProperties(string description, string quoteCurrency, decimal minimumPriceVariation,
-            decimal lotSize, string marketTicker, decimal contractValue, long? symbolCode)
-            : base(description, quoteCurrency, 1m, minimumPriceVariation, lotSize, marketTicker)
-        {
-            ContractValue = contractValue;
-            SymbolCode = symbolCode;
-        }
+        public decimal ContractValue { get; } = contractValue;
+        public long? SymbolCode { get; } = symbolCode;
     }
 
     public class OkxFuturesBrokerage : SharedFuturesBrokerage
@@ -71,7 +64,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         protected override SharedMarginMode? SharedMarginMode => CryptoExchange.Net.SharedApis.SharedMarginMode.Cross;
 
         protected override SharedPositionSide? SharedPositionSide => _isHedgeMode ? CryptoExchange.Net.SharedApis.SharedPositionSide.Long : null;
-
 
         internal OkxFuturesBrokerage(
             IAlgorithm algorithm,
