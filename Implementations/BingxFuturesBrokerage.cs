@@ -290,37 +290,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
                 EstablishUserStreamSubscription();
             }
-        }
-
-        private void StartListenKeyKeepAliveLoop(string listenKey, CancellationToken ct)
-        {
-            Task.Run(async () =>
-            {
-                while (!ct.IsCancellationRequested)
-                {
-                    try
-                    {
-                        await Task.Delay(TimeSpan.FromMinutes(45), ct);
-
-                        if (ct.IsCancellationRequested) break;
-
-                        var pingResult = await _restClient.PerpetualFuturesApi.Account.KeepAliveUserStreamAsync(listenKey, ct);
-                        if (!pingResult.Success)
-                        {
-                            Log.Error($"BingX: Keep-alive for ListenKey failed: {pingResult.Error}");
-                        }
-                    }
-                    catch (TaskCanceledException)
-                    {
-                        break;
-                    }
-                    catch (Exception ex)
-                    {
-                        Log.Error($"BingX: Error in ListenKey keep-alive loop: {ex.Message}");
-                    }
-                }
-            }, ct);
-        }
+        }  
 
         public override void Disconnect()
         {
