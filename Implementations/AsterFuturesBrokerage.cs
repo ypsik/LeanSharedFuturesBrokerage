@@ -38,10 +38,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         private readonly object _fundingUpdateLock = new();
         private bool _fundingUpdateConnected = false;
         private UpdateSubscription? _fundingUpdateSubscription;
-        private CancellationTokenSource _fundingCts;
-        private CancellationTokenSource? _userStreamCts;
-
-        private string _listenKey;
 
         private bool _isHedgeMode = false;
 
@@ -170,6 +166,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         protected override async Task<WebSocketResult<UpdateSubscription>> CreateFundingSubscriptionAsync(
             string nativeTicker, Symbol symbol, Func<DateTime, decimal?, DateTime?, (bool ShouldEmit, bool IsFirstTick)> onFundingRate)
         {
+            _subRateGate.WaitToProceed();
             return await _socketClientExData.FuturesV3Api.SubscribeToMarkPriceUpdatesAsync(
                 nativeTicker, null, data =>
                 {
@@ -181,7 +178,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         public override void Connect()
         {
-            _fundingCts = new CancellationTokenSource();
             lock (_fundingUpdateLock)
             {
                 EstablishUserStreamSubscription();
@@ -196,24 +192,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
             _subRateGate.WaitToProceed();
 
-            _userStreamCts = new CancellationTokenSource();
-
-            // 1. ListenKey via REST holen
-            var listenKeyResult = RunSync(() => _restClient.FuturesV3Api.Account.StartUserStreamAsync(_userStreamCts.Token));
-
-            if (!listenKeyResult.Success)
-            {
-                Log.Error($"Aster: Failed to create UserStream: {listenKeyResult.Error}");
-                return;
-            }
-
-            _listenKey = listenKeyResult.Data;
-
-            // 2. WebSocket mit ListenKey subscriben
             DateTime connectTime = StartTime;
             var sub = RunSync(() =>
                 _socketClient.FuturesV3Api.SubscribeToUserDataUpdatesAsync(
-                    _listenKey,
                     onAccountUpdate: update =>
                     {
                         if (update?.Data == null) return;
@@ -237,8 +218,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                     {
                         Log.Trace("Aster: ListenKey expired! Initiating reconnect...");
                         Task.Run(() => ReconnectUserStream());
-                    },
-                    ct: _userStreamCts.Token));
+                    }));
 
             SetupSubscriptionEvents(
                 sub?.Success ?? false,
@@ -252,9 +232,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             if (sub?.Success ?? false)
             {
                 _fundingUpdateSubscription = sub.Data;
-
-                // 3. Keep-alive Loop starten
-                StartListenKeyKeepAliveLoop(_listenKey, _userStreamCts.Token);
             }
         }
 
@@ -264,10 +241,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             {
                 try
                 {
-                    _userStreamCts?.Cancel();
-                    _userStreamCts?.Dispose();
-                    _userStreamCts = null;
-
                     if (_fundingUpdateSubscription != null && _socketClient != null)
                     {
                         RunSync(() => _socketClient.UnsubscribeAsync(_fundingUpdateSubscription));
@@ -283,37 +256,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             }
         }
 
-        private void StartListenKeyKeepAliveLoop(string listenKey, CancellationToken ct)
-        {
-            Task.Run(async () =>
-            {
-                while (!ct.IsCancellationRequested)
-                {
-                    try
-                    {
-                        await Task.Delay(TimeSpan.FromMinutes(45), ct);
-
-                        if (ct.IsCancellationRequested) break;
-
-                        var pingResult = await _restClient.FuturesV3Api.Account.KeepAliveUserStreamAsync(listenKey, ct);
-                        if (!pingResult.Success)
-                            Log.Error($"Aster: Keep-alive for ListenKey failed: {pingResult.Error}");
-                    }
-                    catch (TaskCanceledException) { break; }
-                    catch (Exception ex)
-                    {
-                        Log.Error($"Aster: Error in ListenKey keep-alive loop: {ex.Message}");
-                    }
-                }
-            }, ct);
-        }
-
         public override void Disconnect()
         {
-            _fundingCts?.Cancel();
-            _fundingCts?.Dispose();
-            _userStreamCts?.Cancel();
-            _userStreamCts?.Dispose();
             RunSync(() => _fundingUpdateSubscription?.CloseAsync() ?? Task.CompletedTask);
             _socketClientExData?.Dispose();
             base.Disconnect();

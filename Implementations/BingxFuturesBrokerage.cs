@@ -328,7 +328,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 DateTime? nextFundingTime = null;
 
                 Log.Trace($"{Name} Funding poll initialization for {nativeTicker}");
-                while (!(_fundingCts.Token.IsCancellationRequested))
+                while (!_fundingCts.Token.IsCancellationRequested)
                 {
                     try
                     {
