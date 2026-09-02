@@ -77,9 +77,14 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 job.BrokerageData.TryGetValue("bitget-api-secret", out var secret);
                 job.BrokerageData.TryGetValue("bitget-api-pass", out var pass);
 
+                if (string.IsNullOrEmpty(key) || string.IsNullOrEmpty(secret) || string.IsNullOrEmpty(pass))
+                {
+                    Log.Error($"{Name}.InitializeFromJob(): Missing required Bitget credentials (key/secret/pass) in BrokerageData.");
+                    throw new ArgumentException("Bitget brokerage credentials (bitget-api-key, bitget-api-secret, bitget-api-pass) are required but were not provided.");
+                }
+
                 _restClient = new BitgetRestClient(options => {
-                    if (!string.IsNullOrEmpty(key) && !string.IsNullOrEmpty(secret))
-                        options.ApiCredentials = new BitgetCredentials(key: key, secret: secret, pass: pass);
+                    options.ApiCredentials = new BitgetCredentials(key: key, secret: secret, pass: pass);
                 });
             }
 
@@ -88,6 +93,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 job.BrokerageData.TryGetValue("bitget-api-key", out var key);
                 job.BrokerageData.TryGetValue("bitget-api-secret", out var secret);
                 job.BrokerageData.TryGetValue("bitget-api-pass", out var pass);
+
+                if (string.IsNullOrEmpty(key) || string.IsNullOrEmpty(secret) || string.IsNullOrEmpty(pass))
+                {
+                    Log.Error($"{Name}.InitializeFromJob(): Missing required Bitget credentials (key/secret/pass) in BrokerageData.");
+                    throw new ArgumentException("Bitget brokerage credentials (bitget-api-key, bitget-api-secret, bitget-api-pass) are required but were not provided.");
+                }
 
                 _socketClient = new BitgetSocketClient(options =>
                 {
@@ -108,6 +119,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             {
                 _isHedgeMode = hedgeModeParsed;
             }
+
 
             InitializeBase(
                 _restClient.FuturesApiV2.SharedClient,
