@@ -48,7 +48,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         protected readonly object _connectLock = new();
         protected readonly object _balanceUpdatesConnectLock = new();
         private bool _isConnectedOrder, _isConnectedUserTrade;
-        protected CancellationTokenSource _reconcileCts;
+        protected CancellationTokenSource? _reconcileCts;
         protected Task? _reconcileTask = null;
         protected readonly TimeSpan _reconciliationInterval = TimeSpan.FromSeconds(30);
 
@@ -170,7 +170,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                 if (!_isConnectedOrder)
                 {
-                    if (_orderSocket == null) 
+                    if (_orderSocket == null)
                         throw new InvalidOperationException("Order client not properly configured");
 
                     _subRateGate.WaitToProceed();
@@ -222,7 +222,22 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         public override void Disconnect()
         {
-            _reconcileCts?.Cancel();
+            // Reconcile-Loop sauber beenden: cancel, dann erst disposen, NACHDEM der Task
+            // tatsächlich beendet ist (ConfigureAwait im Loop hängt evtl. gerade in
+            // Task.Delay(_reconciliationInterval, ct) - ein sofortiges Dispose hier würde dort
+            // eine ObjectDisposedException beim nächsten Await auslösen). _reconcileTask und
+            // _reconcileCts werden hier zusätzlich zurückgesetzt, sonst greift der
+            // "if (_reconcileTask == null)"-Guard in Connect() nach dem ersten Connect() nie
+            // wieder und der Loop wird nach einem Reconnect nicht neu gestartet.
+            if (_reconcileCts != null)
+            {
+                _reconcileCts.Cancel();
+                var ctsToDispose = _reconcileCts;
+                _reconcileTask?.ContinueWith(_ => ctsToDispose.Dispose(), TaskScheduler.Default);
+            }
+            _reconcileTask = null;
+            _reconcileCts = null;
+
             _chaseCts?.Cancel();
             if (_userTradeSocketSub != null) RunSync(() => _userTradeSocketSub.CloseAsync());
             if (_orderSocketSub != null) RunSync(() => _orderSocketSub.CloseAsync());
