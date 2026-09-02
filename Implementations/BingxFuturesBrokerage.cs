@@ -290,13 +290,16 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
                 EstablishUserStreamSubscription();
             }
-        }  
+        }
 
         public override void Disconnect()
         {
+            // Nur noch Cancel() hier - kein Dispose() und kein "= null" mehr.
+            // Der Loop in SubscribeFunding haelt seine eigene lokale Referenz auf die
+            // CancellationTokenSource und disposed sie selbst in seinem eigenen finally-Block,
+            // sobald er (durch die Cancellation) beendet wird. So gibt es keine Race Condition
+            // mehr zwischen Disconnect() und dem noch laufenden Background-Task.
             _fundingCts?.Cancel();
-            _fundingCts?.Dispose();
-            _fundingCts = null;
             RunSync(() => _fundingUpdateSubscription?.CloseAsync() ?? Task.CompletedTask);
             _socketClientExData?.Dispose();
             base.Disconnect();
@@ -321,85 +324,102 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         protected override bool SubscribeFunding(Symbol symbol)
         {
             var nativeTicker = NativeTicker(symbol);
-            _fundingCts = new CancellationTokenSource();
+
+            // Lokale CTS-Instanz für diesen Aufruf/Loop. Das Feld _fundingCts wird nur für
+            // Disconnect() als externer Cancel-Trigger gehalten - der Loop selbst arbeitet
+            // ausschließlich mit dieser lokalen Kopie ("cts"/"token"), damit ein paralleles
+            // Disconnect() (das das Feld auf null setzen bzw. disposen würde) den Loop nicht
+            // mit einer NullReferenceException/ObjectDisposedException abschießen kann.
+            var cts = new CancellationTokenSource();
+            _fundingCts = cts;
+            var token = cts.Token;
 
             _ = Task.Run(async () =>
             {
                 DateTime? nextFundingTime = null;
 
                 Log.Trace($"{Name} Funding poll initialization for {nativeTicker}");
-                while (!_fundingCts.Token.IsCancellationRequested)
+                try
                 {
-                    try
+                    while (!token.IsCancellationRequested)
                     {
-                        // 1. Initialer Abruf der NextFundingTime außerhalb oder falls der State verloren ging
-                        if (nextFundingTime == null)
+                        try
                         {
-                            var initResult = await _restClient.PerpetualFuturesApi.ExchangeData
-                                .GetFundingRateAsync(nativeTicker, _fundingCts.Token);
-
-                            if (!initResult.Success)
+                            // 1. Initialer Abruf der NextFundingTime außerhalb oder falls der State verloren ging
+                            if (nextFundingTime == null)
                             {
-                                Log.Error($"{Name} SubscribeFunding initial fetch failed for {nativeTicker}: {initResult.Error}");
-                                await Task.Delay(TimeSpan.FromMinutes(1), _fundingCts.Token);
-                                continue;
+                                var initResult = await _restClient.PerpetualFuturesApi.ExchangeData
+                                    .GetFundingRateAsync(nativeTicker, token);
+
+                                if (!initResult.Success)
+                                {
+                                    Log.Error($"{Name} SubscribeFunding initial fetch failed for {nativeTicker}: {initResult.Error}");
+                                    await Task.Delay(TimeSpan.FromMinutes(1), token);
+                                    continue;
+                                }
+
+                                nextFundingTime = initResult.Data.NextFundingTime;
                             }
 
-                            nextFundingTime = initResult.Data.NextFundingTime;
-                        }
+                            // 2. Berechnen und Warten bis zum Settlement
+                            var delay = nextFundingTime.Value - DateTime.UtcNow;
 
-                        // 2. Berechnen und Warten bis zum Settlement
-                        var delay = nextFundingTime.Value - DateTime.UtcNow;
-
-                        if (delay > TimeSpan.Zero)
-                        {
-                            await Task.Delay(delay.Add(TimeSpan.FromTicks(100)), _fundingCts.Token);
-                        }
-                        else
-                        {
-                            // Fallback falls die Zeit in der Vergangenheit liegt / System-Uhr-Abweichungen
-                            await Task.Delay(TimeSpan.FromTicks(100), _fundingCts.Token);
-                        }
-
-                        // 3. Nach dem Settlement: Einzigen Call ausführen, um die neue Rate + die NÄCHSTE FundingTime zu holen
-                        var rateResult = await _restClient.PerpetualFuturesApi.ExchangeData
-                            .GetFundingRateAsync(nativeTicker, _fundingCts.Token);
-
-                        if (rateResult.Success)
-                        {
-                            var roundedTime = new DateTime(
-                                nextFundingTime.Value.Year, nextFundingTime.Value.Month, nextFundingTime.Value.Day,
-                                nextFundingTime.Value.Hour, 0, 0, DateTimeKind.Utc);
-
-                            _aggregator?.Update(new MarginInterestRate
+                            if (delay > TimeSpan.Zero)
                             {
-                                Symbol = symbol,
-                                Time = roundedTime,
-                                InterestRate = rateResult.Data.LastFundingRate
-                            });
+                                await Task.Delay(delay.Add(TimeSpan.FromTicks(100)), token);
+                            }
+                            else
+                            {
+                                // Fallback falls die Zeit in der Vergangenheit liegt / System-Uhr-Abweichungen
+                                await Task.Delay(TimeSpan.FromTicks(100), token);
+                            }
 
-                            Log.Trace($"{Name} Funding Update: {symbol.Value} -> Rate: {rateResult.Data.LastFundingRate} @ {roundedTime}");
+                            // 3. Nach dem Settlement: Einzigen Call ausführen, um die neue Rate + die NÄCHSTE FundingTime zu holen
+                            var rateResult = await _restClient.PerpetualFuturesApi.ExchangeData
+                                .GetFundingRateAsync(nativeTicker, token);
 
-                            // Target für die nächste Iteration direkt auf den neuen Wert der Exchange setzen
-                            nextFundingTime = rateResult.Data.NextFundingTime;
+                            if (rateResult.Success)
+                            {
+                                var roundedTime = new DateTime(
+                                    nextFundingTime.Value.Year, nextFundingTime.Value.Month, nextFundingTime.Value.Day,
+                                    nextFundingTime.Value.Hour, 0, 0, DateTimeKind.Utc);
+
+                                _aggregator?.Update(new MarginInterestRate
+                                {
+                                    Symbol = symbol,
+                                    Time = roundedTime,
+                                    InterestRate = rateResult.Data.LastFundingRate
+                                });
+
+                                Log.Trace($"{Name} Funding Update: {symbol.Value} -> Rate: {rateResult.Data.LastFundingRate} @ {roundedTime}");
+
+                                // Target für die nächste Iteration direkt auf den neuen Wert der Exchange setzen
+                                nextFundingTime = rateResult.Data.NextFundingTime;
+                            }
+                            else
+                            {
+                                Log.Error($"{Name} SubscribeFunding rate fetch failed for {nativeTicker}: {rateResult.Error}");
+                                // Bei Fehler Target zurücksetzen, um im nächsten Loop neu zu initialisieren
+                                nextFundingTime = null;
+                                await Task.Delay(TimeSpan.FromMinutes(1), token);
+                            }
                         }
-                        else
+                        catch (OperationCanceledException) { break; }
+                        catch (Exception ex)
                         {
-                            Log.Error($"{Name} SubscribeFunding rate fetch failed for {nativeTicker}: {rateResult.Error}");
-                            // Bei Fehler Target zurücksetzen, um im nächsten Loop neu zu initialisieren
-                            nextFundingTime = null;
-                            await Task.Delay(TimeSpan.FromMinutes(1), _fundingCts.Token);
+                            Log.Error($"{Name} SubscribeFunding exception for {nativeTicker}: {ex.Message}");
+                            nextFundingTime = null; // Sicherhaltshalber zurücksetzen
+                            await Task.Delay(TimeSpan.FromMinutes(1), token);
                         }
-                    }
-                    catch (OperationCanceledException) { break; }
-                    catch (Exception ex)
-                    {
-                        Log.Error($"{Name} SubscribeFunding exception for {nativeTicker}: {ex.Message}");
-                        nextFundingTime = null; // Sicherhaltshalber zurücksetzen
-                        await Task.Delay(TimeSpan.FromMinutes(1), _fundingCts.Token);
                     }
                 }
-            }, _fundingCts.Token);
+                finally
+                {
+                    // Dispose passiert hier, in derselben "Funktion"/demselben Loop, der die CTS
+                    // auch erzeugt hat - nicht mehr in Disconnect(), das nur noch cancelt.
+                    cts.Dispose();
+                }
+            }, token);
 
             return true;
         }
