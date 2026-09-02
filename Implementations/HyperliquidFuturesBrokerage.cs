@@ -459,19 +459,25 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         protected override async Task<HttpResult<SharedId>> ExecutePlaceOrderAsync(PlaceFuturesOrderRequest request)
         {
+            if(request.Symbol == null)
+            {
+                Log.Error($"{Name}.PlaceOrder error: symbol not provided");
+                return new HttpResult<SharedId>(Name, null, ArgumentError.Missing("Symbol"));
+            }
+
             var res = await _socketClient.FuturesApi.Trading.PlaceOrderAsync(
                 symbol: request.Symbol.SymbolName ?? request.Symbol.BaseAsset,
                 side: request.Side == SharedOrderSide.Buy ? OrderSide.Buy : OrderSide.Sell,
                 orderType: request.OrderType == SharedOrderType.Limit ? HyperLiquid.Net.Enums.OrderType.Limit : HyperLiquid.Net.Enums.OrderType.Market,
                 quantity: request.Quantity?.QuantityInBaseAsset ?? 0m,
                 price: request.Price ?? 0m,
-                clientOrderId: request.ClientOrderId, // NEU: Zwingend erforderlich für das spätere Socket-Tracking
+                clientOrderId: request.ClientOrderId,
                 timeInForce: HyperLiquid.Net.Enums.TimeInForce.GoodTillCanceled,
                 vaultAddress: _vaultAdress);
 
             if (!res.Success)
             {
-                Log.Error($"{Name}.PlaceOrder-Error: {res.Error} | " +
+                Log.Error($"{Name}.PlaceOrder error: {res.Error} | " +
                           $"Price: {request.Price ?? 0m} | " +
                           $"OriginalData : {res.OriginalData}");
 

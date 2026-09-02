@@ -34,9 +34,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         private readonly object _fundingUpdateLock = new();
         private bool _fundingUpdateConnected = false;
         private UpdateSubscription? _fundingUpdateSubscription;
-        private CancellationTokenSource _fundingCts;
-        private CancellationTokenSource? _userStreamCts;
-        private string _listenKey;
+        private CancellationTokenSource? _fundingCts;
 
         private bool _isHedgeMode = false;
 
@@ -215,7 +213,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         public override void Connect()
         {
-            _fundingCts = new CancellationTokenSource();
             lock (_fundingUpdateLock)
             {
                 // Start the isolated user stream setup
@@ -236,24 +233,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
             _subRateGate.WaitToProceed();
 
-            // Isolated token source specifically for the ListenKey lifecycle and keep-alive loop
-            _userStreamCts = new CancellationTokenSource();
-
-            // 1. Request ListenKey via REST-API
-            var listenKeyResult = RunSync(() => _restClient.PerpetualFuturesApi.Account.StartUserStreamAsync(_userStreamCts.Token));
-
-            if (!listenKeyResult.Success)
-            {
-                Log.Error($"BingX: Failed to create UserStream: {listenKeyResult.Error}");
-                return;
-            }
-
-            _listenKey = listenKeyResult.Data;
-
-            // 2. Subscribe to WebSocket with the generated listenKey and handle expiration
             var sub = RunSync(() =>
                 _socketClient.PerpetualFuturesApi.SubscribeToUserDataUpdatesAsync(
-                    _listenKey,
                     onAccountUpdate: update =>
                     {
                         if (update.Data?.Update?.Trigger == "FUNDING_FEE")
@@ -268,16 +249,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                             }
                         }
                     },
-                    onOrderUpdate: null,
-                    onConfigurationUpdate: null,
                     onListenKeyExpiredUpdate: expiredEvent =>
                     {
                         Log.Trace("BingX: ListenKey expired! Initiating reconnect...");
-
-                        // Trigger reconnect logic asynchronously outside the lock to prevent deadlocks
                         Task.Run(() => ReconnectUserStream());
-                    },
-                    ct: _userStreamCts.Token));
+                    }));
 
             SetupSubscriptionEvents(
                 sub?.Success ?? false,
@@ -289,12 +265,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             );
 
             if (sub?.Success ?? false)
-            {
                 _fundingUpdateSubscription = sub.Data;
-
-                // 3. Start background keep-alive loop using the dedicated token
-                StartListenKeyKeepAliveLoop(_listenKey, _userStreamCts.Token);
-            }
         }
 
         /// <summary>
@@ -306,12 +277,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             {
                 try
                 {
-                    // Cancel old token (safely stops the previous keep-alive loop only)
-                    _userStreamCts?.Cancel();
-                    _userStreamCts?.Dispose();
-                    _userStreamCts = null;
-
-                    // Unsubscribe old session if exists
                     if (_fundingUpdateSubscription != null && _socketClient != null)
                     {
                         RunSync(() => _socketClient.UnsubscribeAsync(_fundingUpdateSubscription));
@@ -323,7 +288,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                     Log.Error($"BingX: Error during unsubscribe while reconnecting: {ex.Message}");
                 }
 
-                // ONLY rebuild the specific user stream, leaving other Connect() logic completely alone
                 EstablishUserStreamSubscription();
             }
         }
@@ -362,8 +326,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         {
             _fundingCts?.Cancel();
             _fundingCts?.Dispose();
-            _userStreamCts?.Cancel();
-            _userStreamCts?.Dispose();
+            _fundingCts = null;
             RunSync(() => _fundingUpdateSubscription?.CloseAsync() ?? Task.CompletedTask);
             _socketClientExData?.Dispose();
             base.Disconnect();
@@ -388,13 +351,14 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         protected override bool SubscribeFunding(Symbol symbol)
         {
             var nativeTicker = NativeTicker(symbol);
+            _fundingCts = new CancellationTokenSource();
 
             _ = Task.Run(async () =>
             {
                 DateTime? nextFundingTime = null;
 
                 Log.Trace($"{Name} Funding poll initialization for {nativeTicker}");
-                while (!_fundingCts.Token.IsCancellationRequested)
+                while (!(_fundingCts.Token.IsCancellationRequested))
                 {
                     try
                     {
