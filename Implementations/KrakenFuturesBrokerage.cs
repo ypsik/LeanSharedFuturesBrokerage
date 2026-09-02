@@ -391,6 +391,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         protected override async Task<WebSocketResult<UpdateSubscription>> CreateFundingSubscriptionAsync(
             string nativeTicker, Symbol symbol, Func<DateTime, decimal?, DateTime?, (bool ShouldEmit, bool IsFirstTick)> onFundingRate)
         {
+            _subRateGate.WaitToProceed();
             return await _socketClientExData.FuturesApi.SubscribeToTickerUpdatesAsync(
                 nativeTicker, data =>
                 {
