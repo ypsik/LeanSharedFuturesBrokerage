@@ -72,7 +72,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
             var builderAddressRaw = job.BrokerageData.TryGetValue("aster-builder-address", out var bAddr) ? bAddr : null;
             var builderFeeRaw = job.BrokerageData.TryGetValue("aster-builder-fee", out var bFee) ? bFee : null;
 
-            string builderAddress;
+            string? builderAddress;
             decimal? builderFeePercentage;
 
             if (string.IsNullOrWhiteSpace(builderAddressRaw))
@@ -101,7 +101,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
             var asterRestClient = new AsterRestClient(options => {
                 options.ApiCredentials = asterCredentials;
                 options.BuilderFeePercentage = builderFeePercentage;
-                options.BuilderAddress = builderAddress;
+                options.BuilderAddress = builderAddress ?? options.BuilderAddress;
             });
 
             var asterSocketClient = new AsterSocketClient(options => {

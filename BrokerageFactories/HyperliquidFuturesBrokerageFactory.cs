@@ -96,7 +96,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
             {
                 options.ApiCredentials = credentials;
                 options.BuilderFeePercentage = builderFeePercentage;
-                options.BuilderAddress = builderAddress;
+                if(builderAddress != null)
+                    options.BuilderAddress = builderAddress;
                 options.OutputOriginalData = true;
             });
 
@@ -106,7 +107,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
                 options.DelayAfterConnect = TimeSpan.FromMilliseconds(500);
                 options.SocketIndividualSubscriptionCombineTarget = 50;
                 options.BuilderFeePercentage = builderFeePercentage;
-                options.BuilderAddress = builderAddress;
+                if (builderAddress != null)
+                    options.BuilderAddress = builderAddress;
                 options.OutputOriginalData = true;
             });
 
