@@ -66,7 +66,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
             var builderAddressRaw = job.BrokerageData.TryGetValue("hyperliquid-builder-address", out var bAddr) ? bAddr : null;
             var builderFeeRaw = job.BrokerageData.TryGetValue("hyperliquid-builder-fee", out var bFee) ? bFee : null;
 
-            string builderAddress;
+            string? builderAddress;
             decimal? builderFeePercentage;
 
             if (string.IsNullOrWhiteSpace(builderAddressRaw))

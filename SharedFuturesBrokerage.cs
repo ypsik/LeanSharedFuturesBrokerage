@@ -38,11 +38,14 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         protected readonly SymbolPropertiesDatabase _spdb = SymbolPropertiesDatabase.FromDataFolder();
 
         protected IDataAggregator? _aggregator;
-        protected EventBasedDataQueueHandlerSubscriptionManager _subscriptionManager;
-        protected bool _isInitialized;
-        protected LiveNodePacket _job;
 
-        private UpdateSubscription _orderSocketSub;
+        private readonly EventBasedDataQueueHandlerSubscriptionManager _subscriptionManager = new(
+                tickType => tickType.ToString() // "Trade" ≠ "Quote" → separate Channels
+            );
+
+        protected bool _isInitialized;
+
+        private UpdateSubscription? _orderSocketSub;
         private UpdateSubscription? _userTradeSocketSub;
         protected readonly object _connectLock = new();
         protected readonly object _balanceUpdatesConnectLock = new();
@@ -104,10 +107,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             _klineClient = klineClient;
             _aggregator = aggregator;
             _getHoldingsFunc = getHoldingsFunc;
-
-            _subscriptionManager = new EventBasedDataQueueHandlerSubscriptionManager(
-                tickType => tickType.ToString() // "Trade" ≠ "Quote" → separate Channels
-            );
 
             _subscriptionManager.SubscribeImpl += (symbols, tickType) => SubscribeSymbols(symbols, tickType);
             _subscriptionManager.UnsubscribeImpl += (symbols, tickType) => UnsubscribeSymbols(symbols, tickType);
@@ -234,8 +233,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             _reconcileCts = null;
 
             _chaseCts?.Cancel();
-            if (_userTradeSocketSub != null) RunSync(() => _userTradeSocketSub.CloseAsync());
-            if (_orderSocketSub != null) RunSync(() => _orderSocketSub.CloseAsync());
+            if (_userTradeSocketSub != null) RunSync(_userTradeSocketSub.CloseAsync);
+            if (_orderSocketSub != null) RunSync(_orderSocketSub.CloseAsync);
             _isConnectedUserTrade = false;
             _isConnectedOrder = false;
             _cashBalanceTimer?.Dispose();
@@ -244,7 +243,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         public virtual void SetJob(LiveNodePacket job)
         {
-            _job = job;
             var aggregator = Composer.Instance.GetExportedValueByTypeName<IDataAggregator>(
                 Config.Get("data-aggregator", "QuantConnect.Lean.Engine.DataFeeds.AggregationManager"),
                 forceTypeNameOnExisting: false);
