@@ -485,7 +485,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             if (!order.BrokerId.Any())
                 return false;
 
-            var ticket = _orderManager.GetOrderTicket(order.Id);
+            var ticket = _algorithm.Transactions.GetOrderTicket(order.Id);
             var updates = ticket?.UpdateRequests;
             var lastUpdate = updates?.Count > 0 ? updates[updates.Count - 1] : null;
 

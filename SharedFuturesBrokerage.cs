@@ -22,8 +22,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
     // WICHTIG: abstract partial muss hier stehen!
     public abstract partial class SharedFuturesBrokerage : Brokerage, IDataQueueHandler
     {
-        protected IAlgorithm _algorithm;
-        protected SecurityTransactionManager _orderManager;
+        protected readonly IAlgorithm _algorithm;
 
         protected IBookTickerSocketClient _bookTickerSocket;
         protected ITradeSocketClient _tradeSocket;
@@ -36,7 +35,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         protected IFundingRateRestClient _fundingRateClient;
         protected Func<List<Holding>>? _getHoldingsFunc;
 
-        protected SymbolPropertiesDatabase _spdb;
+        protected readonly SymbolPropertiesDatabase _spdb = SymbolPropertiesDatabase.FromDataFolder();
 
         protected IDataAggregator? _aggregator;
         protected EventBasedDataQueueHandlerSubscriptionManager _subscriptionManager;
@@ -67,8 +66,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         protected SharedFuturesBrokerage(IAlgorithm algorithm, string exchangeName) : base(exchangeName)
         {
             _algorithm = algorithm;
-            _orderManager = _algorithm.Transactions;
-            _spdb = SymbolPropertiesDatabase.FromDataFolder();
         }
 
         protected void InitializeBase(
@@ -107,8 +104,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             _klineClient = klineClient;
             _aggregator = aggregator;
             _getHoldingsFunc = getHoldingsFunc;
-
-            _spdb = SymbolPropertiesDatabase.FromDataFolder();
 
             _subscriptionManager = new EventBasedDataQueueHandlerSubscriptionManager(
                 tickType => tickType.ToString() // "Trade" ≠ "Quote" → separate Channels
