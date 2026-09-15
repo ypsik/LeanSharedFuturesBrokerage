@@ -19,7 +19,7 @@
     <PackageReference Include="Jkorf.Aster.Net" Version="4.4.0" />
     <PackageReference Include="JKorf.Lighter.Net" Version="1.5.1" />
     <PackageReference Include="KrakenExchange.Net" Version="8.4.0" />
-    <PackageReference Include="QuantConnect.Lean.Engine" Version="2.5.18042" />
+    <PackageReference Include="QuantConnect.Lean.Engine" Version="2.5.18090" />
   </ItemGroup>
 
 </Project>
