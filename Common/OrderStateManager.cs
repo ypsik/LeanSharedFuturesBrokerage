@@ -95,9 +95,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.Common
                         return false;
                     }
 
-                    state.CumulativeCostFilledCurrentOrder = 0m;
-                    state.FilledQuantityCurrentOrder = 0m;
-                    state.CumulativeFeePaidCurrentOrder = 0m;
+                    // GEÄNDERT: Kein Reset mehr nötig. FilledQuantityByBrokerId /
+                    // CumulativeCostByBrokerId / FeePaidByBrokerId sind jetzt pro BrokerId
+                    // geführte Dictionaries (siehe OrderState.cs) - ein neuer Key (die neue
+                    // newExchangeId) startet automatisch bei 0 (GetValueOrDefault), der Stand
+                    // der alten BrokerId bleibt unangetastet in seinem eigenen Eintrag stehen
+                    // und kann von verspätet eintreffenden Events dieser alten Generation
+                    // weiterhin korrekt referenziert werden.
 
                     state.BrokerId = newExchangeId;
 

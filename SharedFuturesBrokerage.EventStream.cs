@@ -183,11 +183,25 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     var fee = trade.Fee ?? 0m;
 
                     state.FilledQuantity += signedFill;
-                    state.FilledQuantityCurrentOrder += signedFill;
                     state.CumulativeFeePaid += fee;
-                    state.CumulativeCostFilledCurrentOrder += tradeQuantity * trade.Price;
                     state.CumulativeCostFilled += tradeQuantity * trade.Price;
                     state.LastUpdateUtc = DateTime.UtcNow;
+
+                    // NACHGETRAGEN: ersetzt die entfernten Zeilen state.FilledQuantityCurrentOrder +=
+                    // signedFill / state.CumulativeCostFilledCurrentOrder += tradeQuantity * trade.Price.
+                    // Weiterhin nötig (siehe ursprünglicher Kommentar oben): ReconcileLoop /
+                    // ReconcileOrderImmediateAsync vergleichen brokerOrder.QuantityFilled relativ zur
+                    // aktuellen BrokerId gegen unseren Stand - ohne diese Fortschreibung würden bereits
+                    // über den Trade-Socket gebuchte Fills beim nächsten Reconcile doppelt gezählt.
+                    // Anders als im Order-Stream-Sensemann-Check liefert der Trade-Socket keinen
+                    // kumulierten Snapshot pro Event, sondern einzelne Fill-Deltas - daher hier
+                    // AddOrUpdate (aufaddieren) statt Überschreiben, keyed by trade.OrderId (die
+                    // BrokerId, auf der dieser Fill stattfand).
+                    state.FilledQuantityByBrokerId.AddOrUpdate(trade.OrderId, tradeQuantity, (_, existing) => existing + tradeQuantity);
+                    if (trade.Price > 0m)
+                    {
+                        state.CumulativeCostByBrokerId.AddOrUpdate(trade.OrderId, tradeQuantity * trade.Price, (_, existing) => existing + tradeQuantity * trade.Price);
+                    }
 
                     var leanStatus = Math.Abs(state.FilledQuantity) >= Math.Abs(state.OriginalQuantity)
                         ? QuantConnect.Orders.OrderStatus.Filled
@@ -337,7 +351,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                             //    - trägt unter o.OrderId in _statesByExchangeId ein
                             //    - ergänzt Order.BrokerId
                             //    - _statesByClientId[o.ClientOrderId] bleibt unverändert
-                            //    - resettet FilledQuantityCurrentOrder für die neue BrokerId-Generation
+                            //    - GEÄNDERT: kein Reset von Fill-Zählern mehr nötig, siehe
+                            //      OrderStateManager.MapNewExchangeId / OrderState.cs
                             var mapped = _orderStateManager.MapNewExchangeId(o.ClientOrderId, o.OrderId);
 
                             // Bitget-Style: neue clientOrderId war temporärer Alias → alten Key entfernen und State updaten
@@ -409,22 +424,25 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                                 ? FromExchangeQuantity(fillState.Order.Symbol, o.QuantityFilled)
                                 : (o.Status == SharedOrderStatus.Filled ? Math.Abs(fillState.OriginalQuantity) : 0m);
 
-                            // GEÄNDERT: absFilled/o.QuantityFilled ist relativ zur AKTUELLEN BrokerId
-                            // (startet bei 0 nach jedem Cancel+Replace). Delta daher gegen
-                            // FilledQuantityCurrentOrder bilden, nicht gegen die über alle
-                            // BrokerId-Generationen kumulierte FilledQuantity - sonst entsteht direkt
-                            // nach einem Replace ein Phantom-Event mit negativer FillQuantity
-                            // (siehe DivideByZeroException-Fall vom 2026-07-18 14:16:00, XMRUSDT).
-                            var currentOrderSignedFilled = absFilled * sign;
-                            var signedFill = currentOrderSignedFilled - fillState.FilledQuantityCurrentOrder;
+                            // GEÄNDERT: Delta wird gegen den Stand DERSELBEN BrokerId (o.OrderId)
+                            // gebildet, nicht mehr gegen einen generation-übergreifenden Einzelwert.
+                            // Ein verspätetes Event einer ALTEN, bereits ersetzten BrokerId kann so
+                            // nie mehr das Delta der NEUEN BrokerId verfälschen (siehe
+                            // DivideByZeroException-Fall vom 2026-09-17 00:04:03, TRXUSDT - vorher
+                            // erzeugte das ein Phantom-Event mit negativer FillQuantity).
+                            var lastKnownAbsFilled = OrderState.GetOrZero(fillState.FilledQuantityByBrokerId, o.OrderId);
+                            var absDelta = absFilled - lastKnownAbsFilled;
 
-                            if (Math.Abs(signedFill) > 0)
+                            if (Math.Abs(absDelta) > 0)
                             {
-                                var totalFeeForCurrentOrder = o.Fee ?? 0m;
-                                var deltaFee = Math.Max(0m, totalFeeForCurrentOrder - fillState.CumulativeFeePaidCurrentOrder);
-                                fillState.CumulativeFeePaidCurrentOrder = totalFeeForCurrentOrder;
+                                fillState.FilledQuantityByBrokerId[o.OrderId] = absFilled;
+                                var signedFill = absDelta * sign;
 
-                                fillState.FilledQuantityCurrentOrder = currentOrderSignedFilled;
+                                var totalFeeForCurrentOrder = o.Fee ?? 0m;
+                                var lastKnownFee = OrderState.GetOrZero(fillState.FeePaidByBrokerId, o.OrderId);
+                                var deltaFee = Math.Max(0m, totalFeeForCurrentOrder - lastKnownFee);
+                                fillState.FeePaidByBrokerId[o.OrderId] = totalFeeForCurrentOrder;
+
                                 fillState.FilledQuantity += signedFill;
                                 fillState.CumulativeFeePaid += deltaFee;
 
@@ -437,9 +455,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                                 decimal fillPrice;
                                 if (o.AveragePrice.HasValue && o.AveragePrice.Value > 0m)
                                 {
-                                    var previousCost = fillState.CumulativeCostFilled;
+                                    var lastKnownCost = OrderState.GetOrZero(fillState.CumulativeCostByBrokerId, o.OrderId);
                                     var newCumulativeCost = o.AveragePrice.Value * absFilled;
-                                    var deltaCost = newCumulativeCost - fillState.CumulativeCostFilledCurrentOrder;   // GEÄNDERT: nicht mehr CumulativeCostFilled
+                                    var deltaCost = newCumulativeCost - lastKnownCost;   // GEÄNDERT: pro BrokerId statt CumulativeCostFilledCurrentOrder
 
                                     fillPrice = deltaCost != 0m ? Math.Abs(deltaCost / signedFill) : o.AveragePrice.Value;
 
@@ -453,7 +471,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                                     if (priceTick > 0m)
                                         fillPrice = Math.Round(fillPrice / priceTick) * priceTick;
 
-                                    fillState.CumulativeCostFilledCurrentOrder = newCumulativeCost;   // GEÄNDERT
+                                    fillState.CumulativeCostByBrokerId[o.OrderId] = newCumulativeCost;   // GEÄNDERT
                                     fillState.CumulativeCostFilled += (deltaCost != 0m ? deltaCost : o.AveragePrice.Value * signedFill);  // Lifetime-Kumulator weiterhin korrekt fortschreiben
                                 }
                                 else
@@ -646,16 +664,26 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                                 ? FromExchangeQuantity(state.Order.Symbol, brokerOrder.QuantityFilled)
                                 : Math.Abs(removedState.OriginalQuantity);
 
-                            var finalSignedFillQty = finalFillAbsQty * (removedState.OriginalQuantity > 0 ? 1m : -1m);
-                            // GEÄNDERT: brokerOrder.QuantityFilled kommt relativ zur AKTUELLEN BrokerId
-                            // (brokerId, siehe oben) → gegen FilledQuantityCurrentOrder vergleichen,
-                            // nicht gegen die kumulierte FilledQuantity über alle Generationen.
-                            var remainingToFill = finalSignedFillQty - removedState.FilledQuantityCurrentOrder;
-                            if (Math.Abs(remainingToFill) > 0)
+                            // GEÄNDERT: Delta gegen den Stand DIESER BrokerId (brokerId), nicht gegen
+                            // einen generation-übergreifenden Zähler - analog zum Fix in
+                            // HandleOrderSocket. Verhindert dasselbe Phantom-Delta-Problem, falls der
+                            // Reconcile nach einem Replace auf eine BrokerId trifft, für die bereits
+                            // (teilweise) über den Socket-Pfad Fills verarbeitet wurden.
+                            var lastKnownAbsFilled = OrderState.GetOrZero(removedState.FilledQuantityByBrokerId, brokerId);
+                            var absDelta = finalFillAbsQty - lastKnownAbsFilled;
+
+                            if (Math.Abs(absDelta) > 0)
                             {
-                                // FIX 3: Doppelbuchungen der Gebühren verhindern!
+                                removedState.FilledQuantityByBrokerId[brokerId] = finalFillAbsQty;
+                                var remainingToFill = absDelta * (removedState.OriginalQuantity > 0 ? 1m : -1m);
+
+                                // FIX: Doppelbuchungen der Gebühren verhindern - jetzt ebenfalls
+                                // pro BrokerId statt gegen removedState.CumulativeFeePaid (lifetime,
+                                // über alle Generationen), analog zum Quantity-Fix oben.
                                 var totalExchangeFee = brokerOrder.Fee ?? 0m;
-                                var remainingFee = Math.Max(0m, totalExchangeFee - removedState.CumulativeFeePaid);
+                                var lastKnownFee = OrderState.GetOrZero(removedState.FeePaidByBrokerId, brokerId);
+                                var remainingFee = Math.Max(0m, totalExchangeFee - lastKnownFee);
+                                removedState.FeePaidByBrokerId[brokerId] = totalExchangeFee;
 
                                 OnOrderEvent(new OrderEvent(removedState.Order, DateTime.UtcNow, OrderFee.Zero)
                                 {

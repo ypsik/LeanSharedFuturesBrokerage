@@ -144,11 +144,20 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 {
                     OriginalQuantity = qty,
                     FilledQuantity = filledQty,
-                    FilledQuantityCurrentOrder = filledQty,
                     BrokerId = o.OrderId,
                     State = order.Status == QuantConnect.Orders.OrderStatus.PartiallyFilled ? OrderLifeCycleState.PartiallyFilled : OrderLifeCycleState.Open,
                     LimitPrice = o.OrderPrice
                 };
+
+                // GEÄNDERT: FilledQuantityCurrentOrder existiert nicht mehr als Einzelfeld - der
+                // Startup-Füllstand dieser (bereits existierenden) BrokerId wird direkt im neuen
+                // per-BrokerId Dictionary hinterlegt, damit spätere Delta-Berechnungen (Sensemann-
+                // Check, ReconcileLoop) für diese Order korrekt beim tatsächlichen Ist-Stand ansetzen,
+                // statt bei 0 zu starten und den bereits vor dem Neustart vorhandenen Fill erneut zu zählen.
+                if (!string.IsNullOrEmpty(o.OrderId))
+                {
+                    state.FilledQuantityByBrokerId[o.OrderId] = Math.Abs(filledQty);
+                }
 
                 // TryAdd: nop if clientId already registered (idempotent on reconnect).
                 // BrokerId is already set → manager auto-indexes in _statesByExchangeId.
@@ -250,7 +259,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             {
                 OriginalQuantity = signedRoundedQuantity,
                 FilledQuantity = 0m,
-                FilledQuantityCurrentOrder = 0m,
                 State = OrderLifeCycleState.Placing,
                 LimitPrice = (order as LimitOrder)?.LimitPrice
             };
@@ -321,7 +329,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         // Trigger ist ein eigener Task pro Order statt eines gemeinsamen Loops/Timers - das
         // ChaseInterval aus den ChaseOrderProperties ist damit direkt der Throttle zwischen zwei
         // Reprice-Versuchen dieser einen Order.
-
+        
         private async Task ChaseOrderLoop(OrderState state)
         {
             var order = state.Order;
@@ -777,9 +785,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             {
                 var oldBrokerId = state.BrokerId;
 
-                // MapNewExchangeId resettet FilledQuantityCurrentOrder für die neue BrokerId-Generation
-                // und ergänzt Order.BrokerId als einzige Add-Stelle (kein separates order.BrokerId.Add
-                // mehr hier - das führte vorher garantiert zu einem Duplikat von placeRes.Data.Id).
+                // GEÄNDERT: kein Reset von Fill-Zählern mehr nötig (per-BrokerId Dictionaries, siehe
+                // OrderState.cs) - MapNewExchangeId ergänzt Order.BrokerId weiterhin als einzige
+                // Add-Stelle (kein separates order.BrokerId.Add mehr hier - das führte vorher
+                // garantiert zu einem Duplikat von placeRes.Data.Id).
                 var mapped = _orderStateManager.MapNewExchangeId(newClientOrderId, placeRes.Data.Id);
                 _orderStateManager.RemoveAlias(state.ClientOrderId); // alte ClientOrderId-Eintragung entfernen
                 state.ClientOrderId = newClientOrderId;
@@ -861,17 +870,24 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         : Math.Abs(removedState.OriginalQuantity);
 
                     var sign = removedState.OriginalQuantity > 0 ? 1m : -1m;
-                    var finalSignedFillQty = finalFillAbsQty * sign;
-                    // GEÄNDERT: brokerOrder.QuantityFilled ist relativ zur AKTUELLEN BrokerId (brokerId
-                    // startet bei 0 nach jedem Replace) → gegen FilledQuantityCurrentOrder vergleichen,
-                    // nicht gegen die über alle Generationen kumulierte FilledQuantity.
-                    var remainingToFill = finalSignedFillQty - removedState.FilledQuantityCurrentOrder;
 
-                    if (Math.Abs(remainingToFill) > 0)
+                    // GEÄNDERT: Delta gegen den Stand DIESER BrokerId (brokerId), nicht gegen einen
+                    // generation-übergreifenden Zähler - identisches Muster zum Fix in
+                    // HandleOrderSocket / ReconcileLoop CASE 1.
+                    var lastKnownAbsFilled = OrderState.GetOrZero(removedState.FilledQuantityByBrokerId, brokerId);
+                    var absDelta = finalFillAbsQty - lastKnownAbsFilled;
+
+                    if (Math.Abs(absDelta) > 0)
                     {
-                        // FIX 3: Doppelbuchungen der Gebühren verhindern!
+                        removedState.FilledQuantityByBrokerId[brokerId] = finalFillAbsQty;
+                        var remainingToFill = absDelta * sign;
+
+                        // FIX 3: Doppelbuchungen der Gebühren verhindern - ebenfalls per-BrokerId
+                        // statt gegen removedState.CumulativeFeePaid (lifetime, über alle Generationen).
                         var totalExchangeFee = brokerOrder.Fee ?? 0m;
-                        var remainingFee = Math.Max(0m, totalExchangeFee - removedState.CumulativeFeePaid);
+                        var lastKnownFee = OrderState.GetOrZero(removedState.FeePaidByBrokerId, brokerId);
+                        var remainingFee = Math.Max(0m, totalExchangeFee - lastKnownFee);
+                        removedState.FeePaidByBrokerId[brokerId] = totalExchangeFee;
 
                         Log.Trace($"{Name}.ReconcileOrderImmediateAsync: Order {brokerId} confirmed FILLED. Emitting fill event.");
                         OnOrderEvent(new OrderEvent(removedState.Order, DateTime.UtcNow, OrderFee.Zero)

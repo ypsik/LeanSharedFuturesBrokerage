@@ -392,14 +392,17 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 // Bitget lehnt In-Place-Modify ab, sobald die Order bereits einen Fill hat
                 // ("40922" / "Only work order modifications are allowed"). Zeigt der lokale State
                 // das schon an, sparen wir uns den REST-Roundtrip und springen direkt über
-                // IsRejectedUpdateError in den Cancel+Replace-Workaround. Steht der State noch auf
-                // FilledQuantityCurrentOrder == 0, wird ganz normal per REST versucht - eine Race
+                // IsRejectedUpdateError in den Cancel+Replace-Workaround. Steht der Fill-Stand
+                // dieser BrokerId noch auf 0, wird ganz normal per REST versucht - eine Race
                 // (Fill zwischen diesem Check und dem Call) fängt die echte Exchange-Fehlermeldung
                 // unten wie bisher ab.
-                if (state.FilledQuantityCurrentOrder != 0)
+                // GEÄNDERT: FilledQuantityCurrentOrder existiert nicht mehr - Abfrage jetzt gegen
+                // das per-BrokerId Dictionary (fachlich identisch: Fill-Stand DIESER BrokerId).
+                var filledOnCurrentGeneration = state.FilledQuantityByBrokerId.GetValueOrDefault(brokerId, 0m);
+                if (filledOnCurrentGeneration != 0m)
                 {
                     Log.Trace($"Bitget update: order {brokerId} already has a fill on the current generation " +
-                              $"(FilledQuantityCurrentOrder={state.FilledQuantityCurrentOrder}), skipping in-place modify attempt.");
+                              $"(FilledQuantity={filledOnCurrentGeneration}), skipping in-place modify attempt.");
                     return new HttpResult<SharedId>(Name, null, new InvalidOperationError("40922 Only work order modifications are allowed"));
                 }
 
