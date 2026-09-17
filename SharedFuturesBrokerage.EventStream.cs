@@ -513,6 +513,107 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     // -------------------------------------------------------
                     if (_orderStateManager.TryGetByExchangeId(o.OrderId, out var state))
                     {
+                        var absFilled = FromExchangeQuantity(state.Order.Symbol, o.QuantityFilled);
+                        var leanStatus = MapStatus(o.Status, absFilled);
+
+                        // FIX 1 (2026-09-17, korrigiert): Auf Exchanges ohne dedizierten Trade-Stream
+                        // (BingX, Aster, CoinW, OKX) liefert auch das finale Canceled/Invalid-Payload
+                        // einen QuantityFilled-Snapshot. Bisher wurde das hier komplett ignoriert -
+                        // ein Fill, der NIE über ein vorheriges "Open"-Event gemeldet wurde, sondern
+                        // erst und ausschließlich im Cancel-Payload auftaucht (genau der TRX-Fall:
+                        // der Fill steckte im Cancel-Payload des ALTEN, bereits ersetzten Tickets),
+                        // ging dadurch komplett verloren.
+                        //
+                        // WICHTIG, zwei Korrekturen gegenüber der ersten Fassung:
+                        // 1) Muss VOR dem "alte Ticket"-Guard unten laufen, nicht danach - genau
+                        //    dieser Fall (Cancel-Payload eines bereits ersetzten, alten Tickets)
+                        //    wird von diesem Guard sonst schon weggeworfen, bevor die Fill-Recovery
+                        //    je zum Zug kommt (o.OrderId != state.BrokerId, weil längst auf die neue
+                        //    BrokerId gemappt wurde - das ist im TRX-Vorfall exakt der Ablauf).
+                        // 2) Darf NICHT von state.IsUpdatePending abhängen - das eine (Fill nachbuchen)
+                        //    und das andere (sichtbares Canceled-Event ggf. unterdrücken, weil gerade
+                        //    ein Replace läuft) sind unabhängige Entscheidungen. Ein real passierter
+                        //    Fill muss verbucht werden, unabhängig davon, ob parallel ein Replace
+                        //    aussteht - IsUpdatePending steuert weiter unten weiterhin nur, ob das
+                        //    Canceled-Event selbst an LEAN durchgereicht wird.
+                        if (!ExchangeSupportsUserTradeStream
+                            && leanStatus is QuantConnect.Orders.OrderStatus.Canceled or QuantConnect.Orders.OrderStatus.Invalid)
+                        {
+                            var lastKnownAbsFilled = OrderState.GetOrZero(state.FilledQuantityByBrokerId, o.OrderId);
+                            var absDelta = absFilled - lastKnownAbsFilled;
+
+                            if (Math.Abs(absDelta) > 0)
+                            {
+                                state.FilledQuantityByBrokerId[o.OrderId] = absFilled;
+                                var sign = state.OriginalQuantity > 0 ? 1m : -1m;
+                                var signedFill = absDelta * sign;
+
+                                var totalFeeForCurrentOrder = o.Fee ?? 0m;
+                                var lastKnownFee = OrderState.GetOrZero(state.FeePaidByBrokerId, o.OrderId);
+                                var deltaFee = Math.Max(0m, totalFeeForCurrentOrder - lastKnownFee);
+                                state.FeePaidByBrokerId[o.OrderId] = totalFeeForCurrentOrder;
+
+                                decimal recoveredFillPrice;
+                                if (o.AveragePrice.HasValue && o.AveragePrice.Value > 0m)
+                                {
+                                    var lastKnownCost = OrderState.GetOrZero(state.CumulativeCostByBrokerId, o.OrderId);
+                                    var newCumulativeCost = o.AveragePrice.Value * absFilled;
+                                    var deltaCost = newCumulativeCost - lastKnownCost;
+                                    recoveredFillPrice = deltaCost != 0m ? Math.Abs(deltaCost / signedFill) : o.AveragePrice.Value;
+
+                                    var priceTick = _algorithm.Securities[state.Order.Symbol].SymbolProperties.MinimumPriceVariation;
+                                    if (priceTick > 0m)
+                                        recoveredFillPrice = Math.Round(recoveredFillPrice / priceTick) * priceTick;
+
+                                    state.CumulativeCostByBrokerId[o.OrderId] = newCumulativeCost;
+                                    state.CumulativeCostFilled += (deltaCost != 0m ? deltaCost : o.AveragePrice.Value * signedFill);
+                                }
+                                else
+                                {
+                                    recoveredFillPrice = o.OrderPrice ?? 0m;
+                                }
+
+                                state.FilledQuantity += signedFill;
+                                state.CumulativeFeePaid += deltaFee;
+                                state.LastUpdateUtc = DateTime.UtcNow;
+
+                                var recoveredStatus = Math.Abs(state.FilledQuantity) >= Math.Abs(state.OriginalQuantity)
+                                    ? QuantConnect.Orders.OrderStatus.Filled
+                                    : QuantConnect.Orders.OrderStatus.PartiallyFilled;
+                                state.State = recoveredStatus == QuantConnect.Orders.OrderStatus.Filled
+                                    ? OrderLifeCycleState.Filled
+                                    : OrderLifeCycleState.PartiallyFilled;
+
+                                Log.Trace($"{Name}.HandleOrderSocket: Recovered unbooked fill from {o.Status} payload for {o.OrderId} (delta={signedFill} @ {recoveredFillPrice}, IsUpdatePending={state.IsUpdatePending}).");
+
+                                OnOrderEvent(new OrderEvent(state.Order, DateTime.UtcNow, new OrderFee(new CashAmount(deltaFee, o.FeeAsset ?? SettleAsset)))
+                                {
+                                    Status = recoveredStatus,
+                                    FillPrice = recoveredFillPrice,
+                                    FillQuantity = signedFill,
+                                    Message = $"Order socket {o.Status} payload (recovered fill)"
+                                });
+
+                                if(!state.IsUpdatePending && recoveredStatus == QuantConnect.Orders.OrderStatus.Filled)
+                                {
+                                    // Order ist durch den nachgebuchten Fill bereits vollständig
+                                    // geschlossen - kein zusätzliches Canceled-Event mehr senden,
+                                    // sonst sieht LEAN einen Filled->Canceled-Übergang, der nie
+                                    // stattgefunden hat. Das gilt unabhängig davon, ob o.OrderId
+                                    // die aktuell aktive BrokerId ist oder eine bereits ersetzte -
+                                    // in beiden Fällen ist die Order jetzt zweifelsfrei fertig.
+                                    _orderStateManager.TryRemove(state.ClientOrderId, out _);
+                                    continue;
+                                }
+                                // Sonst: Teil-Fill nachgebucht, Order bleibt offen. Für ein altes,
+                                // bereits ersetztes Ticket greift direkt danach der "alte Ticket"-
+                                // Guard und verwirft den Rest des Events korrekt (der Cancel-Status
+                                // selbst ist für die alte Generation irrelevant, der Fill wurde aber
+                                // bereits sicher gebucht). Für das aktuell aktive Ticket läuft der
+                                // Cancel-Zweig direkt darunter normal weiter und schließt die Order.
+                            }
+                        }
+
                         // Ignoriere Status-Events von alten, ersetzten Tickets
                         if (o.OrderId != state.BrokerId)
                         {
@@ -521,8 +622,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         }
 
                         state.LastUpdateUtc = DateTime.UtcNow;
-                        var absFilled = FromExchangeQuantity(state.Order.Symbol, o.QuantityFilled);
-                        var leanStatus = MapStatus(o.Status, absFilled);
 
                         if (leanStatus is QuantConnect.Orders.OrderStatus.Canceled or QuantConnect.Orders.OrderStatus.Invalid)
                         {
