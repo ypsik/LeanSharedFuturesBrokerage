@@ -14,10 +14,12 @@ using QuantConnect.Data.Market;
 using QuantConnect.Interfaces;
 using QuantConnect.Logging;
 using QuantConnect.Orders;
+using QuantConnect.Orders.Fees;
 using QuantConnect.Securities;
 using QuantConnect.Util;
 using RestSharp;
 using SilverQuant.Lean.Brokerages.Futures.Shared;
+using SilverQuant.Lean.Brokerages.Futures.Shared.Common;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -481,6 +483,75 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 return new HttpResult<SharedId>(Name, null, res.Error);
             }
 
+            // FIX (2026-09-17): res.Data.CanceledOrder liefert SYNCHRON, im selben REST-Response,
+            // den terminalen Fill-Stand der gerade stornierten alten Order - ohne auf die (im
+            // TRXUSDT-Vorfall bis zu ~85s verzögerte) Socket-Bestätigung warten zu müssen. Bevor
+            // wir mit dem Replace weitermachen, buchen wir daher hier sofort nach, falls
+            // QuantityFilled höher ist als unser bisheriger Stand für diese BrokerId - identisches
+            // Delta-Muster wie der Order-Stream-Fix in HandleOrderSocket, nur synchron statt
+            // reaktiv. Der später ohnehin eintreffende Socket-Event für dieselbe BrokerId wird
+            // dadurch automatisch zu einem No-Op-Delta (bereits gebucht).
+            var canceledOrder = res.Data?.CanceledOrder;
+            if (canceledOrder != null)
+            {
+                var canceledAbsFilled = canceledOrder.QuantityFilled ?? 0m;
+                var lastKnownAbsFilled = OrderState.GetOrZero(state.FilledQuantityByBrokerId, brokerId);
+                var absDelta = canceledAbsFilled - lastKnownAbsFilled;
+
+                if (Math.Abs(absDelta) > 0)
+                {
+                    state.FilledQuantityByBrokerId[brokerId] = canceledAbsFilled;
+                    var sign = state.OriginalQuantity > 0 ? 1m : -1m;
+                    var signedFill = absDelta * sign;
+
+                    var totalFeeForOldOrder = canceledOrder.Fee ?? 0m;
+                    var lastKnownFee = OrderState.GetOrZero(state.FeePaidByBrokerId, brokerId);
+                    var deltaFee = Math.Max(0m, totalFeeForOldOrder - lastKnownFee);
+                    state.FeePaidByBrokerId[brokerId] = totalFeeForOldOrder;
+
+                    decimal recoveredFillPrice;
+                    if (canceledOrder.AveragePrice.HasValue && canceledOrder.AveragePrice.Value > 0m)
+                    {
+                        var lastKnownCost = OrderState.GetOrZero(state.CumulativeCostByBrokerId, brokerId);
+                        var newCumulativeCost = canceledOrder.AveragePrice.Value * canceledAbsFilled;
+                        var deltaCost = newCumulativeCost - lastKnownCost;
+                        recoveredFillPrice = deltaCost != 0m ? Math.Abs(deltaCost / signedFill) : canceledOrder.AveragePrice.Value;
+
+                        var priceTick = _algorithm.Securities[state.Order.Symbol].SymbolProperties.MinimumPriceVariation;
+                        if (priceTick > 0m)
+                            recoveredFillPrice = Math.Round(recoveredFillPrice / priceTick) * priceTick;
+
+                        state.CumulativeCostByBrokerId[brokerId] = newCumulativeCost;
+                        state.CumulativeCostFilled += (deltaCost != 0m ? deltaCost : canceledOrder.AveragePrice.Value * signedFill);
+                    }
+                    else
+                    {
+                        recoveredFillPrice = price;
+                    }
+
+                    state.FilledQuantity += signedFill;
+                    state.CumulativeFeePaid += deltaFee;
+                    state.LastUpdateUtc = DateTime.UtcNow;
+
+                    var recoveredStatus = Math.Abs(state.FilledQuantity) >= Math.Abs(state.OriginalQuantity)
+                        ? QuantConnect.Orders.OrderStatus.Filled
+                        : QuantConnect.Orders.OrderStatus.PartiallyFilled;
+                    // Keine eigene state.State/TryRemove-Entscheidung hier - state.State wird
+                    // gleich im Anschluss durch das reguläre BrokerId-Mapping unten (bzw. später
+                    // durch HandleOrderSocket) konsistent nachgezogen. Diese Stelle meldet nur
+                    // den zusätzlichen Fill an LEAN, verwaltet aber nicht den Order-Lifecycle.
+                    Log.Trace($"{Name}.ExecuteUpdateOrderAsync: Recovered unbooked fill from CancelReplace response for {brokerId} (delta={signedFill} @ {recoveredFillPrice}).");
+
+                    OnOrderEvent(new OrderEvent(state.Order, DateTime.UtcNow, new OrderFee(new CashAmount(deltaFee, SettleAsset)))
+                    {
+                        Status = recoveredStatus,
+                        FillPrice = recoveredFillPrice,
+                        FillQuantity = signedFill,
+                        Message = "CancelReplace response (recovered fill)"
+                    });
+                }
+            }
+
             // Cancel-replace produces a new exchange order → return new ID (unlike Bitget EditOrder)
             var newExchangeId = res.Data?.NewOrder?.OrderId.ToString();
 
@@ -517,6 +588,74 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             // hier entfernen, falls der Socket (Race Condition) den Alias zwischenzeitlich bereits
             // selbst aufgelöst hat. RemoveAlias gibt jetzt bool zurück — dort prüfen, ob der Socket
             // erfolgreich war, bevor wir hier eingreifen.
+
+            // FIX (2026-09-17): Overshoot-Korrektur. Der oben gesendete CancelReplace-Request wurde
+            // mit `quantity` gebaut - der zum Zeitpunkt der Berechnung im ChaseOrderLoop bekannten
+            // Restmenge. Falls canceledOrder (s.o.) einen HÖHEREN Fill-Stand offenbart hat, als wir
+            // beim Absenden wussten, ist die gerade platzierte neue Order jetzt zu groß: die Summe
+            // aus bereits gefüllter Menge (state.FilledQuantity, inkl. des soeben nachgebuchten
+            // Deltas) plus der neuen, noch offenen Order-Menge übersteigt die eigentliche
+            // Zielmenge (state.OriginalQuantity).
+            //
+            // BingX bietet mit EditOrderAsync (POST /openApi/swap/v1/trade/amend) einen ECHTEN
+            // In-Place-Edit für die Menge (nur Menge, kein Preis) - im Unterschied zu
+            // CancelReplaceOrderAsync also OHNE erneuten Cancel+Place-Zyklus und ohne das
+            // Race-Fenster erneut zu öffnen. Damit korrigieren wir die gerade platzierte neue
+            // Order sofort auf die tatsächlich noch benötigte Restmenge.
+            if (!string.IsNullOrEmpty(newExchangeId) && long.TryParse(newExchangeId, out var newExchangeOrderId))
+            {
+                var newOrderQty = res.Data?.NewOrder?.Quantity ?? Math.Abs(quantity.Value);
+                var overshoot = (Math.Abs(state.FilledQuantity) + newOrderQty) - Math.Abs(state.OriginalQuantity);
+                var lotSize = _algorithm.Securities[order.Symbol].SymbolProperties.LotSize;
+
+                // Toleranz gegen Rundungsrauschen: nur korrigieren, wenn der Overshoot mindestens
+                // eine handelbare Einheit ausmacht - sonst riskieren wir, EditOrderAsync mit einer
+                // Sub-Lot-Differenz zu belästigen, die die Exchange ohnehin nicht auflösen kann.
+                if (overshoot > 0m && (lotSize <= 0m || overshoot >= lotSize))
+                {
+                    var correctedQty = newOrderQty - overshoot;
+
+                    if (correctedQty > 0m)
+                    {
+                        var editRes = await _restClient.PerpetualFuturesApi.Trading.EditOrderAsync(
+                            orderId: null,
+                            clientOrderId: newClientOrderId,
+                            symbol: ticker,
+                            quantity: correctedQty);
+
+                        if (editRes.Success)
+                        {
+                            Log.Trace($"{Name}.ExecuteUpdateOrderAsync: Overshoot detected for {order.Symbol.Value} " +
+                                      $"(newOrderQty={newOrderQty}, overshoot={overshoot}) - corrected new order {newExchangeId} " +
+                                      $"to {correctedQty} via in-place EditOrderAsync.");
+                        }
+                        else
+                        {
+                            Log.Error($"{Name}.ExecuteUpdateOrderAsync: Overshoot correction FAILED for order {newExchangeId}: " +
+                                      $"{editRes.Error}. New order remains at its original (too large) size - manual review recommended.");
+                        }
+                    }
+                    else
+                    {
+                        // Zielmenge ist bereits durch die alte Order allein erreicht/überschritten -
+                        // die gerade platzierte neue Order wird komplett storniert statt reduziert.
+                        var cancelRes = await ExecuteCancelOrderAsync(
+                            new CryptoExchange.Net.SharedApis.CancelOrderRequest(GetSharedSymbol(order.Symbol), newExchangeId, CancelFuturesOrderExchangeParameters));
+
+                        if (cancelRes.Success)
+                        {
+                            Log.Trace($"{Name}.ExecuteUpdateOrderAsync: Overshoot detected for {order.Symbol.Value} " +
+                                      $"(newOrderQty={newOrderQty}, overshoot={overshoot} >= newOrderQty) - Zielmenge bereits " +
+                                      $"durch die stornierte alte Order allein erreicht. Neue Order {newExchangeId} storniert.");
+                        }
+                        else
+                        {
+                            Log.Error($"{Name}.ExecuteUpdateOrderAsync: Overshoot-Cancel FAILED for order {newExchangeId}: " +
+                                      $"{cancelRes.Error}. New order remains live and unnecessary - manual review recommended.");
+                        }
+                    }
+                }
+            }
 
             return new HttpResult<SharedId>(
                 Name,
