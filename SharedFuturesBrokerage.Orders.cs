@@ -551,6 +551,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 }
 
                 state.IsUpdatePending = true;
+                state.LastUpdateUtc = DateTime.UtcNow;
             }
 
             var res = RunSync(() => ExecuteUpdateOrderAsync(order, price, quantity));
@@ -593,11 +594,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     errorMsg));
 
                 return false;
-            }
-
-            if (_orderStateManager.TryGetByExchangeId(activeBrokerId, out var activeState))
-            {
-                activeState.LastUpdateUtc = DateTime.UtcNow;
             }
 
             return true;
