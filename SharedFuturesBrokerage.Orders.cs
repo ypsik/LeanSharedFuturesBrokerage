@@ -295,9 +295,24 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                     if (mapped)
                     {
-                        placingState.State = OrderLifeCycleState.Submitted;
-                        placingState.LastUpdateUtc = DateTime.UtcNow;
-                        OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero) { Status = QuantConnect.Orders.OrderStatus.Submitted });
+                        // Ab MapNewExchangeId ist der State über den Exchange-ID-Index auffindbar.
+                        // Der Trade-Socket (Versuch 3 / Late Match) kann einen Instant-Fill daher
+                        // genau zwischen Mapping und dieser Stelle bereits gebucht und den State auf
+                        // PartiallyFilled/Filled gesetzt haben. Nur wenn der State noch Placing ist,
+                        // auf Submitted setzen und das Event feuern - sonst würde ein bereits
+                        // gebuchter Fill-Status überschrieben und LEAN bekäme ein Submitted NACH
+                        // dem Fill-Event.
+                        if (placingState.State == OrderLifeCycleState.Placing)
+                        {
+                            placingState.State = OrderLifeCycleState.Submitted;
+                            placingState.LastUpdateUtc = DateTime.UtcNow;
+                            OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero) { Status = QuantConnect.Orders.OrderStatus.Submitted });
+                        }
+                        else
+                        {
+                            Log.Trace($"{Name}.PlaceOrder: Skipping Submitted for {order.Symbol.Value} (orderId={order.Id}, brokerId={res.Data.Id}) - " +
+                                      $"trade socket already booked a fill after mapping (state={placingState.State}).");
+                        }
                     }
                 }
             }
@@ -320,7 +335,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
             return true;
         }
-
         // =====================================================================
         // CHASE ORDERS
         // =====================================================================
@@ -329,7 +343,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         // Trigger ist ein eigener Task pro Order statt eines gemeinsamen Loops/Timers - das
         // ChaseInterval aus den ChaseOrderProperties ist damit direkt der Throttle zwischen zwei
         // Reprice-Versuchen dieser einen Order.
-        
+
         private async Task ChaseOrderLoop(OrderState state)
         {
             var order = state.Order;

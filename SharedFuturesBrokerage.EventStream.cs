@@ -79,6 +79,25 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                             }
                         }
                     }
+                    
+                    // =======================================================
+                    // 3. VERSUCH: Erneuter Exchange-ID-Lookup (Race-Fenster schließen)
+                    // PlaceOrder (bzw. HandleOrderSocket) kann MapNewExchangeId genau
+                    // zwischen Versuch 1 und dem Heuristik-Scan ausgeführt haben:
+                    //   - Versuch 1: BrokerId noch nicht im Index -> Miss
+                    //   - Heuristik Fall A: BrokerId inzwischen gesetzt -> kein Match mehr
+                    // -> Trade wurde verworfen (Incident 2026-09-22 15:00:01, BTCUSDC,
+                    //    Trade 0.001 @ 86310, danach Reconciled Fill mit Preis 0).
+                    // Ein zweiter Lookup unmittelbar vor der Heuristik deckt dieses
+                    // Fenster ab: entweder ist die ID jetzt im Index (Treffer hier),
+                    // oder sie ist noch nicht gesetzt (dann greift Fall A wie bisher).
+                    // =======================================================
+                    if (state == null && _orderStateManager.TryGetByExchangeId(trade.OrderId, out var lateMappedState))
+                    {
+                        state = lateMappedState;
+                        Log.Trace($"{Name}.HandleUserTradeSocket: Late exchange-id match for trade {trade.OrderId} " +
+                                  $"(mapped between first lookup and heuristic scan) -> ClientOrder {state.ClientOrderId}");
+                    }
 
                     if (state == null)
                     {
