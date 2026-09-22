@@ -460,6 +460,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             if (!order.BrokerId.Any()) return false;
             var id = order.BrokerId.Last();
 
+            Log.Trace($"{Name}.CancelOrder({order.Symbol.Value}): CALLED for OrderId={order.Id}, BrokerId={id}, " +
+              $"Tag='{order.Tag}', Status={order.Status}.\nCallStack:\n{Environment.StackTrace}");
+
             var res = RunSync(() => ExecuteCancelOrderAsync(new CxCancelOrderRequest(GetSharedSymbol(order.Symbol), id, CancelFuturesOrderExchangeParameters)));
             if (!res.Success)
             {
