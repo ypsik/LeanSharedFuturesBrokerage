@@ -695,10 +695,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             public string Exchange => _inner.Exchange;
             public TradingMode[] SupportedTradingModes => _inner.SupportedTradingModes;
             public bool Authenticated => _inner.Authenticated;
-            public SharedTransport Transport => _inner.Transport;
-            public IReadOnlyCollection<CapabilityOptions> Capabilities => _inner.Capabilities;
-            public Task<TResult> WithRateLimitAdmissionAsync<TResult>(RateLimitAdmission admission, Func<Task<TResult>> operation)
-                => _inner.WithRateLimitAdmissionAsync(admission, operation);
+//            public SharedTransport Transport => _inner.Transport;
+//            public IReadOnlyCollection<CapabilityOptions> Capabilities => _inner.Capabilities;
+//            public Task<TResult> WithRateLimitAdmissionAsync<TResult>(RateLimitAdmission admission, Func<Task<TResult>> operation)
+//                => _inner.WithRateLimitAdmissionAsync(admission, operation);
             public SharedClientInfo Discover() => _inner.Discover();
             public string FormatSymbol(string baseAsset, string quoteAsset, TradingMode tradingMode, DateTime? deliverDate = null)
                 => _inner.FormatSymbol(baseAsset, quoteAsset, tradingMode, deliverDate);
