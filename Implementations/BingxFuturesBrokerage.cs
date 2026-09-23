@@ -1,10 +1,12 @@
 ﻿using BingX.Net.Clients;
 using BingX.Net.Enums;
 using BingX.Net.Interfaces.Clients;
+using BingX.Net.Interfaces.Clients.PerpetualFuturesApi;
 using BingX.Net.Objects.Models;
 using CryptoExchange.Net.Interfaces.Clients;
 using CryptoExchange.Net.Objects;
 using CryptoExchange.Net.Objects.Sockets;
+using CryptoExchange.Net.RateLimiting;
 using CryptoExchange.Net.SharedApis;
 using CryptoExchange.Net.Trackers.UserData;
 using QuantConnect;
@@ -62,7 +64,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             InitializeBase(
                 restClient.PerpetualFuturesApi.SharedClient,
                 restClient.PerpetualFuturesApi.SharedClient,
-                socketClient.PerpetualFuturesApi.SharedClient,
+                new BingxDepthBookTickerAdapter(socketClient.PerpetualFuturesApi.SharedClient, socketClient.PerpetualFuturesApi),
                 socketClient.PerpetualFuturesApi.SharedClient,
                 socketClient.PerpetualFuturesApi.SharedClient,
                 null,// user trade stream wird von BingX nicht unterstützt, daher null
@@ -142,7 +144,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             InitializeBase(
                 _restClient.PerpetualFuturesApi.SharedClient,
                 _restClient.PerpetualFuturesApi.SharedClient,
-                _socketClient.PerpetualFuturesApi.SharedClient,
+                new BingxDepthBookTickerAdapter(_socketClient.PerpetualFuturesApi.SharedClient, _socketClient.PerpetualFuturesApi),
                 _socketClient.PerpetualFuturesApi.SharedClient,
                 _socketClient.PerpetualFuturesApi.SharedClient,
                 null, // user trade stream wird von BingX nicht unterstützt, daher null
@@ -662,6 +664,78 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 String.IsNullOrEmpty(newExchangeId) ? null : new SharedId(newExchangeId),
                 null
             );
+        }
+
+        /// <summary>
+        /// Adapter: ersetzt BingX' `@bookTicker`-Stream durch `@depth5@100ms` (Top-5-Orderbuch).
+        /// Grund: der `@bookTicker`-Stream von BingX liefert stark verzoegerte Daten (gemessen am
+        /// 23.09.2026: ZEC-USDT ca. 34 Minuten, BTC-USDT ca. 10 Sekunden Rueckstand, jeweils Feld `T`
+        /// gegen Sendezeit `E`), ohne Fehlermeldung. `@depth5@100ms` war im selben Test live
+        /// (ca. 170 ms) und deckungsgleich mit REST. Best Bid/Ask werden daraus abgeleitet,
+        /// unabhaengig von der Sortierung der Levels (hoechster Bid, niedrigster Ask).
+        /// Alle ISharedClient-Member werden 1:1 an den urspruenglichen BingX-Shared-Client
+        /// durchgereicht; nur die Book-Ticker-Subscription selbst laeuft ueber den Depth-Stream.
+        /// </summary>
+        private sealed class BingxDepthBookTickerAdapter : IBookTickerSocketClient
+        {
+            private const int DepthLevels = 5;
+            private const int UpdateIntervalMs = 100;
+
+            private readonly IBookTickerSocketClient _inner;
+            private readonly IBingXSocketClientPerpetualFuturesApi _api;
+
+            public BingxDepthBookTickerAdapter(IBookTickerSocketClient inner, IBingXSocketClientPerpetualFuturesApi api)
+            {
+                _inner = inner;
+                _api = api;
+            }
+
+            public SubscribeBookTickerOptions SubscribeBookTickerOptions => _inner.SubscribeBookTickerOptions;
+
+            public string Exchange => _inner.Exchange;
+            public TradingMode[] SupportedTradingModes => _inner.SupportedTradingModes;
+            public bool Authenticated => _inner.Authenticated;
+            public SharedTransport Transport => _inner.Transport;
+            public IReadOnlyCollection<CapabilityOptions> Capabilities => _inner.Capabilities;
+            public Task<TResult> WithRateLimitAdmissionAsync<TResult>(RateLimitAdmission admission, Func<Task<TResult>> operation)
+                => _inner.WithRateLimitAdmissionAsync(admission, operation);
+            public SharedClientInfo Discover() => _inner.Discover();
+            public string FormatSymbol(string baseAsset, string quoteAsset, TradingMode tradingMode, DateTime? deliverDate = null)
+                => _inner.FormatSymbol(baseAsset, quoteAsset, tradingMode, deliverDate);
+            public void SetDefaultExchangeParameter(string name, object value)
+                => _inner.SetDefaultExchangeParameter(name, value);
+            public void ResetDefaultExchangeParameters()
+                => _inner.ResetDefaultExchangeParameters();
+
+            public async Task<WebSocketResult<UpdateSubscription>> SubscribeToBookTickerUpdatesAsync(
+                SubscribeBookTickerRequest request, Action<DataEvent<SharedBookTicker>> handler, CancellationToken ct = default)
+            {
+                var sharedSymbol = request.Symbol ?? throw new ArgumentException("Symbol is not set", nameof(request));
+                var nativeSymbol = sharedSymbol.GetSymbol(FormatSymbol);
+                var symbolName = sharedSymbol.BaseAsset + sharedSymbol.QuoteAsset;
+
+                return await _api.SubscribeToPartialOrderBookUpdatesAsync(
+                    nativeSymbol, DepthLevels, UpdateIntervalMs,
+                    update =>
+                    {
+                        var book = update.Data;
+                        if (book.Bids.Length == 0 || book.Asks.Length == 0)
+                            return; // leeres/einseitiges Update - kein sinnvoller Best Bid/Ask ableitbar
+
+                        var bestBid = book.Bids.MaxBy(b => b.Price)!;
+                        var bestAsk = book.Asks.MinBy(a => a.Price)!;
+
+                        var ticker = new SharedBookTicker(
+                            sharedSymbol,
+                            symbolName,
+                            bestAsk.Price,
+                            new SharedOrderQuantity(bestAsk.Quantity),
+                            bestBid.Price,
+                            new SharedOrderQuantity(bestBid.Quantity));
+
+                        handler(update.ToType(ticker));
+                    }, ct).ConfigureAwait(false);
+            }
         }
     }
 }
