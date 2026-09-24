@@ -61,7 +61,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             IDataAggregator aggregator,
             Func<List<Holding>>? getHoldingsFunc = null,
             bool isHedgeMode = true,
-            bool useDepthBookTicker = true)
+            bool useDepthBookTicker = false)
             : base(algorithm, "bingx")
         {
             _restClient = restClient;

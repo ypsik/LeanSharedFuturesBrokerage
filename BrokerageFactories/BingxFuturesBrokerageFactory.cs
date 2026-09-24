@@ -35,6 +35,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
             { "bingx-api-key", Config.Get("bingx-api-key") },
             { "bingx-api-secret",  Config.Get("bingx-api-secret")  },
             { "bingx-hedge-mode", Config.Get("bingx-hedge-mode", "false") },
+            { "bingx-use-depth-book-ticker", Config.Get("bingx-use-depth-book-ticker", "false") },
         };
 
         public override IBrokerageModel GetBrokerageModel(IOrderProvider orderProvider)
@@ -73,16 +74,16 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
             var aggregator = Composer.Instance.GetPart<IDataAggregator>();
 
             Func<List<Holding>> getHoldingsFunc = () =>
-                algorithm.Securities.Values
+                [.. algorithm.Securities.Values
                     .Where(x => x.Holdings.Quantity != 0)
-                    .Select(x => new Holding(x))
-                    .ToList();
+                    .Select(x => new Holding(x))];
 
             algorithm.Settings.DatabasesRefreshPeriod = TimeSpan.FromDays(36500);
 
             var hedgeMode = Config.GetBool("bingx-hedge-mode", false);
+            var useDepthBookTicker = Config.GetBool("bingx-use-depth-book-ticker", false);
 
-            var brokerage = new BingxFuturesBrokerage(algorithm, restClient, socketClient, aggregator, getHoldingsFunc, hedgeMode);
+            var brokerage = new BingxFuturesBrokerage(algorithm, restClient, socketClient, aggregator, getHoldingsFunc, hedgeMode, useDepthBookTicker);
 
             // Register with MEF Composer so Lean reuses this instance when
             // resolving IDataQueueHandler instead of trying to construct a new one
