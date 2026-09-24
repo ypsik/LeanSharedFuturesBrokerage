@@ -24,8 +24,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 {
     public abstract partial class SharedFuturesBrokerage
     {
-        #region Socket / Reconcile
-
         private void HandleUserTradeSocket(DataEvent<SharedUserTrade[]> update)
         {
             foreach (var trade in update.Data)
@@ -79,7 +77,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                             }
                         }
                     }
-                    
+
                     // =======================================================
                     // 3. VERSUCH: Erneuter Exchange-ID-Lookup (Race-Fenster schließen)
                     // PlaceOrder (bzw. HandleOrderSocket) kann MapNewExchangeId genau
@@ -613,7 +611,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                                     Message = $"Order socket {o.Status} payload (recovered fill)"
                                 });
 
-                                if(!state.IsUpdatePending && recoveredStatus == QuantConnect.Orders.OrderStatus.Filled)
+                                if (!state.IsUpdatePending && recoveredStatus == QuantConnect.Orders.OrderStatus.Filled)
                                 {
                                     // Order ist durch den nachgebuchten Fill bereits vollständig
                                     // geschlossen - kein zusätzliches Canceled-Event mehr senden,
@@ -799,6 +797,20 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                                 // pro BrokerId statt gegen removedState.CumulativeFeePaid (lifetime,
                                 // über alle Generationen), analog zum Quantity-Fix oben.
                                 var totalExchangeFee = brokerOrder.Fee ?? 0m;
+                                var feeAsset = brokerOrder.FeeAsset;
+
+                                // Order-REST liefert die Fee nicht (immer 0/null, exchange-übergreifend) -
+                                // die echte Fee steht nur in den Fills der Order, daher hier per REST holen.
+                                if (totalExchangeFee == 0m)
+                                {
+                                    var fillFee = await GetOrderFeeFromFillsAsync(removedState.Order.Symbol, brokerId).ConfigureAwait(false);
+                                    if (fillFee.HasValue)
+                                    {
+                                        totalExchangeFee = fillFee.Value.Fee;
+                                        feeAsset ??= fillFee.Value.FeeAsset;
+                                    }
+                                }
+
                                 var lastKnownFee = OrderState.GetOrZero(removedState.FeePaidByBrokerId, brokerId);
                                 var remainingFee = Math.Max(0m, totalExchangeFee - lastKnownFee);
                                 removedState.FeePaidByBrokerId[brokerId] = totalExchangeFee;
@@ -808,7 +820,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                                     Status = QuantConnect.Orders.OrderStatus.Filled,
                                     FillPrice = brokerOrder.AveragePrice ?? 0,
                                     FillQuantity = remainingToFill,
-                                    OrderFee = new OrderFee(new CashAmount(remainingFee, brokerOrder.FeeAsset ?? SettleAsset)),
+                                    OrderFee = new OrderFee(new CashAmount(remainingFee, feeAsset ?? SettleAsset)),
                                     Message = "Reconciled Fill"
                                 });
                             }
@@ -864,6 +876,5 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             }
         }
 
-        #endregion
     }
 }

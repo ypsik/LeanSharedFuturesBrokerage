@@ -854,7 +854,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     return null;
                 }
 
-                var brokerOrder = statusCheck.Data;
+                SharedFuturesOrder? brokerOrder = statusCheck.Data;
 
                 // 🔥 FIX 3: DER RECONCILER-MORD 🔥
                 // Wenn die Order auf der Börse noch lebt, darf der Reconciler sie nicht anfassen!
@@ -897,7 +897,21 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
                         // FIX 3: Doppelbuchungen der Gebühren verhindern - ebenfalls per-BrokerId
                         // statt gegen removedState.CumulativeFeePaid (lifetime, über alle Generationen).
-                        var totalExchangeFee = brokerOrder.Fee ?? 0m;
+                        var totalExchangeFee = brokerOrder?.Fee ?? 0m;
+                        var feeAsset = brokerOrder?.FeeAsset;
+
+                        // Order-REST liefert die Fee nicht (immer 0/null, exchange-übergreifend) -
+                        // die echte Fee steht nur in den Fills der Order, daher hier per REST holen.
+                        if (totalExchangeFee == 0m)
+                        {
+                            var fillFee = await GetOrderFeeFromFillsAsync(order.Symbol, brokerId).ConfigureAwait(false);
+                            if (fillFee.HasValue)
+                            {
+                                totalExchangeFee = fillFee.Value.Fee;
+                                feeAsset ??= fillFee.Value.FeeAsset;
+                            }
+                        }
+
                         var lastKnownFee = OrderState.GetOrZero(removedState.FeePaidByBrokerId, brokerId);
                         var remainingFee = Math.Max(0m, totalExchangeFee - lastKnownFee);
                         removedState.FeePaidByBrokerId[brokerId] = totalExchangeFee;
@@ -908,7 +922,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                             Status = QuantConnect.Orders.OrderStatus.Filled,
                             FillPrice = brokerOrder.AveragePrice ?? 0,
                             FillQuantity = remainingToFill,
-                            OrderFee = new OrderFee(new CashAmount(remainingFee, brokerOrder.FeeAsset ?? SettleAsset)),
+                            OrderFee = new OrderFee(new CashAmount(remainingFee, feeAsset ?? SettleAsset)),
                             Message = "Immediate Reconcile – Fill"
                         });
                     }
@@ -930,6 +944,38 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             catch (Exception ex)
             {
                 Log.Error($"{Name}.ReconcileOrderImmediateAsync Error for {brokerId}: {ex.Message}");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Holt die Fills (Trades) einer Order per REST und summiert deren Fees. Der Order-Endpoint
+        /// liefert die Fee exchange-übergreifend nicht (immer 0/null), die einzelnen Fills schon.
+        /// Gibt null zurück, wenn keine Fills abrufbar sind (Aufrufer bleibt dann bei seinem bisherigen Wert).
+        /// </summary>
+        private async Task<(decimal Fee, string? FeeAsset)?> GetOrderFeeFromFillsAsync(Symbol symbol, string brokerId)
+        {
+            try
+            {
+                var res = await _orderClient
+                    .GetFuturesOrderTradesAsync(new GetOrderTradesRequest(GetSharedSymbol(symbol), brokerId))
+                    .ConfigureAwait(false);
+
+                if (!res.Success || res.Data == null || !res.Data.Any())
+                {
+                    Log.Trace($"{Name}.GetOrderFeeFromFillsAsync: No fills returned for {symbol.Value} order {brokerId} ({res.Error?.ToString() ?? "empty"}). Fee stays 0.");
+                    return null;
+                }
+
+                var totalFee = res.Data.Sum(t => t.Fee ?? 0m);
+                var asset = res.Data.Select(t => t.FeeAsset).FirstOrDefault(a => !string.IsNullOrEmpty(a));
+
+                Log.Trace($"{Name}.GetOrderFeeFromFillsAsync: {symbol.Value} order {brokerId}: {res.Data.Count()} fill(s), total fee {totalFee} {asset ?? SettleAsset}.");
+                return (totalFee, asset);
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"{Name}.GetOrderFeeFromFillsAsync Error for {brokerId}: {ex.Message}");
                 return null;
             }
         }
