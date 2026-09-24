@@ -107,6 +107,7 @@ Populated dynamically at startup from each exchange's live instrument list (tick
 - No native user-trade stream (`ExchangeSupportsUserTradeStream = false`) — fills handled via the order socket, like AsterDEX
 - ListenKey-based user stream with 45-minute keep-alive loop and automatic reconnect on expiry
 - Hedge mode configurable via job config (`bingx-hedge-mode`), defaults to `true` if unset, with `positionSide` (Long/Short) mapping per side
+- Best bid/ask source configurable via job config (`bingx-use-depth-book-ticker`), defaults to `true`: bid/ask are derived from the `@depth5@100ms` order book stream (`BingxDepthBookTickerAdapter`). Set to `false` to use BingX's native `@bookTicker` stream instead, which delivered ~34-minute-old data on 2026-09-23/24
 - Funding *rate* is not pushed via socket — handled by a dedicated polling loop that fetches the next funding timestamp, sleeps until settlement, then re-fetches rate + next timestamp
 - Funding *fee* settlement pushed via the account-update stream, filtered to `Trigger == "FUNDING_FEE"`
 - Order updates via `CancelReplaceOrderAsync`, which returns a new exchange order ID (cancel+replace under the hood, not a true in-place edit)

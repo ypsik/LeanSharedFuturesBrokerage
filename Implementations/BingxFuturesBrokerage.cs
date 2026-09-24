@@ -42,6 +42,15 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         private bool _isHedgeMode = false;
 
+        /// <summary>
+        /// Quelle fuer Best Bid/Ask (steuert das Verhalten des Book-Ticker-Sockets):
+        /// true (Default)  = `@depth5@100ms` ueber BingxDepthBookTickerAdapter (aktuelle Daten),
+        /// false           = urspruenglicher `@bookTicker`-Stream des BingX-Shared-Clients
+        ///                   (war am 23./24.09.2026 ca. 34 Minuten verzoegert, siehe Adapter-Kommentar).
+        /// Konfiguration ueber Job-Config `bingx-use-depth-book-ticker`.
+        /// </summary>
+        private bool _useDepthBookTicker = true;
+
         public override bool ExchangeSupportsUserTradeStream => false;
         public override decimal MinimumOrderNotionalValue => 2.0m;
 
@@ -51,20 +60,22 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             BingXSocketClient socketClient,
             IDataAggregator aggregator,
             Func<List<Holding>>? getHoldingsFunc = null,
-            bool isHedgeMode = true)
+            bool isHedgeMode = true,
+            bool useDepthBookTicker = true)
             : base(algorithm, "bingx")
         {
             _restClient = restClient;
             _socketClient = socketClient;
             _socketClientExData = new BingXSocketClient();
             _isHedgeMode = isHedgeMode;
+            _useDepthBookTicker = useDepthBookTicker;
 
             PopulateSPDB();
 
             InitializeBase(
                 restClient.PerpetualFuturesApi.SharedClient,
                 restClient.PerpetualFuturesApi.SharedClient,
-                new BingxDepthBookTickerAdapter(socketClient.PerpetualFuturesApi.SharedClient, socketClient.PerpetualFuturesApi),
+                CreateBookTickerSocket(socketClient),
                 socketClient.PerpetualFuturesApi.SharedClient,
                 socketClient.PerpetualFuturesApi.SharedClient,
                 null,// user trade stream wird von BingX nicht unterstützt, daher null
@@ -141,10 +152,17 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 _isHedgeMode = hedgeModeParsed;
             }
 
+            // Book-Ticker-Quelle aus Job-Config lesen, Fallback bleibt true (Depth-Stream)
+            if (job.BrokerageData.TryGetValue("bingx-use-depth-book-ticker", out var useDepthStr)
+                && bool.TryParse(useDepthStr, out var useDepthParsed))
+            {
+                _useDepthBookTicker = useDepthParsed;
+            }
+
             InitializeBase(
                 _restClient.PerpetualFuturesApi.SharedClient,
                 _restClient.PerpetualFuturesApi.SharedClient,
-                new BingxDepthBookTickerAdapter(_socketClient.PerpetualFuturesApi.SharedClient, _socketClient.PerpetualFuturesApi),
+                CreateBookTickerSocket(_socketClient),
                 _socketClient.PerpetualFuturesApi.SharedClient,
                 _socketClient.PerpetualFuturesApi.SharedClient,
                 null, // user trade stream wird von BingX nicht unterstützt, daher null
@@ -153,6 +171,24 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 aggregator,
                 _getHoldingsFunc
             );
+        }
+
+        /// <summary>
+        /// Liefert den Book-Ticker-Socket gemaess `_useDepthBookTicker`: Depth-Adapter (Default)
+        /// oder den originalen `@bookTicker`-Stream des BingX-Shared-Clients.
+        /// </summary>
+        private IBookTickerSocketClient CreateBookTickerSocket(BingXSocketClient socketClient)
+        {
+            var shared = socketClient.PerpetualFuturesApi.SharedClient;
+
+            if (_useDepthBookTicker)
+            {
+                Log.Trace($"{Name}: book ticker source = @depth5@100ms (bingx-use-depth-book-ticker=true).");
+                return new BingxDepthBookTickerAdapter(shared, socketClient.PerpetualFuturesApi);
+            }
+
+            Log.Trace($"{Name}: book ticker source = @bookTicker (bingx-use-depth-book-ticker=false).");
+            return shared;
         }
 
         protected override string NormalizeSymbol(string rawSymbol)
