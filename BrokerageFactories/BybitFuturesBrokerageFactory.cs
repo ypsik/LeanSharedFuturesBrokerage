@@ -1,7 +1,5 @@
-﻿using BingX.Net;
-using BingX.Net.Clients;
-using HyperLiquid.Net;
-using HyperLiquid.Net.Clients;
+﻿using Bybit.Net;
+using Bybit.Net.Clients;
 using QuantConnect;
 using QuantConnect.Brokerages;
 using QuantConnect.Configuration;
@@ -18,52 +16,45 @@ using System.Text;
 
 namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
 {
-    public class BingxFuturesBrokerageFactory : BrokerageFactory
+    public class BybitFuturesBrokerageFactory : BrokerageFactory
     {
-        public BingxFuturesBrokerageFactory() : base(typeof(BingxFuturesBrokerage))
+        public BybitFuturesBrokerageFactory() : base(typeof(BybitFuturesBrokerage))
         {
-            Market.Add("bingx", 904);
-
-            var mhdb = MarketHoursDatabase.FromDataFolder();
-            var alwaysOpen = SecurityExchangeHours.AlwaysOpen(TimeZones.Utc);
-
-            mhdb.SetEntry("bingx", null, SecurityType.CryptoFuture, alwaysOpen, TimeZones.Utc);
         }
 
         public override Dictionary<string, string> BrokerageData => new Dictionary<string, string>
         {
-            { "bingx-api-key", Config.Get("bingx-api-key") },
-            { "bingx-api-secret",  Config.Get("bingx-api-secret")  },
-            { "bingx-hedge-mode", Config.Get("bingx-hedge-mode", "false") },
-            { "bingx-use-depth-book-ticker", Config.Get("bingx-use-depth-book-ticker", "true") },
+            { "bybit-api-key", Config.Get("bybit-api-key") },
+            { "bybit-api-secret",  Config.Get("bybit-api-secret")  },
+            { "bybit-hedge-mode", Config.Get("bybit-hedge-mode", "false") },
         };
 
         public override IBrokerageModel GetBrokerageModel(IOrderProvider orderProvider)
         {
-            return new HyperliquidBrokerageModel(AccountType.Margin);
+            return new BybitBrokerageModel(AccountType.Margin);
         }
 
         public override IBrokerage CreateBrokerage(LiveNodePacket job, IAlgorithm algorithm)
         {
             var errors = new List<string>();
 
-            var address = Read<string>(job.BrokerageData, "bingx-api-key", errors);
-            var secret = Read<string>(job.BrokerageData, "bingx-api-secret", errors);
+            var address = Read<string>(job.BrokerageData, "bybit-api-key", errors);
+            var secret = Read<string>(job.BrokerageData, "bybit-api-secret", errors);
 
             if (errors.Any())
                 throw new ArgumentException(string.Join(Environment.NewLine, errors));
 
-            errors = [];
+            errors = new List<string>();
 
-            var credentials = new BingXCredentials(address, secret);
+            var credentials = new BybitCredentials(address, secret);
 
-            var restClient = new BingXRestClient(options =>
+            var restClient = new BybitRestClient(options =>
             {
                 options.ApiCredentials = credentials;
                 options.OutputOriginalData = true;
             });
 
-            var socketClient = new BingXSocketClient(options =>
+            var socketClient = new BybitSocketClient(options =>
             {
                 options.ApiCredentials = credentials;
                 options.DelayAfterConnect = TimeSpan.FromMilliseconds(500);
@@ -81,10 +72,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
 
             algorithm.Settings.DatabasesRefreshPeriod = TimeSpan.FromDays(36500);
 
-            var hedgeMode = Config.GetBool("bingx-hedge-mode", false);
-            var useDepthBookTicker = Config.GetBool("bingx-use-depth-book-ticker", true);
+            var hedgeMode = Config.GetBool("bybit-hedge-mode", false);
 
-            var brokerage = new BingxFuturesBrokerage(algorithm, restClient, socketClient, aggregator, getHoldingsFunc, hedgeMode, useDepthBookTicker);
+            var brokerage = new BybitFuturesBrokerage(algorithm, restClient, socketClient, aggregator, getHoldingsFunc, hedgeMode);
 
             // Register with MEF Composer so Lean reuses this instance when
             // resolving IDataQueueHandler instead of trying to construct a new one
