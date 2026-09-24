@@ -518,10 +518,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             public string Exchange => _orderBookClient.Exchange;
             public TradingMode[] SupportedTradingModes => _orderBookClient.SupportedTradingModes;
             public bool Authenticated => _orderBookClient.Authenticated;
-//            public SharedTransport Transport => _orderBookClient.Transport;
-//            public IReadOnlyCollection<CapabilityOptions> Capabilities => _orderBookClient.Capabilities;
-//            public Task<TResult> WithRateLimitAdmissionAsync<TResult>(RateLimitAdmission admission, Func<Task<TResult>> operation)
-                //=> _orderBookClient.WithRateLimitAdmissionAsync(admission, operation);
+            public SharedTransport Transport => _orderBookClient.Transport;
+            public IReadOnlyCollection<CapabilityOptions> Capabilities => _orderBookClient.Capabilities;
+            public Task<TResult> WithRateLimitAdmissionAsync<TResult>(RateLimitAdmission admission, Func<Task<TResult>> operation)
+                => _orderBookClient.WithRateLimitAdmissionAsync(admission, operation);
             public SharedClientInfo Discover() => _orderBookClient.Discover();
             public string FormatSymbol(string baseAsset, string quoteAsset, TradingMode tradingMode, DateTime? deliverDate = null)
                 => _orderBookClient.FormatSymbol(baseAsset, quoteAsset, tradingMode, deliverDate);
