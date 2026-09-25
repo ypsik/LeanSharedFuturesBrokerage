@@ -796,19 +796,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                                 // FIX: Doppelbuchungen der Gebühren verhindern - jetzt ebenfalls
                                 // pro BrokerId statt gegen removedState.CumulativeFeePaid (lifetime,
                                 // über alle Generationen), analog zum Quantity-Fix oben.
-                                var totalExchangeFee = brokerOrder.Fee ?? 0m;
-                                var feeAsset = brokerOrder.FeeAsset;
-
-                                // Order-REST liefert die Fee nicht (immer 0/null, exchange-übergreifend) -
-                                // die echte Fee steht nur in den Fills der Order, daher hier per REST holen.
-                                if (totalExchangeFee == 0m)
+                                var totalExchangeFee = 0m;
+                                string? feeAsset = null;
+                                if (await GetOrderFeeFromFillsAsync(removedState.Order.Symbol, brokerId).ConfigureAwait(false) is { } fillFee)
                                 {
-                                    var fillFee = await GetOrderFeeFromFillsAsync(removedState.Order.Symbol, brokerId).ConfigureAwait(false);
-                                    if (fillFee.HasValue)
-                                    {
-                                        totalExchangeFee = fillFee.Value.Fee;
-                                        feeAsset ??= fillFee.Value.FeeAsset;
-                                    }
+                                    totalExchangeFee = fillFee.Fee;
+                                    feeAsset = fillFee.FeeAsset;
                                 }
 
                                 var lastKnownFee = OrderState.GetOrZero(removedState.FeePaidByBrokerId, brokerId);
