@@ -586,7 +586,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     Log.Trace($"{Name}.UpdateOrder: Exchange rejected in-place modify (would have matched immediately). " +
                               $"Falling back to Cancel+Replace workaround for {order.Symbol.Value}.");
 
-                    return ExecuteReplaceWorkaround(order, price, quantity.Value, activeBrokerId, state);
+                    return ExecuteReplaceWorkaround(order, price, activeBrokerId, state);
                 }
 
                 if (_orderStateManager.TryGetByExchangeId(activeBrokerId, out var errorState))
@@ -675,7 +675,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         /// IsUpdatePending bleibt bis zum Abschluss true, damit ein eventuell nachgeliefertes
         /// Cancel-Event für die alte (jetzt tote) BrokerId unterdrückt wird.
         /// </summary>
-        private bool ExecuteReplaceWorkaround(Order order, decimal price, decimal quantity, string activeBrokerId, OrderState? state)
+        private bool ExecuteReplaceWorkaround(Order order, decimal price, string activeBrokerId, OrderState? state)
         {
             // state wird von UpdateOrder bereits VOR dem REST-Call erfasst (Referenztyp). Falls die
             // Order zwischen Reprice-Request und Fehlerauswertung über den Trade-/Order-Socket komplett
@@ -756,6 +756,24 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 {
                     Log.Trace($"{Name}.ExecuteReplaceWorkaround: Old order {activeBrokerId} canceled cleanly, proceeding to replace for {order.Symbol.Value}.");
                 }
+            }
+
+            // FIX (HYPE-Overfill-Incident 2026-09-28): quantity kam frueher als Parameter unveraendert
+            // aus UpdateOrder (state.Remaining VOR dem Modify-Versuch/Cancel berechnet), obwohl
+            // zwischen dieser Berechnung und der (bei RequiresExplicitCancelBeforeReplace == true)
+            // gerade erst bestaetigten Order-Terminierung ueber den Trade-Socket bereits Fills der
+            // alten BrokerId eingetroffen sein koennen (auch wenn cancelRes.Success == true zurueckkam
+            // - das ist bei Bitget keine Garantie fuer "keine Fills mehr"). Deshalb kein Parameter mehr
+            // (zu leicht mit einem stale Wert zu verwechseln) - Menge wird hier, unmittelbar vor dem
+            // Request-Build, immer frisch aus state.Remaining gelesen.
+            var quantity = state.Remaining;
+
+            if (quantity == 0m)
+            {
+                Log.Trace($"{Name}.ExecuteReplaceWorkaround: Remaining quantity for {order.Symbol.Value} is 0. " +
+                          "Nothing left to replace.");
+                state.IsUpdatePending = false;
+                return true;
             }
 
             var newClientOrderId = GenerateClientId(order.Id);
