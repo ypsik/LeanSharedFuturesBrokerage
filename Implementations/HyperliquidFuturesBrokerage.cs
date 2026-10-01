@@ -460,7 +460,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         protected override async Task<HttpResult<SharedId>> ExecutePlaceOrderAsync(PlaceFuturesOrderRequest request)
         {
-            if(request.Symbol == null)
+            if (request.Symbol == null)
             {
                 Log.Error($"{Name}.PlaceOrder error: symbol not provided");
                 return new HttpResult<SharedId>(Name, null, ArgumentError.Missing("Symbol"));
@@ -501,6 +501,25 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
             var activeExchangeId = order.BrokerId.Last();
 
+            // Hyperliquid legt bei jedem Modify eine NEUE Order mit neuer oid an. Die cloid wird nur
+            // übernommen, wenn sie im Modify als "c" mitgeschickt wird (newClientOrderId) - sonst hat
+            // die neue Order keine cloid (Order-Update und Fill kommen mit ClientOrderId='' zurück).
+            // Muster wie bei Bitget: neue ClientId erzeugen und als Alias auf denselben State
+            // registrieren, damit Updates/Fills der neuen Order wieder zugeordnet werden.
+            // HL erwartet "0x" + 32 Hex-Zeichen und liefert die cloid so zurück. HyperLiquid.Net
+            // ergänzt das Präfix nur beim Platzieren, NICHT beim Modify - deshalb hier selbst.
+            var newClientOrderId = GenerateClientId(order.Id);
+
+            if (_orderStateManager.TryGetByExchangeId(activeExchangeId, out var state))
+            {
+                _orderStateManager.TryAdd(newClientOrderId, state);
+            }
+            else
+            {
+                Log.Error($"{Name}.Update error: old state missing for brokerId {activeExchangeId}");
+                return new HttpResult<SharedId>(Name, null, new InvalidOperationError("old state missing"));
+            }
+
             var res = await _socketClient.FuturesApi.Trading.EditOrderAsync(
                           symbol: ticker,
                           orderId: long.Parse(activeExchangeId),
@@ -512,10 +531,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                           quantity: Math.Abs(quantity.Value),
                           price: price,
                           timeInForce: HyperLiquid.Net.Enums.TimeInForce.GoodTillCanceled,
+                          newClientOrderId: newClientOrderId,
                           vaultAddress: _vaultAdress);
 
             if (!res.Success)
             {
+                _orderStateManager.RemoveAlias(newClientOrderId);
+
                 Log.Error($"{Name}.Update error: {res.Error} | Ticker: {ticker} | Price: {price}");
                 return new HttpResult<SharedId>(Name, null, res.Error);
             }
@@ -529,7 +551,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             if (request == null)
                 throw new ArgumentNullException("request");
 
-            if(request.Symbol == null)
+            if (request.Symbol == null)
                 throw new ArgumentNullException("request.Symbol");
 
             var res = await _socketClient.FuturesApi.Trading.CancelOrderAsync(
