@@ -254,51 +254,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             // =======================================================
             // 🔥 UNZERSTÖRBARER BATCH-FIX: Unabhängig von ClientOrderId
             // =======================================================
-            var newOrderUpdates = update.Data.Where(o =>
-                o.Status == SharedOrderStatus.Open ||
-                o.Status == SharedOrderStatus.Filled).ToList();
 
-            var cancelUpdates = update.Data.Where(o => o.Status == SharedOrderStatus.Canceled).ToList();
-
-            var cancelsToDrop = new HashSet<SharedFuturesOrder>();
-
-            if (newOrderUpdates.Any() && cancelUpdates.Any())
-            {
-                foreach (var newPayload in newOrderUpdates)
-                {
-                    // Match rein über Symbol und exakte Exchange-Zeitstempel
-                    var match = cancelUpdates.FirstOrDefault(c =>
-                        c.Symbol == newPayload.Symbol &&
-                        c.UpdateTime == newPayload.UpdateTime);
-
-                    if (match != null)
-                    {
-                        // Fall A: NewPayload hat KEINE ClientOrderId (Der HL-Standardfehler)
-                        // -> Wir holen sie uns von der alten ID aus dem State-Manager
-                        if (string.IsNullOrEmpty(newPayload.ClientOrderId))
-                        {
-                            if (_orderStateManager.TryGetByExchangeId(match.OrderId, out var state))
-                            {
-                                Log.Trace($"{Name}: Multi-Update Match (Naked)! Injecting ClientOrderId {state.ClientOrderId} into new {newPayload.Status} Order {newPayload.OrderId}");
-                                newPayload.ClientOrderId = state.ClientOrderId;
-                                cancelsToDrop.Add(match); // Altes Cancel vernichten
-                            }
-                        }
-                        // Fall B: NewPayload HAT bereits eine ClientOrderId
-                        // -> Perfekt, aber wir müssen das alte Cancel TROTZDEM vernichten, 
-                        // damit es in der Schleife keinen Schaden anrichtet!
-                        else
-                        {
-                            Log.Trace($"{Name}: Multi-Update Match (Identified)! Dropping redundant Cancel for old ID {match.OrderId}");
-                            cancelsToDrop.Add(match); // Altes Cancel trotzdem vernichten!
-                        }
-                    }
-                }
-            }
-
-            var cleanPayload = update.Data.Where(o => !cancelsToDrop.Contains(o));
-
-            foreach (var o in cleanPayload)
+            foreach (var o in update.Data)
             {
                 try
                 {
@@ -315,7 +272,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                               $"QtyFilled='{o.QuantityFilled?.QuantityInBaseAsset ?? o.QuantityFilled?.QuantityInContracts ?? 0m}', " +
                               $"Price='{o.OrderPrice}'" +
                               (!ExchangeSupportsUserTradeStream
-                                  ? $", Fee='{o.Fee}', FeeAsset='{o.FeeAsset}', AvgPrice='{o.AveragePrice}', LastTradeFee='{o.LastTrade?.Fee}'"
+                                  ? $", AvgPrice='{o.AveragePrice}'"
                                   : ""));
 
                     if (string.IsNullOrEmpty(o.OrderId)) continue;
