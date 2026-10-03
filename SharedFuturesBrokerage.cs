@@ -32,7 +32,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         protected IFuturesOrderManagementSocketClient? _orderManagementSocket;
         protected IUserTradeSocketClient? _userTradeSocket;
         protected IKlineRestClient _klineClient;
-        protected IFundingRateRestClient _fundingRateClient;
+        protected IFundingRateRestClient? _fundingRateClient;
         protected Func<List<Holding>>? _getHoldingsFunc;
 
         protected readonly SymbolPropertiesDatabase _spdb = SymbolPropertiesDatabase.FromDataFolder();
@@ -78,7 +78,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             IFuturesOrderSocketClient orderSocket,
             ITradeSocketClient tradeSocket,
             IUserTradeSocketClient? userTradeSocket,
-            IFundingRateRestClient fundingRateClient,
+            IFundingRateRestClient? fundingRateClient,
             IKlineRestClient klineClient,
             IDataAggregator aggregator, // <-- Der kommt jetzt an
             Func<List<Holding>>? getHoldingsFunc = null,
