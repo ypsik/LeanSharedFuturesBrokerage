@@ -126,12 +126,17 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         // auf true zu setzen.
         public override bool ExchangeModifiesOrdersInPlace => false;
 
-        // Kein separater Cancel-vor-Replace-Schritt noetig: entweder EditOrderAsync gelingt
-        // atomar (Happy Path, s. ExecuteUpdateOrderAsync), oder es schlaegt fehl - und laut Doku
-        // ist die Order dann bereits storniert (s. IsRejectedUpdateError unten), ein erneutes
-        // explizites Cancel vor dem Replace waere in diesem Fall ueberfluessig und wuerde nur
-        // unnoetig gegen eine bereits tote Order laufen.
-        protected override bool RequiresExplicitCancelBeforeReplace => false;
+        // false, solange CoinW.Net EditOrderAsync die Order-ID nicht sendet (s. ExecuteUpdateOrderAsync).
+        private static readonly bool NativeEditEnabled = false;
+
+        // FIX (CoinW-Doppelausfuehrung 2026-10-05): Explizites Cancel VOR dem Replace ist zwingend.
+        // CoinW.Net 3.6.0 sendet in EditOrderAsync die Order-ID nie mit (Parameter "id" fehlt) -> jeder
+        // Edit scheitert mit "9606 参数错误:originId", und bei diesem Parameterfehler wird die alte
+        // Order NICHT storniert (nur bei fachlichen Fehlern wie Leverage/Margin laut Doku). Ohne
+        // Cancel lagen alte und neue Order gleichzeitig im Buch und beide wurden gefuellt.
+        // Die Basisklasse cancelt jetzt zuerst, prueft den Status per Reconcile und platziert nur bei
+        // bestaetigtem Canceled neu (bei Filled/unklar bricht sie ab).
+        protected override bool RequiresExplicitCancelBeforeReplace => true;
 
         /// <summary>
         /// Hyperliquid-Pattern (siehe Basisklassen-Kommentar zu IsRejectedUpdateError): CoinW's
@@ -398,6 +403,18 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         protected override async Task<HttpResult<SharedId>> ExecuteUpdateOrderAsync(
             Order order, decimal price, decimal? quantity)
         {
+            // CoinW.Net 3.6.0 Bug: EditOrderAsync sendet den Parameter "id" (Order-ID) nicht mit, der
+            // Request scheitert immer mit 9606. Solange das so ist, wird der Edit-Request uebersprungen
+            // und direkt ein Fehler geliefert -> UpdateOrder faellt via IsRejectedUpdateError (=true)
+            // in ExecuteReplaceWorkaround, der mit RequiresExplicitCancelBeforeReplace=true zuerst
+            // cancelt und nur bei bestaetigtem Cancel neu platziert. Nach einem Library-Fix auf true
+            // setzen, um den atomaren Server-Edit wieder zu nutzen.
+            if (!NativeEditEnabled)
+            {
+                return new HttpResult<SharedId>(Name, null,
+                    new InvalidOperationError("CoinW native edit disabled (CoinW.Net EditOrderAsync omits order id) - using cancel+replace"));
+            }
+
             if (!quantity.HasValue)
             {
                 Log.Error("CoinW update error: quantity not provided");
