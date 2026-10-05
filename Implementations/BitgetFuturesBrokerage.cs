@@ -168,11 +168,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         public override decimal MinimumOrderNotionalValue => 5m;
         protected override int? FundingRolloverHours => null;
 
-        protected override SharedPositionSide? SharedPositionSide => _isHedgeMode ? CryptoExchange.Net.SharedApis.SharedPositionSide.Long : null;
+        protected override bool IsHedgeMode => _isHedgeMode;
 
-        protected override ExchangeParameters GetPlaceFuturesOrderExchangeParameters(Symbol symbol, SharedOrderSide side)
+        protected override ExchangeParameters GetPlaceFuturesOrderExchangeParameters(Symbol symbol, SharedOrderSide side, SharedPositionSide? positionSide)
         {
-            var parameters = base.GetPlaceFuturesOrderExchangeParameters(symbol, side);
+            var parameters = base.GetPlaceFuturesOrderExchangeParameters(symbol, side, positionSide);
             parameters.AddValue(new ExchangeParameter("Bitget", "ProductType", "UsdtFutures"));
             parameters.AddValue(new ExchangeParameter("Bitget", "MarginAsset", SettleAsset));
             return parameters;

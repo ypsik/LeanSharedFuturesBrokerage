@@ -9,7 +9,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.Orders
     /// selbstständig an der BBO nach, unabhängig von der Algorithmus-Loop. Portiert 1:1 aus der
     /// bisherigen strategy-seitigen Reprice-Logik (AdaptiveMacroFlowAlgorithm.Buy/Sell/Reprice).
     /// </summary>
-    public class ChaseOrderProperties : OrderProperties
+    public class ChaseOrderProperties : FuturesOrderProperties
     {
         /// <summary>
         /// 0 = Mid-Preis, 1 = am Bid/Ask selbst. Identisch zur bisherigen "aggression" in

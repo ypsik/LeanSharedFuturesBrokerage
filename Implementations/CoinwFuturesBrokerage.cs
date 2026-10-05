@@ -1,4 +1,4 @@
-using CoinW.Net;
+﻿using CoinW.Net;
 using CoinW.Net.Clients;
 using CoinW.Net.Enums;
 using CoinW.Net.Objects;
@@ -47,19 +47,16 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         private bool _fundingUpdateConnected = false;
         // CoinW hat kein echtes One-Way-Mode-Konzept - Long und Short sind laut Doku strukturell
-        // immer getrennte Buecher (kein "Net"/"Both" wie bei OKX/BingX).
-        // V1-SCOPE: fix Long (Buy oeffnet/erweitert die Long-Position, Sell schliesst/reduziert sie).
-        // V2-TODO: Short-Support geplant - braucht dann echtes Bestands-basiertes PositionSide-
-        // Routing (aktuelles Holding pro Symbol ansehen: Buy bei bestehendem Short -> Short
-        // reduzieren (PositionSide=Short); Buy bei flach/Long -> Long eroeffnen/erweitern
-        // (PositionSide=Long); analog fuer Sell). Betrifft SharedPositionSide unten UND
-        // ExecuteUpdateOrderAsync's `side`-Variable (beide aktuell hart auf Long).
+        // immer getrennte Buecher (kein "Net"/"Both" wie bei OKX/BingX), daher IsHedgeMode immer true.
+        // Die Positions-Seite kommt aus den Order-Properties der Strategie (FuturesOrderProperties.
+        // PositionSide, ohne Angabe Long) und wird in der Basisklasse aufgeloest (TryResolvePositionSide).
+        // Buy+Long bzw. Sell+Short oeffnet, alles andere schliesst (gleiche Regel wie in CoinW.Net).
 
         protected override int? FundingRolloverHours => null; // settledPeriod variiert pro Symbol (4h/8h), kein fixer globaler Wert - Rollover-Erkennung läuft rein über den Socket-Callback, s.u.
 
         protected override SharedMarginMode? SharedMarginMode => CryptoExchange.Net.SharedApis.SharedMarginMode.Cross;
 
-        protected override SharedPositionSide? SharedPositionSide => CryptoExchange.Net.SharedApis.SharedPositionSide.Long;
+        protected override bool IsHedgeMode => true;
 
         /// <summary>
         /// CoinW's Shared-Client verlangt bei Orders, die eine Position oeffnen, zwingend
@@ -74,19 +71,18 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         /// zwingend den ExchangeParameter "PositionId" (sonst ArgumentError.Missing("PositionId")).
         /// Ob eine Order ein Close ist, entscheidet CoinW.Net rein aus Order-Seite und PositionSide
         /// (Buy+Long bzw. Sell+Short oeffnet, alles andere schliesst) - nicht aus dem Positionsbestand.
-        /// Dieselbe Bedingung wird hier verwendet, mit der PositionSide aus SharedPositionSide (aktuell
-        /// fix Long), damit der Hook bei spaeterem Short-Support automatisch mitzieht.
+        /// Dieselbe Bedingung wird hier verwendet, mit der aufgeloesten PositionSide der Order (aus den
+        /// Order-Properties der Strategie, ohne Angabe Long).
         /// Nur bei einem Close wird die PositionId der Position dieser Seite per REST (GetPositionsAsync)
         /// geholt. Bewusst ohne Cache - eine veraltete ID (Position geschlossen und neu eroeffnet) waere
         /// schlimmer als ein zusaetzlicher REST-Call pro Close-Order. Open-Orders brauchen keine PositionId.
         /// Bei mehreren Positionen derselben Seite (Split-Modus) wird die mit der groessten Menge genommen
         /// (Warnung im Log); im Merged-Modus gibt es pro Symbol und Seite genau eine.
         /// </summary>
-        protected override ExchangeParameters GetPlaceFuturesOrderExchangeParameters(Symbol symbol, SharedOrderSide side)
+        protected override ExchangeParameters GetPlaceFuturesOrderExchangeParameters(Symbol symbol, SharedOrderSide side, SharedPositionSide? positionSide)
         {
-            var parameters = base.GetPlaceFuturesOrderExchangeParameters(symbol, side);
+            var parameters = base.GetPlaceFuturesOrderExchangeParameters(symbol, side, positionSide);
 
-            var positionSide = SharedPositionSide;
             var isOpen = (side == SharedOrderSide.Buy && positionSide == CryptoExchange.Net.SharedApis.SharedPositionSide.Long)
                       || (side == SharedOrderSide.Sell && positionSide == CryptoExchange.Net.SharedApis.SharedPositionSide.Short);
             if (isOpen)
@@ -395,14 +391,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         ///     Cancel noetig da die alte laut Doku schon weg ist) statt nur passiv zu reconcilen.
         ///
         /// CoinW hat kein echtes One-Way-Mode-Konzept (Long/Short strukturell immer getrennte
-        /// Buecher, kein "Net"/"Both"). V1-SCOPE: fix Long (s. SharedPositionSide oben) - direction/
-        /// side ist daher IMMER Long, unabhaengig von order.Direction: eine Buy-Order erweitert die
-        /// Long-Position, eine Sell-Order reduziert/schliesst sie, aber in beiden Faellen ist das
-        /// betroffene Buch dasselbe (Long). Direction==Buy->Long, Direction==Sell->Short waere hier
-        /// falsch gewesen (siehe Diskussion) - eine Sell-Order zum Schliessen einer Long-Position
-        /// haette damit faelschlich eine neue Short-Position eroeffnet statt die Long-Position zu
-        /// reduzieren. V2-TODO: bei Short-Support muss `side` hier ebenso wie SharedPositionSide auf
-        /// Bestands-basiertes Routing umgestellt werden.
+        /// Buecher, kein "Net"/"Both"). Das Buch (side) wird von der Strategie ueber
+        /// FuturesOrderProperties.PositionSide vorgegeben (Default Long), nicht aus order.Direction
+        /// abgeleitet: eine Sell-Order kann eine Long-Position schliessen.
         /// </summary>
         protected override async Task<HttpResult<SharedId>> ExecuteUpdateOrderAsync(
             Order order, decimal price, decimal? quantity)
@@ -430,9 +421,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             var sharedQty = ToExchangeQuantity(order.Symbol, Math.Abs(quantity.Value), out _);
             var contractQuantity = sharedQty.QuantityInContracts ?? 0m;
 
-            // Immer Long: CoinW handeln wir ausschliesslich long (s. SharedPositionSide), das
-            // betroffene Buch aendert sich nie, egal ob die Order gerade oeffnet oder schliesst.
-            var side = CoinW.Net.Enums.PositionSide.Long;
+            // Buch (Long/Short) kommt von der Strategie (FuturesOrderProperties.PositionSide),
+            // Default Long - gleiche Aufloesung wie beim Placen.
+            TryResolvePositionSide(order, out var resolvedPositionSide, out _);
+            var side = resolvedPositionSide == CryptoExchange.Net.SharedApis.SharedPositionSide.Short
+                ? CoinW.Net.Enums.PositionSide.Short
+                : CoinW.Net.Enums.PositionSide.Long;
 
             // Leverage laut Doku nicht aenderbar (sonst Error 9081 + Order storniert) - aktuell
             // am Security konfigurierten Wert unveraendert erneut mitschicken.

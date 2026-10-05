@@ -40,7 +40,41 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         /// </summary>
         public virtual bool ExchangeSupportsUserTradeStream => true;
         protected virtual SharedMarginMode? SharedMarginMode => null;
-        protected virtual SharedPositionSide? SharedPositionSide => null;
+
+        /// <summary>
+        /// Ob die Exchange/der Account im Hedge-Modus laeuft (getrennte Long-/Short-Buecher). Default
+        /// false (One-Way). Exchanges mit konfigurierbarem Hedge-Modus (OKX, BingX, Bitget, Aster, Bybit)
+        /// ueberschreiben das mit ihrem Config-Wert; CoinW kennt nur Hedge und liefert immer true.
+        /// </summary>
+        protected virtual bool IsHedgeMode => false;
+
+        /// <summary>
+        /// Bestimmt die Positions-Seite fuer die Exchange-Requests aus den Order-Properties der Strategie
+        /// (<see cref="Orders.FuturesOrderProperties.PositionSide"/>):
+        /// - Hedge-Modus: die angegebene Seite, ohne Angabe Long.
+        /// - One-Way-Modus: immer null (Long wird ignoriert); Short ist dort ein Fehler.
+        /// </summary>
+        protected bool TryResolvePositionSide(Order order, out SharedPositionSide? positionSide, out string? error)
+        {
+            var requested = (order.Properties as Orders.FuturesOrderProperties)?.PositionSide;
+            error = null;
+
+            if (!IsHedgeMode)
+            {
+                positionSide = null;
+                if (requested == Orders.FuturesPositionSide.Short)
+                {
+                    error = $"PositionSide Short requested for {order.Symbol.Value}, but {Name} is not in hedge mode.";
+                    return false;
+                }
+                return true;
+            }
+
+            positionSide = requested == Orders.FuturesPositionSide.Short
+                ? SharedPositionSide.Short
+                : SharedPositionSide.Long;
+            return true;
+        }
 
         #region Quantity Unit Conversion
 
@@ -170,6 +204,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
 
         public override bool PlaceOrder(Order order)
         {
+            if (!TryResolvePositionSide(order, out var positionSide, out var positionSideError))
+            {
+                Log.Error($"{Name}.PlaceOrder({order.Symbol.Value}): {positionSideError}");
+                OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Warning, "PlaceOrder", positionSideError!));
+                return false;
+            }
+
             decimal executionQuantity = order.Quantity;
 
             if (MinimumOrderNotionalValue > 0m)
@@ -242,8 +283,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             {
                 Price = (order as LimitOrder)?.LimitPrice,
                 ClientOrderId = clientOrderId,
-                ExchangeParameters = GetPlaceFuturesOrderExchangeParameters(order.Symbol, executionQuantity > 0 ? SharedOrderSide.Buy : SharedOrderSide.Sell),
-                PositionSide = SharedPositionSide,
+                ExchangeParameters = GetPlaceFuturesOrderExchangeParameters(order.Symbol, executionQuantity > 0 ? SharedOrderSide.Buy : SharedOrderSide.Sell, positionSide),
+                PositionSide = positionSide,
                 MarginMode = SharedMarginMode,
                 Leverage = GetLeverage(order.Symbol)
             };
@@ -618,11 +659,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         }
 
         /// <summary>
-        /// ExchangeParameters für PlaceFuturesOrderRequest, pro Symbol und Order-Seite. Standard: leer.
-        /// Exchanges, die Parameter brauchen, die vom Symbol/der Seite abhängen (z.B. CoinW PositionId
+        /// ExchangeParameters für PlaceFuturesOrderRequest, pro Symbol, Order-Seite und Positions-Seite.
+        /// Standard: leer. Exchanges, die Parameter brauchen, die davon abhängen (z.B. CoinW PositionId
         /// beim Schließen), überschreiben das.
         /// </summary>
-        protected virtual ExchangeParameters GetPlaceFuturesOrderExchangeParameters(Symbol symbol, SharedOrderSide side) => new ExchangeParameters();
+        protected virtual ExchangeParameters GetPlaceFuturesOrderExchangeParameters(Symbol symbol, SharedOrderSide side, SharedPositionSide? positionSide) => new ExchangeParameters();
 
         /// <summary>
         /// Leverage für PlaceFuturesOrderRequest.Leverage. Standard: null (nicht gesetzt). Exchanges,
@@ -699,6 +740,15 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             if (state == null)
             {
                 Log.Error($"{Name}.ExecuteReplaceWorkaround: Old state for {activeBrokerId} not found. Aborting workaround.");
+                return false;
+            }
+
+            // Dieselben Order-Properties wie beim ersten Platzieren (dort bereits geprueft) - Fehler hier
+            // ist praktisch ausgeschlossen, wird aber vor dem Cancel abgefangen statt danach.
+            if (!TryResolvePositionSide(order, out var positionSide, out var positionSideError))
+            {
+                Log.Error($"{Name}.ExecuteReplaceWorkaround({order.Symbol.Value}): {positionSideError}");
+                state.IsUpdatePending = false;
                 return false;
             }
 
@@ -806,8 +856,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             {
                 Price = price,
                 ClientOrderId = newClientOrderId,
-                ExchangeParameters = GetPlaceFuturesOrderExchangeParameters(order.Symbol, quantity > 0 ? SharedOrderSide.Buy : SharedOrderSide.Sell),
-                PositionSide = SharedPositionSide,
+                ExchangeParameters = GetPlaceFuturesOrderExchangeParameters(order.Symbol, quantity > 0 ? SharedOrderSide.Buy : SharedOrderSide.Sell, positionSide),
+                PositionSide = positionSide,
                 MarginMode = SharedMarginMode,
                 Leverage = GetLeverage(order.Symbol)
             };

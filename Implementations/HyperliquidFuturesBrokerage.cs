@@ -441,9 +441,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             Log.Trace($"{Name}: SPDB Fix for {symbol.Value} - TickSize: {tickSize} (Price: {oraclePrice})");
         }
         /*
-        protected override ExchangeParameters GetPlaceFuturesOrderExchangeParameters(Symbol symbol, SharedOrderSide side)
+        protected override ExchangeParameters GetPlaceFuturesOrderExchangeParameters(Symbol symbol, SharedOrderSide side, SharedPositionSide? positionSide)
         {
-            var parameters = base.GetPlaceFuturesOrderExchangeParameters(symbol, side);
+            var parameters = base.GetPlaceFuturesOrderExchangeParameters(symbol, side, positionSide);
             if (!String.IsNullOrEmpty(_vaultAdress))
                 parameters.AddValue(new ExchangeParameter("Hyperliquid", "vaultAddress", _vaultAdress));
             return parameters;

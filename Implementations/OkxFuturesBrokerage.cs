@@ -63,7 +63,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         protected override SharedMarginMode? SharedMarginMode => CryptoExchange.Net.SharedApis.SharedMarginMode.Cross;
 
-        protected override SharedPositionSide? SharedPositionSide => _isHedgeMode ? CryptoExchange.Net.SharedApis.SharedPositionSide.Long : null;
+        protected override bool IsHedgeMode => _isHedgeMode;
 
         internal OkxFuturesBrokerage(
             IAlgorithm algorithm,

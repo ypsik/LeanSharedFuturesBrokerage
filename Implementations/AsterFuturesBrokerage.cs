@@ -46,7 +46,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         public override decimal MinimumOrderNotionalValue => 5.0m;
 
-        protected override SharedPositionSide? SharedPositionSide => _isHedgeMode ? CryptoExchange.Net.SharedApis.SharedPositionSide.Long : null;
+        protected override bool IsHedgeMode => _isHedgeMode;
         protected override int? FundingRolloverHours => null;
 
         // 2. Trading-Instanz Konstruktor (für die Factory)

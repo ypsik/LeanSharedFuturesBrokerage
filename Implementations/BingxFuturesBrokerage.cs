@@ -40,7 +40,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         private UpdateSubscription? _fundingUpdateSubscription;
         private CancellationTokenSource? _fundingCts;
 
-        private bool _isHedgeMode = false;
+        private bool _isHedgeMode = true;
 
         /// <summary>
         /// Quelle fuer Best Bid/Ask (steuert das Verhalten des Book-Ticker-Sockets):
@@ -205,12 +205,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         public override bool IsConnected => base.IsConnected && _fundingUpdateConnected;
         public override bool ExchangeModifiesOrdersInPlace => false;
-        protected override SharedPositionSide? SharedPositionSide => _isHedgeMode ? CryptoExchange.Net.SharedApis.SharedPositionSide.Long : null;
+        protected override bool IsHedgeMode => _isHedgeMode;
 
 
-        protected override ExchangeParameters GetPlaceFuturesOrderExchangeParameters(Symbol symbol, SharedOrderSide side)
+        protected override ExchangeParameters GetPlaceFuturesOrderExchangeParameters(Symbol symbol, SharedOrderSide side, SharedPositionSide? positionSide)
         {
-            var parameters = base.GetPlaceFuturesOrderExchangeParameters(symbol, side);
+            var parameters = base.GetPlaceFuturesOrderExchangeParameters(symbol, side, positionSide);
             return parameters;
         }
         protected override ExchangeParameters OrderUpdatesExchangeParameters
@@ -492,8 +492,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             }
 
             var side = order.Quantity > 0 ? BingX.Net.Enums.OrderSide.Buy : BingX.Net.Enums.OrderSide.Sell;
+            // Positions-Seite aus den Order-Properties der Strategie (dieselbe Aufloesung wie beim Platzieren).
+            TryResolvePositionSide(order, out var resolvedPositionSide, out _);
             var positionSide = _isHedgeMode
-                ? (SharedPositionSide == CryptoExchange.Net.SharedApis.SharedPositionSide.Long ? BingX.Net.Enums.PositionSide.Long : BingX.Net.Enums.PositionSide.Short)
+                ? (resolvedPositionSide == CryptoExchange.Net.SharedApis.SharedPositionSide.Short ? BingX.Net.Enums.PositionSide.Short : BingX.Net.Enums.PositionSide.Long)
                 : BingX.Net.Enums.PositionSide.Both;
 
             string newClientOrderId = GenerateClientId(order.Id);
