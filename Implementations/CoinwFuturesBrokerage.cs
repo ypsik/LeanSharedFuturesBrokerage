@@ -72,18 +72,29 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         /// <summary>
         /// CoinW's Shared-Client schliesst Positionen ueber einen eigenen Endpunkt und verlangt dafuer
         /// zwingend den ExchangeParameter "PositionId" (sonst ArgumentError.Missing("PositionId")).
-        /// Da wir ausschliesslich Long handeln (s. SharedPositionSide), ist jede Sell-Order ein Close:
-        /// die PositionId der Long-Position wird vor dem Platzieren per REST (GetPositionsAsync) geholt.
-        /// Bewusst ohne Cache - eine veraltete ID (Position geschlossen und neu eroeffnet) waere schlimmer
-        /// als ein zusaetzlicher REST-Call pro Close-Order. Buy-Orders (Open) brauchen keine PositionId.
-        /// Bei mehreren Long-Positionen pro Symbol wird die mit der groessten Menge genommen (Warnung im Log).
+        /// Ob eine Order ein Close ist, entscheidet CoinW.Net rein aus Order-Seite und PositionSide
+        /// (Buy+Long bzw. Sell+Short oeffnet, alles andere schliesst) - nicht aus dem Positionsbestand.
+        /// Dieselbe Bedingung wird hier verwendet, mit der PositionSide aus SharedPositionSide (aktuell
+        /// fix Long), damit der Hook bei spaeterem Short-Support automatisch mitzieht.
+        /// Nur bei einem Close wird die PositionId der Position dieser Seite per REST (GetPositionsAsync)
+        /// geholt. Bewusst ohne Cache - eine veraltete ID (Position geschlossen und neu eroeffnet) waere
+        /// schlimmer als ein zusaetzlicher REST-Call pro Close-Order. Open-Orders brauchen keine PositionId.
+        /// Bei mehreren Positionen derselben Seite (Split-Modus) wird die mit der groessten Menge genommen
+        /// (Warnung im Log); im Merged-Modus gibt es pro Symbol und Seite genau eine.
         /// </summary>
         protected override ExchangeParameters GetPlaceFuturesOrderExchangeParameters(Symbol symbol, SharedOrderSide side)
         {
             var parameters = base.GetPlaceFuturesOrderExchangeParameters(symbol, side);
 
-            if (side != SharedOrderSide.Sell)
+            var positionSide = SharedPositionSide;
+            var isOpen = (side == SharedOrderSide.Buy && positionSide == CryptoExchange.Net.SharedApis.SharedPositionSide.Long)
+                      || (side == SharedOrderSide.Sell && positionSide == CryptoExchange.Net.SharedApis.SharedPositionSide.Short);
+            if (isOpen)
                 return parameters;
+
+            var coinwSide = positionSide == CryptoExchange.Net.SharedApis.SharedPositionSide.Short
+                ? CoinW.Net.Enums.PositionSide.Short
+                : CoinW.Net.Enums.PositionSide.Long;
 
             var ticker = NativeTicker(symbol);
             var res = RunSync(() => _restClient.FuturesApi.Trading.GetPositionsAsync(ticker));
@@ -93,20 +104,20 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 return parameters;
             }
 
-            var longPositions = res.Data
-                .Where(p => p.PositionSide == CoinW.Net.Enums.PositionSide.Long && p.PositionSize > 0m)
+            var positions = res.Data
+                .Where(p => p.PositionSide == coinwSide && p.PositionSize > 0m)
                 .ToArray();
 
-            if (longPositions.Length == 0)
+            if (positions.Length == 0)
             {
-                Log.Error($"CoinW: no open long position found for {ticker}, cannot resolve PositionId for close order.");
+                Log.Error($"CoinW: no open {coinwSide} position found for {ticker}, cannot resolve PositionId for close order.");
                 return parameters;
             }
 
-            if (longPositions.Length > 1)
-                Log.Trace($"CoinW: {longPositions.Length} long positions for {ticker}, using the largest one for the close order.");
+            if (positions.Length > 1)
+                Log.Trace($"CoinW: {positions.Length} {coinwSide} positions for {ticker}, using the largest one for the close order.");
 
-            var position = longPositions.OrderByDescending(p => p.PositionSize).First();
+            var position = positions.OrderByDescending(p => p.PositionSize).First();
             parameters.AddValue(new ExchangeParameter("CoinW", "PositionId", position.Id));
             return parameters;
         }
