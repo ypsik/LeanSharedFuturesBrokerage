@@ -57,7 +57,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         protected override int? FundingRolloverHours => null; // settledPeriod variiert pro Symbol (4h/8h), kein fixer globaler Wert - Rollover-Erkennung läuft rein über den Socket-Callback, s.u.
 
-        protected override SharedMarginMode? SharedMarginMode => CryptoExchange.Net.SharedApis.SharedMarginMode.Isolated;
+        protected override SharedMarginMode? SharedMarginMode => CryptoExchange.Net.SharedApis.SharedMarginMode.Cross;
 
         protected override SharedPositionSide? SharedPositionSide => CryptoExchange.Net.SharedApis.SharedPositionSide.Long;
 
@@ -436,7 +436,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 leverage: leverage,
                 price: price,
                 quantityUnit: QuantityUnit.Contracts,
-                marginType: MarginType.IsolatedMargin
+                marginType: MarginType.CrossMargin // muss zu SharedMarginMode (Cross) passen
             ).ConfigureAwait(false);
 
             if (!res.Success)
