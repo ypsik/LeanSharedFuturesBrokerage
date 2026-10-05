@@ -62,17 +62,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         protected override SharedPositionSide? SharedPositionSide => CryptoExchange.Net.SharedApis.SharedPositionSide.Long;
 
         /// <summary>
-        /// CoinW verlangt beim Platzieren zwingend den Exchange-Parameter "Leverage" (sonst
-        /// ArgumentError.MissingParameter). Gleiche Quelle wie in ExecuteUpdateOrderAsync: die am
-        /// Security konfigurierte Leverage (min. 1).
+        /// CoinW's Shared-Client verlangt bei Orders, die eine Position oeffnen, zwingend
+        /// PlaceFuturesOrderRequest.Leverage (sonst ArgumentError.MissingParameter). Gleiche Quelle
+        /// wie in ExecuteUpdateOrderAsync: die am Security konfigurierte Leverage (min. 1).
         /// </summary>
-        protected override ExchangeParameters GetPlaceFuturesOrderExchangeParameters(Symbol symbol)
-        {
-            var parameters = base.GetPlaceFuturesOrderExchangeParameters(symbol);
-            var leverage = (int)Math.Max(1m, _algorithm.Securities.TryGetValue(symbol, out var sec) ? sec.Leverage : 1m);
-            parameters.AddValue(new ExchangeParameter("CoinW", "Leverage", leverage));
-            return parameters;
-        }
+        protected override decimal? GetLeverage(Symbol symbol)
+            => Math.Max(1m, _algorithm.Securities.TryGetValue(symbol, out var sec) ? sec.Leverage : 1m);
 
         // BESTAETIGT gegen offizielle CoinW-Doku (PUT /v1/perpum/order, "Modify an Order"):
         // Response liefert originId (alte Order-ID) UND editId (neue Order-ID) als getrennte

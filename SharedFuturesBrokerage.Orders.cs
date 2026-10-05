@@ -242,9 +242,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             {
                 Price = (order as LimitOrder)?.LimitPrice,
                 ClientOrderId = clientOrderId,
-                ExchangeParameters = GetPlaceFuturesOrderExchangeParameters(order.Symbol),
+                ExchangeParameters = PlaceFuturesOrderExchangeParameters,
                 PositionSide = SharedPositionSide,
-                MarginMode = SharedMarginMode
+                MarginMode = SharedMarginMode,
+                Leverage = GetLeverage(order.Symbol)
             };
 
             // State Machine: Order mit Placing-State registrieren bevor API-Call rausgeht.
@@ -616,7 +617,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             return true;
         }
 
-        protected virtual ExchangeParameters GetPlaceFuturesOrderExchangeParameters(Symbol symbol) => new ExchangeParameters();
+        protected virtual ExchangeParameters PlaceFuturesOrderExchangeParameters => new ExchangeParameters();
+
+        /// <summary>
+        /// Leverage für PlaceFuturesOrderRequest.Leverage. Standard: null (nicht gesetzt). Exchanges,
+        /// die Leverage zwingend pro Order verlangen (z.B. CoinW), überschreiben das pro Symbol.
+        /// </summary>
+        protected virtual decimal? GetLeverage(Symbol symbol) => null;
         protected virtual async Task<HttpResult<SharedId>> ExecutePlaceOrderAsync(PlaceFuturesOrderRequest request)
         {
             if (_orderManagementSocket != null)
@@ -794,8 +801,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             {
                 Price = price,
                 ClientOrderId = newClientOrderId,
-                ExchangeParameters = GetPlaceFuturesOrderExchangeParameters(order.Symbol),
-                PositionSide = SharedPositionSide
+                ExchangeParameters = PlaceFuturesOrderExchangeParameters,
+                PositionSide = SharedPositionSide,
+                Leverage = GetLeverage(order.Symbol)
             };
 
             var placeRes = RunSync(() => ExecutePlaceOrderAsync(request));
