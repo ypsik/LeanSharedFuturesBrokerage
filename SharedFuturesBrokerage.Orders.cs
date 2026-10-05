@@ -803,6 +803,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 ClientOrderId = newClientOrderId,
                 ExchangeParameters = PlaceFuturesOrderExchangeParameters,
                 PositionSide = SharedPositionSide,
+                MarginMode = SharedMarginMode,
                 Leverage = GetLeverage(order.Symbol)
             };
 
