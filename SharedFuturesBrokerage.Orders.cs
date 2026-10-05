@@ -242,7 +242,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             {
                 Price = (order as LimitOrder)?.LimitPrice,
                 ClientOrderId = clientOrderId,
-                ExchangeParameters = PlaceFuturesOrderExchangeParameters,
+                ExchangeParameters = GetPlaceFuturesOrderExchangeParameters(order.Symbol),
                 PositionSide = SharedPositionSide,
                 MarginMode = SharedMarginMode
             };
@@ -616,7 +616,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             return true;
         }
 
-        protected virtual ExchangeParameters PlaceFuturesOrderExchangeParameters => new ExchangeParameters();
+        protected virtual ExchangeParameters GetPlaceFuturesOrderExchangeParameters(Symbol symbol) => new ExchangeParameters();
         protected virtual async Task<HttpResult<SharedId>> ExecutePlaceOrderAsync(PlaceFuturesOrderRequest request)
         {
             if (_orderManagementSocket != null)
@@ -794,7 +794,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             {
                 Price = price,
                 ClientOrderId = newClientOrderId,
-                ExchangeParameters = PlaceFuturesOrderExchangeParameters,
+                ExchangeParameters = GetPlaceFuturesOrderExchangeParameters(order.Symbol),
                 PositionSide = SharedPositionSide
             };
 
