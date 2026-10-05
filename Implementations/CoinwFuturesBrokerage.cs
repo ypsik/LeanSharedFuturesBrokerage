@@ -69,6 +69,48 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         protected override decimal? GetLeverage(Symbol symbol)
             => Math.Max(1m, _algorithm.Securities.TryGetValue(symbol, out var sec) ? sec.Leverage : 1m);
 
+        /// <summary>
+        /// CoinW's Shared-Client schliesst Positionen ueber einen eigenen Endpunkt und verlangt dafuer
+        /// zwingend den ExchangeParameter "PositionId" (sonst ArgumentError.Missing("PositionId")).
+        /// Da wir ausschliesslich Long handeln (s. SharedPositionSide), ist jede Sell-Order ein Close:
+        /// die PositionId der Long-Position wird vor dem Platzieren per REST (GetPositionsAsync) geholt.
+        /// Bewusst ohne Cache - eine veraltete ID (Position geschlossen und neu eroeffnet) waere schlimmer
+        /// als ein zusaetzlicher REST-Call pro Close-Order. Buy-Orders (Open) brauchen keine PositionId.
+        /// Bei mehreren Long-Positionen pro Symbol wird die mit der groessten Menge genommen (Warnung im Log).
+        /// </summary>
+        protected override ExchangeParameters GetPlaceFuturesOrderExchangeParameters(Symbol symbol, SharedOrderSide side)
+        {
+            var parameters = base.GetPlaceFuturesOrderExchangeParameters(symbol, side);
+
+            if (side != SharedOrderSide.Sell)
+                return parameters;
+
+            var ticker = NativeTicker(symbol);
+            var res = RunSync(() => _restClient.FuturesApi.Trading.GetPositionsAsync(ticker));
+            if (!res.Success || res.Data == null)
+            {
+                Log.Error($"CoinW: could not fetch positions to resolve PositionId for {ticker}: {res.Error}");
+                return parameters;
+            }
+
+            var longPositions = res.Data
+                .Where(p => p.PositionSide == CoinW.Net.Enums.PositionSide.Long && p.PositionSize > 0m)
+                .ToArray();
+
+            if (longPositions.Length == 0)
+            {
+                Log.Error($"CoinW: no open long position found for {ticker}, cannot resolve PositionId for close order.");
+                return parameters;
+            }
+
+            if (longPositions.Length > 1)
+                Log.Trace($"CoinW: {longPositions.Length} long positions for {ticker}, using the largest one for the close order.");
+
+            var position = longPositions.OrderByDescending(p => p.PositionSize).First();
+            parameters.AddValue(new ExchangeParameter("CoinW", "PositionId", position.Id));
+            return parameters;
+        }
+
         // BESTAETIGT gegen offizielle CoinW-Doku (PUT /v1/perpum/order, "Modify an Order"):
         // Response liefert originId (alte Order-ID) UND editId (neue Order-ID) als getrennte
         // Felder - kein echtes In-Place-Amend wie OKX, sondern server-seitiges Cancel+Replace

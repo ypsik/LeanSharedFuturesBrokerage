@@ -208,13 +208,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         protected override SharedPositionSide? SharedPositionSide => _isHedgeMode ? CryptoExchange.Net.SharedApis.SharedPositionSide.Long : null;
 
 
-        protected override ExchangeParameters PlaceFuturesOrderExchangeParameters
+        protected override ExchangeParameters GetPlaceFuturesOrderExchangeParameters(Symbol symbol, SharedOrderSide side)
         {
-            get
-            {
-                var parameters = base.PlaceFuturesOrderExchangeParameters;
-                return parameters;
-            }
+            var parameters = base.GetPlaceFuturesOrderExchangeParameters(symbol, side);
+            return parameters;
         }
         protected override ExchangeParameters OrderUpdatesExchangeParameters
         {

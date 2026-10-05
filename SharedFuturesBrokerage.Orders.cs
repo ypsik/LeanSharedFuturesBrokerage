@@ -242,7 +242,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             {
                 Price = (order as LimitOrder)?.LimitPrice,
                 ClientOrderId = clientOrderId,
-                ExchangeParameters = PlaceFuturesOrderExchangeParameters,
+                ExchangeParameters = GetPlaceFuturesOrderExchangeParameters(order.Symbol, executionQuantity > 0 ? SharedOrderSide.Buy : SharedOrderSide.Sell),
                 PositionSide = SharedPositionSide,
                 MarginMode = SharedMarginMode,
                 Leverage = GetLeverage(order.Symbol)
@@ -617,7 +617,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             return true;
         }
 
-        protected virtual ExchangeParameters PlaceFuturesOrderExchangeParameters => new ExchangeParameters();
+        /// <summary>
+        /// ExchangeParameters für PlaceFuturesOrderRequest, pro Symbol und Order-Seite. Standard: leer.
+        /// Exchanges, die Parameter brauchen, die vom Symbol/der Seite abhängen (z.B. CoinW PositionId
+        /// beim Schließen), überschreiben das.
+        /// </summary>
+        protected virtual ExchangeParameters GetPlaceFuturesOrderExchangeParameters(Symbol symbol, SharedOrderSide side) => new ExchangeParameters();
 
         /// <summary>
         /// Leverage für PlaceFuturesOrderRequest.Leverage. Standard: null (nicht gesetzt). Exchanges,
@@ -801,7 +806,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             {
                 Price = price,
                 ClientOrderId = newClientOrderId,
-                ExchangeParameters = PlaceFuturesOrderExchangeParameters,
+                ExchangeParameters = GetPlaceFuturesOrderExchangeParameters(order.Symbol, quantity > 0 ? SharedOrderSide.Buy : SharedOrderSide.Sell),
                 PositionSide = SharedPositionSide,
                 MarginMode = SharedMarginMode,
                 Leverage = GetLeverage(order.Symbol)
