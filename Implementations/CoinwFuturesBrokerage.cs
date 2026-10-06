@@ -500,14 +500,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         #region Cash Balance
 
-        // Kein einzelnes "Equity"-Feld wie bei OKX/Bitget - GetBalancesAsync liefert stattdessen
-        // AvailableUsdt (frei), Holding/alMargin (in Positionen gebundene Margin) und Frozen/alFreeze
-        // (in offenen Orders gebundene Margin) getrennt von CrossUnrealizedPnl. Summe der ersten drei
-        // entspricht der Kontogesamtsumme OHNE unrealisierten PnL - identisch zum Muster
-        // "Equity minus UnrealizedPnl" bei OKX/Bitget, nur dass CoinW von vornherein getrennt liefert
-        // statt es aus einem kombinierten TotalEquity-Feld herausrechnen zu muessen. Deckt sich mit
-        // der Formel, die JKorf selbst im Shared-Balance-Client verwendet (AvailableUsdt + Holding +
-        // Frozen), s. CoinWRestClientFuturesApiShared.GetBalancesAsync.
+        // Gleiches Muster wie OKX/Bitget/Bybit: Equity-Wert minus unrealisierter PnL, damit LEAN
+        // offene Positionen nicht doppelt zaehlt. Holding (alMargin) und Frozen (alFreeze) werden
+        // NICHT addiert - die Margin steckt bereits im Kontowert, sonst wird sie doppelt gezaehlt
+        // (TotalPortfolioValue war um ca. die genutzte Margin zu hoch).
         public override List<CashAmount> GetCashBalance()
         {
             var res = RunSync(() => _restClient.FuturesApi.Account.GetBalancesAsync());
@@ -518,7 +514,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 return [];
             }
 
-            var balance = res.Data.AvailableUsdt + res.Data.Holding + res.Data.Frozen;
+            // Diagnose: Rohwerte zum Abgleich mit dem CoinW-Kontostand.
+            Log.Trace($"CoinwFuturesBrokerage.GetCashBalance raw: availableUsdt={res.Data.AvailableUsdt}, " +
+                      $"alMargin={res.Data.Holding}, alFreeze={res.Data.Frozen}, " +
+                      $"crossUnPnl={res.Data.CrossUnrealizedPnl}, almightyGold={res.Data.MegaCouponBalance}");
+
+            var balance = res.Data.AvailableUsdt - res.Data.CrossUnrealizedPnl;
 
             return
             [
