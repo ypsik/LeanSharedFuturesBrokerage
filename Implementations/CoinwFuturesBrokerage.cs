@@ -126,8 +126,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         // auf true zu setzen.
         public override bool ExchangeModifiesOrdersInPlace => false;
 
-        // false, solange CoinW.Net EditOrderAsync die Order-ID nicht sendet (s. ExecuteUpdateOrderAsync).
-        private static readonly bool NativeEditEnabled = false;
+        // CoinW.Net >= 3.6.1 sendet in EditOrderAsync die Order-ID ("id") mit (Fix von 3.6.0, siehe
+        // ExecuteUpdateOrderAsync). Auf false setzen, um den Edit wieder zu umgehen (reines Cancel+Replace).
+        private static readonly bool NativeEditEnabled = true;
 
         // FIX (CoinW-Doppelausfuehrung 2026-10-05): Explizites Cancel VOR dem Replace ist zwingend.
         // CoinW.Net 3.6.0 sendet in EditOrderAsync die Order-ID nie mit (Parameter "id" fehlt) -> jeder
@@ -403,16 +404,16 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         protected override async Task<HttpResult<SharedId>> ExecuteUpdateOrderAsync(
             Order order, decimal price, decimal? quantity)
         {
-            // CoinW.Net 3.6.0 Bug: EditOrderAsync sendet den Parameter "id" (Order-ID) nicht mit, der
-            // Request scheitert immer mit 9606. Solange das so ist, wird der Edit-Request uebersprungen
-            // und direkt ein Fehler geliefert -> UpdateOrder faellt via IsRejectedUpdateError (=true)
-            // in ExecuteReplaceWorkaround, der mit RequiresExplicitCancelBeforeReplace=true zuerst
-            // cancelt und nur bei bestaetigtem Cancel neu platziert. Nach einem Library-Fix auf true
-            // setzen, um den atomaren Server-Edit wieder zu nutzen.
+            // CoinW.Net 3.6.0 Bug: EditOrderAsync sendete den Parameter "id" (Order-ID) nicht mit, der
+            // Request scheiterte immer mit 9606 (gefixt in 3.6.1). Ist NativeEditEnabled=false, wird der
+            // Edit-Request uebersprungen und direkt ein Fehler geliefert -> UpdateOrder faellt via
+            // IsRejectedUpdateError in ExecuteReplaceWorkaround, der mit
+            // RequiresExplicitCancelBeforeReplace=true zuerst cancelt und nur bei bestaetigtem Cancel
+            // neu platziert.
             if (!NativeEditEnabled)
             {
                 return new HttpResult<SharedId>(Name, null,
-                    new InvalidOperationError("CoinW native edit disabled (CoinW.Net EditOrderAsync omits order id) - using cancel+replace"));
+                    new InvalidOperationError("CoinW native edit disabled - using cancel+replace"));
             }
 
             if (!quantity.HasValue)
