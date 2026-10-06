@@ -500,10 +500,11 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         #region Cash Balance
 
-        // Gleiches Muster wie OKX/Bitget/Bybit: Equity-Wert minus unrealisierter PnL, damit LEAN
-        // offene Positionen nicht doppelt zaehlt. Holding (alMargin) und Frozen (alFreeze) werden
-        // NICHT addiert - die Margin steckt bereits im Kontowert, sonst wird sie doppelt gezaehlt
-        // (TotalPortfolioValue war um ca. die genutzte Margin zu hoch).
+        // Cash = Wallet-Guthaben OHNE unrealisierten PnL (wie bei OKX/Bitget/Bybit, dort Equity minus
+        // uPnL), LEAN addiert den PnL offener Positionen selbst. availableUsdt entspricht laut
+        // Abgleich mit der CoinW-UI der "Account Balance" (inkl. gebundener Margin, ohne uPnL).
+        // Holding (alMargin), Frozen (alFreeze) und CrossUnrealizedPnl werden daher weder addiert
+        // noch abgezogen, sonst wird Margin bzw. PnL doppelt gezaehlt.
         public override List<CashAmount> GetCashBalance()
         {
             var res = RunSync(() => _restClient.FuturesApi.Account.GetBalancesAsync());
@@ -519,7 +520,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                       $"alMargin={res.Data.Holding}, alFreeze={res.Data.Frozen}, " +
                       $"crossUnPnl={res.Data.CrossUnrealizedPnl}, almightyGold={res.Data.MegaCouponBalance}");
 
-            var balance = res.Data.AvailableUsdt - res.Data.CrossUnrealizedPnl;
+            var balance = res.Data.AvailableUsdt;
 
             return
             [
