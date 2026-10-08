@@ -312,6 +312,21 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         {
                             Log.Trace($"{Name}.HandleOrderSocket: Ignoring backwards swap to old ID {o.OrderId}.");
                         }
+                        // FIX (TRXUSDC 2026-10-08 00:17:26): Ein neues Ticket, das bereits als Canceled
+                        // ankommt, ist ein abgelehnter Modify (z.B. Hyperliquid Post-Only/ALO "would have
+                        // immediately matched": der Modify cancelt intern die alte Order und das Replace
+                        // wird sofort verworfen). Dieses tote Ticket darf NICHT als aktives Ticket gemappt
+                        // werden und IsUpdatePending NICHT zurücksetzen - sonst fällt dasselbe Payload
+                        // unten in den normalen Status-Zweig (o.OrderId == state.BrokerId, kein Pending
+                        // mehr) und LEAN bekommt ein falsches Canceled, obwohl danach der Replace-
+                        // Workaround (UpdateOrder -> ExecuteReplaceWorkaround) die Order noch füllt.
+                        // Ein echtes Cancel trägt immer die aktuelle BrokerId und betritt diesen Zweig nie.
+                        // Das Cancel der alten Order wird weiter unten wegen IsUpdatePending unterdrückt.
+                        else if (o.Status == SharedOrderStatus.Canceled && existingState.IsUpdatePending)
+                        {
+                            Log.Trace($"{Name}.HandleOrderSocket: Ignoring dead replacement ticket {o.OrderId} (Canceled on arrival, rejected modify). Active ticket stays {existingState.BrokerId}, IsUpdatePending={existingState.IsUpdatePending}.");
+                            continue;
+                        }
                         else
                         {
                             var oldBrokerId = existingState.BrokerId;
