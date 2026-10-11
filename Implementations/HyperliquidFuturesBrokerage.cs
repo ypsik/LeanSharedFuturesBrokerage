@@ -45,7 +45,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         private HyperLiquidSocketClient _socketClient;
         private HyperLiquidSocketClient _socketClientExData; // dedicated for ExchangeData (SubscribeFunding)
 
-        private string _vaultAdress;
+        private string? _vaultAdress;
 
         private readonly object _fundingUpdateLock = new();
         private bool _fundingUpdateConnected = false;
@@ -61,7 +61,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             IAlgorithm algorithm,
             HyperLiquidRestClient restClient,
             HyperLiquidSocketClient socketClient,
-            string vaultAddress,
+            string? vaultAddress,
             IDataAggregator aggregator,
             Func<List<Holding>>? getHoldingsFunc = null) // 🔥 Fix: Optional gemacht
             : base(algorithm, "hyperliquid")
