@@ -34,6 +34,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         private bool _fundingUpdateConnected = false;
         private UpdateSubscription? _fundingUpdateSubscription;
 
+        // Optional aus der Config (lighter-account-tier). null -> Tier wird nicht angefasst.
+        private readonly AccountTier? _configuredAccountTier;
+        private bool _accountTierApplied;
+
         protected override string SettleAsset => "USDC";
 
         protected override bool EmitFundingRateImmediately => true;
@@ -52,11 +56,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             LighterRestClient restClient,
             LighterSocketClient socketClient,
             IDataAggregator aggregator,
-            Func<List<Holding>>? getHoldingsFunc = null)
+            Func<List<Holding>>? getHoldingsFunc = null,
+            AccountTier? accountTier = null)
             : base(algorithm, "lighter")
         {
             _restClient = restClient;
             _socketClient = socketClient;
+            _configuredAccountTier = accountTier;
             _socketClientExData = new LighterSocketClient();
 
             PopulateSPDB();
@@ -141,8 +147,58 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         #region Connect
 
+        /// <summary>
+        /// Stellt den Account-Tier gemaess Config (lighter-account-tier) um. Nur ein Versuch pro
+        /// Brokerage-Instanz; Fehler werden geloggt und brechen den Connect nicht ab.
+        /// </summary>
+        private void ApplyConfiguredAccountTier()
+        {
+            if (_configuredAccountTier == null || _accountTierApplied)
+                return;
+
+            _accountTierApplied = true;
+            var target = _configuredAccountTier.Value;
+
+            try
+            {
+                // Aktuellen Tier zuerst lesen und nur bei Abweichung umstellen: Lighter erlaubt
+                // max. 1 changeAccountTier-Aufruf pro 24h, ein ueberfluessiger Aufruf koennte den
+                // Cooldown fuer eine spaetere gewollte Umstellung verbrauchen.
+                var limits = RunSync(() => _restClient.ExchangeApi.Account.GetAccountLimitsAsync());
+                if (limits.Success)
+                {
+                    Log.Trace($"{Name}.ApplyConfiguredAccountTier: current tier UserTier='{limits.Data.UserTier}', " +
+                              $"UserTierName='{limits.Data.UserTierName}', lastUpdate={limits.Data.UserTierLastUpdate:u}, " +
+                              $"target={target}");
+
+                    if (string.Equals(limits.Data.UserTierName, target.ToString(), StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(limits.Data.UserTier, target.ToString(), StringComparison.OrdinalIgnoreCase))
+                    {
+                        Log.Trace($"{Name}.ApplyConfiguredAccountTier: account is already on tier {target}, nothing to do.");
+                        return;
+                    }
+                }
+                else
+                {
+                    Log.Error($"{Name}.ApplyConfiguredAccountTier: could not read current tier ({limits.Error}), trying to set {target} anyway.");
+                }
+
+                var result = RunSync(() => _restClient.ExchangeApi.Account.SetAccountTierAsync(null, target));
+                if (result.Success)
+                    Log.Trace($"{Name}.ApplyConfiguredAccountTier: account tier set to {target}.");
+                else
+                    Log.Error($"{Name}.ApplyConfiguredAccountTier: setting account tier to {target} failed: {result.Error}");
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"{Name}.ApplyConfiguredAccountTier: unhandled exception: {ex}");
+            }
+        }
+
         public override void Connect()
         {
+            ApplyConfiguredAccountTier();
+
             lock (_fundingUpdateLock)
             {
                 if (_fundingUpdateSubscription == null && _socketClient != null)

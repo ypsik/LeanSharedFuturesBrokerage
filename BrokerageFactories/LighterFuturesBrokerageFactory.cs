@@ -1,5 +1,6 @@
 ﻿using Lighter.Net;
 using Lighter.Net.Clients;
+using Lighter.Net.Enums;
 using QuantConnect;
 using QuantConnect.Brokerages;
 using QuantConnect.Configuration;
@@ -43,6 +44,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
             // hyperliquid-builder-address). Gesetzt, aber keine lighter-integrator-fee angegeben
             // -> Default 0.01 (1bps, Lib-eigener Wert) greift.
             { "lighter-integrator-account-index", Config.Get("lighter-integrator-account-index") },
+            // Optional. standard | plus | premium. Wenn gesetzt, wird der Account-Tier beim Connect
+            // per changeAccountTier umgestellt (Lighter erlaubt max. 1 Aufruf pro 24h). Leer -> Tier
+            // bleibt unangetastet.
+            { "lighter-account-tier", Config.Get("lighter-account-tier") },
         };
 
         public override IBrokerageModel GetBrokerageModel(IOrderProvider orderProvider)
@@ -109,6 +114,23 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
                 }
             }
 
+            // Optional - nur wenn gesetzt wird der Account-Tier beim Connect umgestellt.
+            AccountTier? accountTier = null;
+            var accountTierRaw = job.BrokerageData.TryGetValue("lighter-account-tier", out var tierRaw) ? tierRaw : null;
+            if (!string.IsNullOrWhiteSpace(accountTierRaw))
+            {
+                // IsDefined verhindert, dass Zahlenstrings (z.B. "5") als undefinierter Enum-Wert durchrutschen.
+                if (Enum.TryParse<AccountTier>(accountTierRaw.Trim(), true, out var parsedTier)
+                    && Enum.IsDefined(typeof(AccountTier), parsedTier))
+                {
+                    accountTier = parsedTier;
+                }
+                else
+                {
+                    errors.Add($"Invalid lighter-account-tier: '{accountTierRaw}' (expected standard, plus or premium)");
+                }
+            }
+
             if (errors.Any())
                 throw new ArgumentException(string.Join(Environment.NewLine, errors));
 
@@ -141,7 +163,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
                     .ToList();
 
             algorithm.Settings.DatabasesRefreshPeriod = TimeSpan.FromDays(36500);
-            var brokerage = new LighterFuturesBrokerage(algorithm, restClient, socketClient, aggregator, getHoldingsFunc);
+            var brokerage = new LighterFuturesBrokerage(algorithm, restClient, socketClient, aggregator, getHoldingsFunc, accountTier);
 
             Composer.Instance.AddPart<IDataQueueHandler>(brokerage);
 
