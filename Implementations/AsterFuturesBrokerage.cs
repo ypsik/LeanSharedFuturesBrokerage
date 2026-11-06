@@ -19,6 +19,7 @@ using QuantConnect.Orders.Fees;
 using QuantConnect.Securities;
 using SilverQuant.Lean.Brokerages.Futures.Shared;
 using SilverQuant.Lean.Brokerages.Futures.Shared.Orders;
+using SilverQuant.Lean.Brokerages.Futures.Shared.Common;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -118,7 +119,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
                 _restClient = new AsterRestClient(options => {
                     if (!string.IsNullOrEmpty(key) && !string.IsNullOrEmpty(secret))
-                        options.ApiCredentials = new AsterCredentials(new AsterV3Credential(EthKey.FromPublicAddress(publicAddress), EthKey.FromPrivateKey(secret)));
+                        options.ApiCredentials = new AsterCredentials(new AsterV3Credential(EthKeyHelper.FromPublicAddress(publicAddress), EthKeyHelper.FromPrivateKey(secret)));
                 });
             }
 
@@ -130,7 +131,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
                 _socketClient = new AsterSocketClient(options => {
                     if (!string.IsNullOrEmpty(key) && !string.IsNullOrEmpty(secret))
-                        options.ApiCredentials = new AsterCredentials(new AsterV3Credential(EthKey.FromPublicAddress(publicAddress), EthKey.FromPrivateKey(secret)));
+                        options.ApiCredentials = new AsterCredentials(new AsterV3Credential(EthKeyHelper.FromPublicAddress(publicAddress), EthKeyHelper.FromPrivateKey(secret)));
                 });
             }
 

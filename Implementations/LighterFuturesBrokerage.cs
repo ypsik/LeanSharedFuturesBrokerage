@@ -16,6 +16,7 @@ using QuantConnect.Orders;
 using QuantConnect.Securities;
 using QuantConnect.Util;
 using SilverQuant.Lean.Brokerages.Futures.Shared;
+using SilverQuant.Lean.Brokerages.Futures.Shared.Common;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -140,7 +141,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 return null;
 
             return new LighterCredentials(
-                EthKey.FromPublicAddress(publicAddress.Trim().StartsWith("0x", StringComparison.OrdinalIgnoreCase) ? publicAddress.Trim() : "0x" + publicAddress.Trim()),
+                EthKeyHelper.FromPublicAddress(publicAddress),
                 long.Parse(accountIndexStr ?? "0"),
                 int.Parse(apiKeyIndexStr ?? "0"),
                 secret);

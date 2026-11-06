@@ -13,6 +13,7 @@ using QuantConnect.Util;
 using QuantConnect.Data; // 🔥 Neu für IDataAggregator
 using SilverQuant.Lean.Brokerages.Futures.Implementations;
 using SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageModels;
+using SilverQuant.Lean.Brokerages.Futures.Shared.Common;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.Composition;
@@ -97,7 +98,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
                 }
             }
 
-            var asterCredentials = new AsterCredentials(new AsterV3Credential(EthKey.FromPublicAddress(publicAddress), EthKey.FromPrivateKey(secret)));
+            var asterCredentials = new AsterCredentials(new AsterV3Credential(EthKeyHelper.FromPublicAddress(publicAddress), EthKeyHelper.FromPrivateKey(secret)));
 
             var asterRestClient = new AsterRestClient(options => {
                 options.ApiCredentials = asterCredentials;
