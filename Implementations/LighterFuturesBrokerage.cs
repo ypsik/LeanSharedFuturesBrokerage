@@ -1,4 +1,5 @@
 ﻿using CryptoExchange.Net.Interfaces.Clients;
+using CryptoExchange.Net.Web3;
 using CryptoExchange.Net.Objects;
 using CryptoExchange.Net.Objects.Errors;
 using CryptoExchange.Net.Objects.Sockets;
@@ -139,7 +140,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 return null;
 
             return new LighterCredentials(
-                EthKey.FromPublicKey(publicAddress),
+                EthKey.FromPublicAddress(publicAddress),
                 long.Parse(accountIndexStr ?? "0"),
                 int.Parse(apiKeyIndexStr ?? "0"),
                 secret);

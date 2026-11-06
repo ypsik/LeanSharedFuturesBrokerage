@@ -4,6 +4,7 @@ using Aster.Net.Enums;
 using Aster.Net.Objects;
 using BingX.Net.Enums;
 using CryptoExchange.Net.Interfaces.Clients;
+using CryptoExchange.Net.Web3;
 using CryptoExchange.Net.Objects;
 using CryptoExchange.Net.Objects.Sockets;
 using CryptoExchange.Net.SharedApis;
@@ -117,7 +118,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
                 _restClient = new AsterRestClient(options => {
                     if (!string.IsNullOrEmpty(key) && !string.IsNullOrEmpty(secret))
-                        options.ApiCredentials = new AsterCredentials(new AsterV3Credential(publicAddress, key, secret));
+                        options.ApiCredentials = new AsterCredentials(new AsterV3Credential(EthKey.FromPublicAddress(publicAddress), EthKey.FromPrivateKey(secret)));
                 });
             }
 
@@ -129,7 +130,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
                 _socketClient = new AsterSocketClient(options => {
                     if (!string.IsNullOrEmpty(key) && !string.IsNullOrEmpty(secret))
-                        options.ApiCredentials = new AsterCredentials(new AsterV3Credential(publicAddress, key, secret));
+                        options.ApiCredentials = new AsterCredentials(new AsterV3Credential(EthKey.FromPublicAddress(publicAddress), EthKey.FromPrivateKey(secret)));
                 });
             }
 
@@ -266,7 +267,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         #endregion
         protected override string GenerateClientId(int _)
         {
-            return _restClient.FuturesApi.SharedClient.GenerateClientOrderId();
+            return _restClient.FuturesV3Api.SharedClient.GenerateClientOrderId();
         }
 
         protected override async Task<HttpResult<SharedId>> ExecuteUpdateOrderAsync(

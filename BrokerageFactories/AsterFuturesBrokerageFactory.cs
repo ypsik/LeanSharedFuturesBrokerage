@@ -2,6 +2,7 @@
 using Aster.Net.Clients;
 using Aster.Net.Objects;
 using CryptoExchange.Net.Interfaces.Clients;
+using CryptoExchange.Net.Web3;
 using QuantConnect;
 using QuantConnect.Brokerages;
 using QuantConnect.Configuration;
@@ -96,7 +97,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
                 }
             }
 
-            var asterCredentials = new AsterCredentials(new AsterV3Credential(publicAddress, address, secret));
+            var asterCredentials = new AsterCredentials(new AsterV3Credential(EthKey.FromPublicAddress(publicAddress), EthKey.FromPrivateKey(secret)));
 
             var asterRestClient = new AsterRestClient(options => {
                 options.ApiCredentials = asterCredentials;
