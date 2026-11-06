@@ -10,6 +10,7 @@ using QuantConnect.Util;
 using QuantConnect.Data; // Wichtig für IDataAggregator
 using SilverQuant.Lean.Brokerages.Futures.Implementations;
 using SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageModels;
+using SilverQuant.Lean.Brokerages.Futures.Shared.Common;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.Composition;
@@ -90,7 +91,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
                 }
             }
 
-            var credentials = new HyperLiquidCredentials(String.IsNullOrEmpty(vaultAddress) ? address : vaultAddress, secret);
+            var credentials = new HyperLiquidCredentials(new HyperLiquidCredential(EthKeyHelper.FromPublicAddress(String.IsNullOrEmpty(vaultAddress) ? address : vaultAddress), EthKeyHelper.FromPrivateKey(secret)));
 
             var restClient = new HyperLiquidRestClient(options =>
             {

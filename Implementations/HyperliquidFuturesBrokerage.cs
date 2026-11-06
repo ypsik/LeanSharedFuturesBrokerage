@@ -26,6 +26,7 @@ using QuantConnect.Securities;
 using QuantConnect.Util;
 using RestSharp;
 using SilverQuant.Lean.Brokerages.Futures.Shared;
+using SilverQuant.Lean.Brokerages.Futures.Shared.Common;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -113,7 +114,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
                 _restClient = new HyperLiquidRestClient(options => {
                     if (!string.IsNullOrEmpty(key) && !string.IsNullOrEmpty(secret))
-                        options.ApiCredentials = new HyperLiquidCredentials(key, secret);
+                        options.ApiCredentials = new HyperLiquidCredentials(new HyperLiquidCredential(EthKeyHelper.FromPublicAddress(key), EthKeyHelper.FromPrivateKey(secret)));
                 });
             }
 
@@ -123,7 +124,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 job.BrokerageData.TryGetValue("hyperliquid-secret", out var secret);
                 _socketClient = new HyperLiquidSocketClient(options => {
                     if (!string.IsNullOrEmpty(key) && !string.IsNullOrEmpty(secret))
-                        options.ApiCredentials = new HyperLiquidCredentials(key, secret);
+                        options.ApiCredentials = new HyperLiquidCredentials(new HyperLiquidCredential(EthKeyHelper.FromPublicAddress(key), EthKeyHelper.FromPrivateKey(secret)));
                 });
             }
 
