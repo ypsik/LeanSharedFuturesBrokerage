@@ -140,7 +140,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 return null;
 
             return new LighterCredentials(
-                EthKey.FromPublicAddress(publicAddress),
+                EthKey.FromPublicAddress(publicAddress.Trim().StartsWith("0x", StringComparison.OrdinalIgnoreCase) ? publicAddress.Trim() : "0x" + publicAddress.Trim()),
                 long.Parse(accountIndexStr ?? "0"),
                 int.Parse(apiKeyIndexStr ?? "0"),
                 secret);
