@@ -28,13 +28,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         public virtual decimal MinimumOrderNotionalValue => 0m;
 
         /// <summary>
-        /// ClientOrderIds von Orders, die als Reduce-Only gesendet werden muessen (kompletter Close einer
-        /// Position unter MinimumOrderNotionalValue). Wird in PlaceOrder gesetzt und von der jeweiligen
-        /// Exchange-Implementierung in ExecutePlaceOrderAsync ausgelesen.
-        /// </summary>
-        protected readonly ConcurrentDictionary<string, byte> ReduceOnlyClientOrderIds = new();
-
-        /// <summary>
         /// Gibt an, ob die Börse Orders in-place ändert (z.B. Bybit) oder Cancel+Replace nutzt (z.B. Hyperliquid).
         /// </summary>
         public virtual bool ExchangeModifiesOrdersInPlace => false;
@@ -277,8 +270,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             }
 
             var clientOrderId = GenerateClientId(order.Id);
-            if (reduceOnly)
-                ReduceOnlyClientOrderIds[clientOrderId] = 0;
 
             // Chase-Orders: Einstiegspreis passiv über dieselbe GetAggressivePrice/ApplyCrossGuard-
             // Logik wie beim Reprice berechnen, statt den vom Aufrufer übergebenen (ggf. crossing)
@@ -340,8 +331,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             };
             _orderStateManager.TryAdd(clientOrderId, placingState);
 
-            var res = RunSync(() => ExecutePlaceOrderAsync(request));
-            ReduceOnlyClientOrderIds.TryRemove(clientOrderId, out _);
+            var res = RunSync(() => ExecutePlaceOrderAsync(request, reduceOnly));
             if (!res.Success)
             {
                 // Placing-State wieder austragen
@@ -705,7 +695,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         /// die Leverage zwingend pro Order verlangen (z.B. CoinW), überschreiben das pro Symbol.
         /// </summary>
         protected virtual decimal? GetLeverage(Symbol symbol) => null;
-        protected virtual async Task<HttpResult<SharedId>> ExecutePlaceOrderAsync(PlaceFuturesOrderRequest request)
+        /// <summary>
+        /// Sendet die Order an die Exchange. <paramref name="reduceOnly"/> markiert einen schliessenden
+        /// Order (z.B. kompletter Close unter MinimumOrderNotionalValue). Die Default-Implementierung
+        /// ueber den Shared-Client kennt kein Reduce-Only und ignoriert den Parameter; Exchanges, die es
+        /// unterstuetzen (z.B. Hyperliquid), ueberschreiben die Methode und reichen ihn weiter.
+        /// </summary>
+        protected virtual async Task<HttpResult<SharedId>> ExecutePlaceOrderAsync(PlaceFuturesOrderRequest request, bool reduceOnly = false)
         {
             if (_orderManagementSocket != null)
             {
@@ -897,7 +893,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 Leverage = GetLeverage(order.Symbol)
             };
 
-            var placeRes = RunSync(() => ExecutePlaceOrderAsync(request));
+            var placeRes = RunSync(() => ExecutePlaceOrderAsync(request, reduceOnly: false));
 
             if (!placeRes.Success)
             {

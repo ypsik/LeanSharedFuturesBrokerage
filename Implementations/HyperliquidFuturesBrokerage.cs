@@ -456,7 +456,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         }
 
 
-        protected override async Task<HttpResult<SharedId>> ExecutePlaceOrderAsync(PlaceFuturesOrderRequest request)
+        protected override async Task<HttpResult<SharedId>> ExecutePlaceOrderAsync(PlaceFuturesOrderRequest request, bool reduceOnly = false)
         {
             if (request.Symbol == null)
             {
@@ -472,7 +472,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 price: request.Price ?? 0m,
                 clientOrderId: request.ClientOrderId,
                 timeInForce: HyperLiquid.Net.Enums.TimeInForce.GoodTillCanceled,
-                reduceOnly: !string.IsNullOrEmpty(request.ClientOrderId) && ReduceOnlyClientOrderIds.ContainsKey(request.ClientOrderId) ? true : (bool?)null,
+                reduceOnly: reduceOnly ? true : (bool?)null,
                 vaultAddress: _vaultAdress);
 
             if (!res.Success)
