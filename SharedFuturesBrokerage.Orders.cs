@@ -311,7 +311,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 ExchangeParameters = GetPlaceFuturesOrderExchangeParameters(order.Symbol, executionQuantity > 0 ? SharedOrderSide.Buy : SharedOrderSide.Sell, positionSide),
                 PositionSide = positionSide,
                 MarginMode = SharedMarginMode,
-                Leverage = GetLeverage(order.Symbol)
+                Leverage = GetLeverage(order.Symbol),
+                ReduceOnly = reduceOnly ? true : null
             };
 
             // State Machine: Order mit Placing-State registrieren bevor API-Call rausgeht.
@@ -331,7 +332,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             };
             _orderStateManager.TryAdd(clientOrderId, placingState);
 
-            var res = RunSync(() => ExecutePlaceOrderAsync(request, reduceOnly));
+            var res = RunSync(() => ExecutePlaceOrderAsync(request));
             if (!res.Success)
             {
                 // Placing-State wieder austragen
@@ -695,13 +696,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         /// die Leverage zwingend pro Order verlangen (z.B. CoinW), überschreiben das pro Symbol.
         /// </summary>
         protected virtual decimal? GetLeverage(Symbol symbol) => null;
-        /// <summary>
-        /// Sendet die Order an die Exchange. <paramref name="reduceOnly"/> markiert einen schliessenden
-        /// Order (z.B. kompletter Close unter MinimumOrderNotionalValue). Die Default-Implementierung
-        /// ueber den Shared-Client kennt kein Reduce-Only und ignoriert den Parameter; Exchanges, die es
-        /// unterstuetzen (z.B. Hyperliquid), ueberschreiben die Methode und reichen ihn weiter.
-        /// </summary>
-        protected virtual async Task<HttpResult<SharedId>> ExecutePlaceOrderAsync(PlaceFuturesOrderRequest request, bool reduceOnly = false)
+        protected virtual async Task<HttpResult<SharedId>> ExecutePlaceOrderAsync(PlaceFuturesOrderRequest request)
         {
             if (_orderManagementSocket != null)
             {
@@ -893,7 +888,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 Leverage = GetLeverage(order.Symbol)
             };
 
-            var placeRes = RunSync(() => ExecutePlaceOrderAsync(request, reduceOnly: false));
+            var placeRes = RunSync(() => ExecutePlaceOrderAsync(request));
 
             if (!placeRes.Success)
             {
