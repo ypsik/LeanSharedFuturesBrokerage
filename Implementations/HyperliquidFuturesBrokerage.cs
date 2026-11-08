@@ -472,6 +472,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 price: request.Price ?? 0m,
                 clientOrderId: request.ClientOrderId,
                 timeInForce: HyperLiquid.Net.Enums.TimeInForce.GoodTillCanceled,
+                reduceOnly: !string.IsNullOrEmpty(request.ClientOrderId) && ReduceOnlyClientOrderIds.ContainsKey(request.ClientOrderId) ? true : (bool?)null,
                 vaultAddress: _vaultAdress);
 
             if (!res.Success)

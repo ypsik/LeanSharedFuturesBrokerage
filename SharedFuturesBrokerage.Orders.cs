@@ -28,6 +28,13 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         public virtual decimal MinimumOrderNotionalValue => 0m;
 
         /// <summary>
+        /// ClientOrderIds von Orders, die als Reduce-Only gesendet werden muessen (kompletter Close einer
+        /// Position unter MinimumOrderNotionalValue). Wird in PlaceOrder gesetzt und von der jeweiligen
+        /// Exchange-Implementierung in ExecutePlaceOrderAsync ausgelesen.
+        /// </summary>
+        protected readonly ConcurrentDictionary<string, byte> ReduceOnlyClientOrderIds = new();
+
+        /// <summary>
         /// Gibt an, ob die Börse Orders in-place ändert (z.B. Bybit) oder Cancel+Replace nutzt (z.B. Hyperliquid).
         /// </summary>
         public virtual bool ExchangeModifiesOrdersInPlace => false;
@@ -212,6 +219,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             }
 
             decimal executionQuantity = order.Quantity;
+            bool reduceOnly = false;
 
             if (MinimumOrderNotionalValue > 0m)
             {
@@ -237,6 +245,30 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                         if (executionQuantity < 0)
                             adjustedQuantity = -adjustedQuantity;
 
+                        // Reduce-Only-Close statt Aufrunden, wenn die Order die Position in Gegenrichtung
+                        // verkleinert und dabei eine der beiden Bedingungen gilt:
+                        //  1. Order-Menge == Position (kompletter Close, nur unter dem Minimum).
+                        //  2. Order-Menge < Position, aber die aufgerundete Menge waere > Position - die
+                        //     Aufrundung wuerde die Position ueberschreiten und ins Gegenteil drehen
+                        //     (XMR-Oversell 2026-11-08: 0.009 Long, Partial Exit -0.006 -> -0.017 -> -0.008 Short).
+                        // In beiden Faellen wird die komplette Position per Reduce-Only geschlossen; das
+                        // Mindest-Notional gilt fuer Reduce-Only-Closes nicht. Groessere Orders (Flip) und
+                        // Partial Exits, deren aufgerundete Menge in die Position passt, bleiben wie bisher.
+                        // Nur One-Way-Modus: im Hedge-Modus ist die Netto-Position nicht die der jeweiligen Seite.
+                        var heldQuantity = _algorithm.Portfolio[order.Symbol].Quantity;
+                        var absHeld = Math.Abs(heldQuantity);
+                        var absOrder = Math.Abs(executionQuantity);
+                        if (!IsHedgeMode && heldQuantity != 0m
+                            && Math.Sign(heldQuantity) != Math.Sign(executionQuantity)
+                            && (absOrder == absHeld || (absOrder < absHeld && Math.Abs(adjustedQuantity) > absHeld)))
+                        {
+                            Log.Trace($"{Name}.PlaceOrder: Order {executionQuantity} for {order.Symbol.Value} would " +
+                                      $"{(absOrder == absHeld ? "close" : "overshoot after rounding up (" + adjustedQuantity + ")")} the position {heldQuantity} below the minimum of ${MinimumOrderNotionalValue}. " +
+                                      "Closing the full position with a reduce-only order instead.");
+                            adjustedQuantity = -heldQuantity;
+                            reduceOnly = true;
+                        }
+
                         Log.Trace($"{Name}.PlaceOrder: Adjusting execution quantity for {order.Symbol.Value} from {executionQuantity} to {adjustedQuantity} to meet the minimum of ${MinimumOrderNotionalValue}.");
                         OnOrderEvent(new OrderEvent(order, DateTime.UtcNow, OrderFee.Zero) { Quantity = adjustedQuantity });
                         executionQuantity = adjustedQuantity;
@@ -245,6 +277,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             }
 
             var clientOrderId = GenerateClientId(order.Id);
+            if (reduceOnly)
+                ReduceOnlyClientOrderIds[clientOrderId] = 0;
 
             // Chase-Orders: Einstiegspreis passiv über dieselbe GetAggressivePrice/ApplyCrossGuard-
             // Logik wie beim Reprice berechnen, statt den vom Aufrufer übergebenen (ggf. crossing)
@@ -307,6 +341,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             _orderStateManager.TryAdd(clientOrderId, placingState);
 
             var res = RunSync(() => ExecutePlaceOrderAsync(request));
+            ReduceOnlyClientOrderIds.TryRemove(clientOrderId, out _);
             if (!res.Success)
             {
                 // Placing-State wieder austragen
