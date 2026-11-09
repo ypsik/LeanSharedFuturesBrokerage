@@ -42,6 +42,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
             { "hyperliquid-vault-address", Config.Get("hyperliquid-vault-address") },
             { "hyperliquid-builder-address", Config.Get("hyperliquid-builder-address") },
             { "hyperliquid-builder-fee", Config.Get("hyperliquid-builder-fee") },
+            { "hyperliquid-dexes", Config.Get("hyperliquid-dexes", "") },
         };
 
         public override IBrokerageModel GetBrokerageModel(IOrderProvider orderProvider)
@@ -66,6 +67,15 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
             // Kein hartes Read<> nutzen, da beide Felder optional sind und nicht in 'errors' münden sollen.
             var builderAddressRaw = job.BrokerageData.TryGetValue("hyperliquid-builder-address", out var bAddr) ? bAddr : null;
             var builderFeeRaw = job.BrokerageData.TryGetValue("hyperliquid-builder-fee", out var bFee) ? bFee : null;
+
+            // Optional HIP-3 DEX list, e.g. "xyz". The default perp DEX is always implicit.
+            job.BrokerageData.TryGetValue("hyperliquid-dexes", out var dexConfig);
+            var dexes = (dexConfig ?? string.Empty)
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(d => !d.Equals("default", StringComparison.OrdinalIgnoreCase))
+                .Select(d => d.ToLowerInvariant())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
 
             string? builderAddress;
             decimal? builderFeePercentage;
@@ -123,7 +133,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared.BrokerageFactories
                     .ToList();
 
             algorithm.Settings.DatabasesRefreshPeriod = TimeSpan.FromDays(36500);
-            var brokerage = new HyperliquidFuturesBrokerage(algorithm, restClient, socketClient, String.IsNullOrEmpty(vaultAddress) ? null : vaultAddress, aggregator, getHoldingsFunc);
+            var brokerage = new HyperliquidFuturesBrokerage(algorithm, restClient, socketClient, String.IsNullOrEmpty(vaultAddress) ? null : vaultAddress, aggregator, getHoldingsFunc, dexes);
 
             // Register with MEF Composer so Lean reuses this instance when
             // resolving IDataQueueHandler instead of trying to construct a new one

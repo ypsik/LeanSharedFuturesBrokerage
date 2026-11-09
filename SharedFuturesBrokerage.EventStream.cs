@@ -686,21 +686,27 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 {
                     await Task.Delay(_reconciliationInterval, ct).ConfigureAwait(false);
 
-                    var openRes = await _orderClient.GetOpenFuturesOrdersAsync(
-                        new GetOpenOrdersRequest(tradingMode: OpenOrdersTradingMode, exchangeParameters: OpenOrdersExchangeParameters)
-                    ).ConfigureAwait(false);
+                    var states = _orderStateManager.GetAllStates().ToArray();
+                    var activeSymbols = states
+                        .Where(s => s.State != OrderLifeCycleState.Placing && !string.IsNullOrEmpty(s.BrokerId))
+                        .Select(s => s.Order.Symbol)
+                        .Distinct()
+                        .ToArray();
 
-                    if (!openRes.Success || openRes.Data == null)
+                    // No active orders: sockets handle new trades, no REST request needed.
+                    if (activeSymbols.Length == 0) continue;
+
+                    // Fetch only DEXes represented by tracked open orders.
+                    var openOrders = await FetchOpenOrdersAcrossDexesAsync(activeSymbols).ConfigureAwait(false);
+                    if (openOrders == null)
                     {
-                        Log.Error($"{Name}.ReconcileLoop: Failed to fetch open orders: {openRes.Error}");
+                        Log.Error($"{Name}.ReconcileLoop: Open-order snapshot incomplete; skipping reconciliation.");
                         continue;
                     }
 
-                    var openExchangeOrders = openRes.Data
-                        .GroupBy(x => x.OrderId)
-                        .ToDictionary(g => g.Key, g => g.First());
+                    var openExchangeOrders = openOrders.ToDictionary(x => x.OrderId, x => x);
 
-                    foreach (var state in _orderStateManager.GetAllStates().ToArray())
+                    foreach (var state in states)
                     {
                         // Skip orders still in Placing phase – they have no real exchange ID yet.
                         // The REST call hasn't returned; no point querying the exchange for a temp ID.

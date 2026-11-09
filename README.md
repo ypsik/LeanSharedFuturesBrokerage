@@ -85,6 +85,7 @@ Populated dynamically at startup from each exchange's live instrument list (tick
 **Hyperliquid**
 - Vault address trading supported (trades on behalf of a vault rather than the main account)
 - Builder Code support: optional builder address + fee percentage (config-driven; defaults to the top of the allowed 0.001–0.1% range if an address is set without an explicit fee)
+- Optional HIP-3 account DEX selection in LEAN `config.json`: `"hyperliquid-dexes": "xyz"`. Main/default is always included; omitted or empty means main only. The factory passes the comma-separated DEX list to the brokerage. Startup position/open-order REST snapshots cover only these DEXes; reconciliation uses the same configuration but queries only DEXes with tracked orders. The existing trade/order sockets are unchanged. Currently intended for USDC-collateralized HIP-3 symbols such as `xyz:GOLD`.
 - June 2026 Hyperliquid network upgrade: in-place GTC modifies that would cross the book are now silently converted server-side to ALO/Post-Only and rejected (`"would have immediately matched"`). Worked around via cancel+replace that preserves the existing `OrderState` and avoids a spurious LEAN cancel event for the old order.
 
 **AsterDEX**

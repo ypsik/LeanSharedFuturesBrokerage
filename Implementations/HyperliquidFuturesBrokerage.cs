@@ -47,6 +47,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         private HyperLiquidSocketClient _socketClientExData; // dedicated for ExchangeData (SubscribeFunding)
 
         private string? _vaultAdress;
+        private readonly string[] _configuredDexes;
 
         private readonly object _fundingUpdateLock = new();
         private bool _fundingUpdateConnected = false;
@@ -64,10 +65,17 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             HyperLiquidSocketClient socketClient,
             string? vaultAddress,
             IDataAggregator aggregator,
-            Func<List<Holding>>? getHoldingsFunc = null) // 🔥 Fix: Optional gemacht
+            Func<List<Holding>>? getHoldingsFunc = null,
+            IEnumerable<string>? dexes = null)
             : base(algorithm, "hyperliquid")
         {
             _vaultAdress = vaultAddress;
+            _configuredDexes = (dexes ?? Array.Empty<string>())
+                .Where(d => !string.IsNullOrWhiteSpace(d) && !d.Equals("default", StringComparison.OrdinalIgnoreCase))
+                .Select(d => d.Trim().ToLowerInvariant())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            Log.Trace($"{Name}: Account DEXes: default{(_configuredDexes.Length == 0 ? "" : ", " + string.Join(", ", _configuredDexes))}");
             _restClient = restClient;
             _socketClient = socketClient;
             _socketClientExData = new HyperLiquidSocketClient();
@@ -260,6 +268,53 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
 
         #endregion
 
+        // Only the explicitly configured HIP-3 DEXes are queried, in addition to main.
+        private IEnumerable<string?> EnumerateAccountDexes()
+        {
+            yield return null; // default perp DEX
+            foreach (var dex in _configuredDexes)
+                yield return dex;
+        }
+
+        private static ExchangeParameters ParametersForDex(string? dex)
+        {
+            var parameters = new ExchangeParameters();
+            if (dex != null)
+                parameters.AddValue(new ExchangeParameter("Hyperliquid", "dex", dex));
+            return parameters;
+        }
+
+        protected override IEnumerable<ExchangeParameters> GetAccountHoldingsRequestParameterSets()
+        {
+            foreach (var dex in EnumerateAccountDexes())
+                yield return ParametersForDex(dex);
+        }
+
+        // The startup query checks all configured DEXes. Reconcile only checks
+        // DEXes of orders currently tracked by this brokerage.
+        protected override IEnumerable<ExchangeParameters> GetOpenOrdersRequestParameterSets(
+            IReadOnlyCollection<Symbol>? activeSymbols = null)
+        {
+            HashSet<string>? activeDexes = null;
+            if (activeSymbols != null)
+            {
+                activeDexes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var symbol in activeSymbols)
+                {
+                    var ticker = symbol.Value;
+                    var separator = ticker.IndexOf('.');
+                    activeDexes.Add(separator > 0 ? ticker.Substring(0, separator) : "");
+                }
+            }
+
+            if (activeDexes == null || activeDexes.Contains(""))
+                yield return OpenOrdersExchangeParameters;
+
+            foreach (var dex in _configuredDexes)
+                if (activeDexes == null || activeDexes.Contains(dex))
+                    yield return ParametersForDex(dex);
+        }
+
         #region Connect
         public override void Connect()
         {
@@ -322,6 +377,28 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         }
         #endregion
 
+
+        // A unified/portfolio account exposes its collateral in spot state; subtract
+        // unrealized perp PnL from each configured USDC DEX once to avoid double counting
+        // it together with LEAN's holdings PnL.
+        private bool TryGetAccountUnrealizedPnl(out decimal unrealizedPnl)
+        {
+            unrealizedPnl = 0m;
+            foreach (var dex in EnumerateAccountDexes())
+            {
+                var account = RunSync(() => _restClient.FuturesApi.Account.GetAccountInfoAsync(dex: dex));
+                if (!account.Success || account.Data == null)
+                {
+                    Log.Error($"{Name}: Cash GetAccountInfoAsync (dex={dex ?? "default"}) failed: {account.Error}");
+                    unrealizedPnl = 0m;
+                    return false;
+                }
+
+                unrealizedPnl += account.Data.Positions.Sum(p => p.Position?.UnrealizedPnl ?? 0m);
+            }
+            return true;
+        }
+
         public override List<CashAmount> GetCashBalance()
         {
             var balancesResult = RunSync(() => _restClient.SpotApi.Account.GetBalancesAsync());
@@ -345,15 +422,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 if (result.Count == 0)
                     return [];
 
-                var futuresResult = RunSync(() => _restClient.FuturesApi.Account.GetAccountInfoAsync());
-                if (!futuresResult.Success || futuresResult.Data == null)
-                {
-                    Log.Error($"Cash GetAccountInfoAsync: {futuresResult.Error?.Message}");
+                if (!TryGetAccountUnrealizedPnl(out var pnl))
                     return [];
-                }
-
-                var pnl = futuresResult.Data.Positions
-                    .Sum(p => p.Position?.UnrealizedPnl ?? 0m);
 
                 var usdcIndex = result.FindIndex(x => x.Currency == SettleAsset);
                 if (usdcIndex >= 0)
@@ -367,16 +437,10 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             if (usdcValue == null)
                 return [];
 
-            var futuresAccountResult = RunSync(() => _restClient.FuturesApi.Account.GetAccountInfoAsync());
-            if (!futuresAccountResult.Success || futuresAccountResult.Data == null)
-            {
-                Log.Error($"Cash {futuresAccountResult.Error?.Message}");
+            if (!TryGetAccountUnrealizedPnl(out var totalPnl))
                 return [];
-            }
 
-            decimal cashBalance = usdcValue.Total;
-            foreach (var assetPosition in futuresAccountResult.Data.Positions)
-                cashBalance -= assetPosition.Position?.UnrealizedPnl ?? 0m;
+            decimal cashBalance = usdcValue.Total - totalPnl;
 
             return [new CashAmount(cashBalance, SettleAsset)];
         }

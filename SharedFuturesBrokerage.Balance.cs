@@ -26,25 +26,40 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         }
 
         protected virtual ExchangeParameters AccountHoldingsExchangeParameters => new ExchangeParameters();
+
+        protected virtual IEnumerable<ExchangeParameters> GetAccountHoldingsRequestParameterSets()
+        {
+            yield return AccountHoldingsExchangeParameters;
+        }
+
         public override List<Holding> GetAccountHoldings()
         {
-            var request = new GetPositionsRequest
-            {
-                ExchangeParameters = AccountHoldingsExchangeParameters
-            };
-            var res = RunSync(() => _orderClient.GetPositionsAsync(request));
+            var parameterSets = GetAccountHoldingsRequestParameterSets().ToArray();
+            var positions = new List<SharedPosition>();
 
-            if (!res.Success)
+            foreach (var parameters in parameterSets)
             {
-                Log.Error($"Fetch positions failed: {res.Error}");
+                var request = new GetPositionsRequest { ExchangeParameters = parameters };
+                var res = RunSync(() => _orderClient.GetPositionsAsync(request));
+
+                if (!res.Success || res.Data == null)
+                {
+                    Log.Error($"{Name}: Fetch positions failed: {res.Error}");
+                    // With multiple DEXes a partial result is unsafe: LEAN must not
+                    // conclude that positions on an unavailable DEX no longer exist.
+                    if (parameterSets.Length > 1)
+                        throw new InvalidOperationException($"{Name}: Incomplete multi-DEX position snapshot");
+                    return _getHoldingsFunc?.Invoke() ?? [];
+                }
+
+                positions.AddRange(res.Data);
             }
-            else if (res.Data != null)
-            {
-                return [.. res.Data.Select(p =>
+
+            return [.. positions.Select(p =>
                 {
                     var ticker = NormalizeSymbol(p.Symbol);
                     var security = _algorithm.Securities.Values
-                        .FirstOrDefault(s => s.Symbol.Value == ticker
+                        .FirstOrDefault(s => string.Equals(s.Symbol.Value, ticker, StringComparison.OrdinalIgnoreCase)
                                           && s.Symbol.ID.Market == Name);
 
                     var symbol = security?.Symbol ?? Symbol.Create(ticker, SecurityType.CryptoFuture, Name);
@@ -82,10 +97,6 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                     };
                 })
                 .OfType<Holding>()];
-            }
-
-            // Fallback auf die lokale Funktion
-            return _getHoldingsFunc?.Invoke() ?? [];
         }
 
         private static TimeSpan GetNextCashRefreshDelay()

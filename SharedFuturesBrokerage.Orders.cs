@@ -137,16 +137,53 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
         /// </summary>
         protected virtual TradingMode? OpenOrdersTradingMode => null;
 
+        protected virtual IEnumerable<ExchangeParameters> GetOpenOrdersRequestParameterSets(
+            IReadOnlyCollection<Symbol>? activeSymbols = null)
+        {
+            yield return OpenOrdersExchangeParameters;
+        }
+
+        protected async Task<SharedFuturesOrder[]?> FetchOpenOrdersAcrossDexesAsync(
+            IReadOnlyCollection<Symbol>? activeSymbols = null)
+        {
+            var orders = new List<SharedFuturesOrder>();
+            foreach (var parameters in GetOpenOrdersRequestParameterSets(activeSymbols))
+            {
+                var res = await _orderClient.GetOpenFuturesOrdersAsync(
+                    new GetOpenOrdersRequest(tradingMode: OpenOrdersTradingMode, exchangeParameters: parameters)
+                ).ConfigureAwait(false);
+
+                if (!res.Success || res.Data == null)
+                {
+                    Log.Error($"{Name}: Fetch open orders failed: {res.Error}");
+                    return null;
+                }
+                orders.AddRange(res.Data);
+            }
+
+            return orders.GroupBy(o => o.OrderId).Select(g => g.First()).ToArray();
+        }
+
         public override List<Order> GetOpenOrders()
         {
-            var res = RunSync(() => _orderClient.GetOpenFuturesOrdersAsync(
-                new GetOpenOrdersRequest(tradingMode: OpenOrdersTradingMode, exchangeParameters: OpenOrdersExchangeParameters)));
-
-            if (!res.Success || res.Data == null) return new List<Order>();
-
-            return res.Data.Select(o =>
+            var orders = RunSync(() => FetchOpenOrdersAcrossDexesAsync());
+            if (orders == null)
             {
-                var symbol = Symbol.Create(NormalizeSymbol(o.Symbol), SecurityType.CryptoFuture, Name);
+                // Preserve single-request fallback for other brokers. For HIP-3,
+                // startup must fail rather than import an incomplete open order book.
+                if (GetOpenOrdersRequestParameterSets().Skip(1).Any())
+                    throw new InvalidOperationException($"{Name}: Incomplete multi-DEX open-order snapshot");
+                return new List<Order>();
+            }
+
+            return orders.Select(o =>
+            {
+                var ticker = NormalizeSymbol(o.Symbol);
+                var symbol = _algorithm.Securities.Values
+                    .FirstOrDefault(s => s.Symbol.ID.Market == Name
+                                      && s.Symbol.SecurityType == SecurityType.CryptoFuture
+                                      && string.Equals(s.Symbol.Value, ticker, StringComparison.OrdinalIgnoreCase))?.Symbol
+                    ?? Symbol.Create(ticker, SecurityType.CryptoFuture, Name);
                 var sign = o.Side == SharedOrderSide.Sell ? -1m : 1m;
                 var qty = FromExchangeQuantity(symbol, o.OrderQuantity) * sign;
                 var filledQty = FromExchangeQuantity(symbol, o.QuantityFilled) * sign;
