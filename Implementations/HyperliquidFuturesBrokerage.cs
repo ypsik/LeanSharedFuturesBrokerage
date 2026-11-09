@@ -280,7 +280,7 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         {
             var parameters = new ExchangeParameters();
             if (dex != null)
-                parameters.AddValue(new ExchangeParameter("Hyperliquid", "dex", dex));
+                parameters.AddValue(new ExchangeParameter("HyperLiquid", "dex", dex));
             return parameters;
         }
 
