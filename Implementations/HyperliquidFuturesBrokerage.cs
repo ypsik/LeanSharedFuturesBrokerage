@@ -520,6 +520,24 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
         }
 
 
+        /// <summary>
+        /// HyperLiquid.Net implements market orders as slippage-limited IOC orders and
+        /// requires a positive reference price even when the caller uses MarketOrder.
+        /// Use the executable book side when available, otherwise LEAN's security price.
+        /// </summary>
+        protected override decimal? GetMarketOrderReferencePrice(Order order)
+        {
+            if (_quoteCache.TryGetValue(order.Symbol, out var quote))
+            {
+                var bookPrice = order.Quantity > 0m ? quote.Ask : quote.Bid;
+                if (bookPrice > 0m)
+                    return bookPrice;
+            }
+
+            var securityPrice = _algorithm.Securities[order.Symbol].Price;
+            return securityPrice > 0m ? securityPrice : null;
+        }
+
         protected override async Task<HttpResult<SharedId>> ExecutePlaceOrderAsync(PlaceFuturesOrderRequest request)
         {
             if (request.Symbol == null)
@@ -528,14 +546,22 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
                 return new HttpResult<SharedId>(Name, null, ArgumentError.Missing("Symbol"));
             }
 
+            if (request.Price is not > 0m)
+            {
+                Log.Error($"{Name}.PlaceOrder error: missing or invalid reference price for {request.Symbol.SymbolName ?? request.Symbol.BaseAsset} ({request.OrderType}); refusing to submit price 0.");
+                return new HttpResult<SharedId>(Name, null, ArgumentError.Missing("Price"));
+            }
+
             var res = await _socketClient.FuturesApi.Trading.PlaceOrderAsync(
                 symbol: request.Symbol.SymbolName ?? request.Symbol.BaseAsset,
                 side: request.Side == SharedOrderSide.Buy ? OrderSide.Buy : OrderSide.Sell,
                 orderType: request.OrderType == SharedOrderType.Limit ? HyperLiquid.Net.Enums.OrderType.Limit : HyperLiquid.Net.Enums.OrderType.Market,
                 quantity: request.Quantity?.QuantityInBaseAsset ?? 0m,
-                price: request.Price ?? 0m,
+                price: request.Price.Value,
                 clientOrderId: request.ClientOrderId,
-                timeInForce: HyperLiquid.Net.Enums.TimeInForce.GoodTillCanceled,
+                timeInForce: request.OrderType == SharedOrderType.Market
+                    ? HyperLiquid.Net.Enums.TimeInForce.ImmediateOrCancel
+                    : HyperLiquid.Net.Enums.TimeInForce.GoodTillCanceled,
                 reduceOnly: request.ReduceOnly,
                 vaultAddress: _vaultAdress);
 
