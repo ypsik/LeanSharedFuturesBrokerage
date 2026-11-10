@@ -239,6 +239,12 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
             }).ToList();
         }
 
+        /// <summary>
+        /// Exchange-specific reference price for market orders. Most shared clients do not
+        /// require it; Hyperliquid needs a positive price to determine its IOC slippage bound.
+        /// </summary>
+        protected virtual decimal? GetMarketOrderReferencePrice(Order order) => null;
+
         public override bool PlaceOrder(Order order)
         {
             if (!TryResolvePositionSide(order, out var positionSide, out var positionSideError))
@@ -343,7 +349,9 @@ namespace SilverQuant.Lean.Brokerages.Futures.Shared
                 order.Type == OrderType.Limit ? SharedOrderType.Limit : SharedOrderType.Market,
                 sharedQuantity)
             {
-                Price = (order as LimitOrder)?.LimitPrice,
+                Price = order.Type == OrderType.Limit
+                    ? (order as LimitOrder)?.LimitPrice
+                    : GetMarketOrderReferencePrice(order),
                 ClientOrderId = clientOrderId,
                 ExchangeParameters = GetPlaceFuturesOrderExchangeParameters(order.Symbol, executionQuantity > 0 ? SharedOrderSide.Buy : SharedOrderSide.Sell, positionSide),
                 PositionSide = positionSide,
