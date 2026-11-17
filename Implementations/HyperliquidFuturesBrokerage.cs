@@ -646,7 +646,8 @@ namespace SilverQuant.Lean.Brokerages.Futures.Implementations
             var res = await _socketClient.FuturesApi.Trading.CancelOrderAsync(
                 symbol: request.Symbol.SymbolName ?? request.Symbol.BaseAsset,
                 orderId: long.Parse(request.OrderId),
-                vaultAddress: _vaultAdress);
+                vaultAddress: _vaultAdress,
+                fast: true);
 
             if (!res.Success)
             {
